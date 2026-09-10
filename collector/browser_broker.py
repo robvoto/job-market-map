@@ -12,6 +12,10 @@ class BrowserBrokerError(RuntimeError):
     pass
 
 
+class BrowserBrokerTimeout(BrowserBrokerError):
+    """The local signed-in Chrome broker did not answer within its deadline."""
+
+
 @dataclass(frozen=True)
 class BrokerResponse:
     result: Any
@@ -57,13 +61,18 @@ $out=[Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($json))
 Write-Output $out
 """
     started = time.perf_counter()
-    proc = subprocess.run(
-        [_powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", ps],
-        text=True,
-        capture_output=True,
-        timeout=timeout_seconds + 15,
-        check=False,
-    )
+    try:
+        proc = subprocess.run(
+            [_powershell_exe(), "-NoProfile", "-NonInteractive", "-Command", ps],
+            text=True,
+            capture_output=True,
+            timeout=timeout_seconds + 15,
+            check=False,
+        )
+    except subprocess.TimeoutExpired as exc:
+        raise BrowserBrokerTimeout(
+            f"browser broker {command!r} timed out after {timeout_seconds + 15}s"
+        ) from exc
     elapsed = time.perf_counter() - started
     if proc.returncode != 0:
         raise BrowserBrokerError(
@@ -94,7 +103,12 @@ def navigate(page_id: int, url: str) -> BrokerResponse:
 
 
 def snapshot(page_id: int, *, verbose: bool = True) -> BrokerResponse:
-    return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
+    """Read one owned Chrome tab; retry one transient broker timeout only."""
+    try:
+        return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
+    except BrowserBrokerTimeout:
+        time.sleep(0.5)
+        return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
 
 
 def select_page(page_id: int, *, bring_to_front: bool = False) -> BrokerResponse:

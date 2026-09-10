@@ -12,46 +12,89 @@ def _wire(tmp_path, monkeypatch):
     return seek_jd
 
 
-def test_fetch_detail_keeps_exact_source_timestamp_and_ignores_noncanonical_fields(monkeypatch):
-    from collector import seek_jd
+def test_detail_snapshot_calculates_date_only_and_strips_personal_match():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
 
-    monkeypatch.setattr(seek_jd, "navigate", lambda *_a, **_k: None)
-    monkeypatch.setattr(
-        seek_jd,
-        "seek_job_detail",
-        lambda *_a, **_k: type(
-            "Response",
-            (),
-            {
-                "result": {
-                    "page_url": "https://au.seek.com/job/12345678",
-                    "source_job_id": "12345678",
-                    "title": "Business Systems Analyst",
-                    "employer": "Example Co",
-                    "location": "Sydney NSW",
-                    "employment_type": "Contract/Temp",
-                    "workplace_type": "Hybrid",
-                    "salary_text": "$900 - $1000 p.d.",
-                    "posted_at": "2026-09-09T01:02:03.456Z",
-                    "posted_text": "Listed one day ago",
-                    "employment_basis": "Contract",
-                    "full_description": "This is the complete source-backed SEEK job description and it is comfortably longer than eighty characters for validation.",
-                    "human_check": False,
-                }
-            },
-        )(),
-    )
+    from collector.seek_jd import parse_seek_detail_snapshot
 
-    detail = seek_jd.fetch_seek_detail(
-        1,
-        "https://au.seek.com/job/12345678",
+    snap = {
+        "url": "https://au.seek.com/job/12345678",
+        "text": """Skip to content
+SEEK
+Business Systems Analyst
+Example Co
+Sydney NSW (Hybrid)
+Business/Systems Analysts (Information & Communication Technology)
+Contract/Temp
+Salary undisclosed
+Posted 1d ago
+Quick apply
+Save
+How you match
+5 skills and credentials match your profile
+SQL
+Troubleshooting
+Process Improvement
+Business Applications
++1 more
+This is the complete source-backed SEEK job description and it is comfortably longer than eighty characters for validation.
+The actual employer advertisement continues here with useful role information.
+Employer questions
+Your application will include questions.
+""",
+        "elements": [{"text": "Quick apply", "ariaLabel": "Apply for role"}],
+    }
+    detail = parse_seek_detail_snapshot(
+        snap,
         expected_source_job_id="12345678",
+        reference=datetime(2026, 9, 11, 0, 30, tzinfo=ZoneInfo("Australia/Sydney")),
     )
-    assert detail.facts["posted_at"] == "2026-09-09T01:02:03.456Z"
+
+    assert detail.facts["posted_at"] == "2026-09-10"
     assert detail.facts["employment_type"] == "Contract/Temp"
-    assert "posted_text" not in detail.facts
-    assert "employment_basis" not in detail.facts
-    assert len(detail.full_description) > 80
+    assert detail.facts["employment_basis"] == "Contract/Temp"
+    assert detail.facts["workplace_type"] == "Hybrid"
+    assert (
+        detail.facts["classification_text"] == "Information & Communication Technology"
+    )
+    assert detail.facts["subclassification_text"] == "Business/Systems Analysts"
+    assert detail.facts["easy_apply"] is True
+    assert "How you match" not in detail.full_description
+    assert "Employer questions" not in detail.full_description
+
+
+def test_posted_date_uses_relative_duration_across_midnight():
+    from datetime import datetime
+    from zoneinfo import ZoneInfo
+
+    from collector.seek_jd import derive_posted_at
+
+    ref = datetime(2026, 9, 11, 0, 30, tzinfo=ZoneInfo("Australia/Sydney"))
+    assert derive_posted_at("Posted 1d ago", reference=ref) == "2026-09-10"
+    assert derive_posted_at("Posted 2h ago", reference=ref) == "2026-09-10"
+    assert derive_posted_at("Listed four hours ago", reference=ref) == "2026-09-10"
+    assert derive_posted_at("Listed ten minutes ago", reference=ref) == "2026-09-11"
+
+
+def test_employment_basis_requires_explicit_job_context():
+    from collector.seek_jd import _employment_basis
+
+    assert (
+        _employment_basis("Full time", "This is a permanent role based in Canberra.")
+        == "Permanent"
+    )
+    assert (
+        _employment_basis("Full time", "This is a 12 month contract role in Sydney.")
+        == "Contract"
+    )
+    assert (
+        _employment_basis(
+            "Full time",
+            "Applicants must be permanent residents. Manage contract updates.",
+        )
+        is None
+    )
 
 
 def test_enrichment_fetches_once_then_permanently_skips_same_job(tmp_path, monkeypatch):
@@ -87,8 +130,9 @@ def test_enrichment_fetches_once_then_permanently_skips_same_job(tmp_path, monke
             full_description="Full source-backed job description captured from SEEK for this role.",
             facts={
                 "source_job_id": "12345678",
-                "posted_at": "2026-09-10T01:02:03.456Z",
+                "posted_at": "2026-09-10",
                 "employment_type": "Contract/Temp",
+                "employment_basis": "Contract/Temp",
                 "workplace_type": "Hybrid",
                 "location": "Sydney NSW",
                 "salary_text": "$900 - $1000 p.d.",
@@ -108,11 +152,12 @@ def test_enrichment_fetches_once_then_permanently_skips_same_job(tmp_path, monke
     assert calls["count"] == 1
     with db.connect() as conn:
         job = conn.execute(
-            "SELECT posted_at,employment_type,workplace_type,location,salary_text FROM jobs WHERE id=?",
+            "SELECT posted_at,employment_type,employment_basis,workplace_type,location,salary_text FROM jobs WHERE id=?",
             (job_id,),
         ).fetchone()
     assert tuple(job) == (
-        "2026-09-10T01:02:03.456Z",
+        "2026-09-10",
+        "Contract/Temp",
         "Contract/Temp",
         "Hybrid",
         "Sydney NSW",

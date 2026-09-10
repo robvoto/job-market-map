@@ -3,20 +3,45 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 
-from collector.browser_broker import (
-    BrowserBrokerError,
-    navigate,
-    seek_job_detail,
-    select_page,
-)
+from collector.browser_broker import BrowserBrokerError, navigate, select_page, snapshot
 from collector.db import connect, store_job_jd_once, update_job_source_facts
 
 SYDNEY = ZoneInfo("Australia/Sydney")
 HUMAN_CHECK_WAIT_SECONDS = 900.0
+
+_CHALLENGE_MARKERS = (
+    "help us keep seek secure",
+    "confirm you are human",
+    "verify you are human",
+    "captcha",
+    "security check",
+    "enable javascript and cookies to continue",
+    "access denied",
+)
+_STOP_MARKERS = {
+    "employer questions",
+    "company profile",
+    "report this job advert",
+    "report this job ad",
+    "be careful",
+    "job seekers",
+}
+_NUMBER_WORDS = {
+    "one": 1,
+    "two": 2,
+    "three": 3,
+    "four": 4,
+    "five": 5,
+    "six": 6,
+    "seven": 7,
+    "eight": 8,
+    "nine": 9,
+    "ten": 10,
+}
 
 
 class SeekJDFetchError(RuntimeError):
@@ -43,13 +68,91 @@ def _now() -> str:
     return datetime.now(SYDNEY).isoformat(timespec="seconds")
 
 
-def _clean(value: object) -> object | None:
-    if value is None:
+def derive_posted_at(
+    posted_text: str | None, *, reference: datetime | None = None
+) -> str | None:
+    """Convert SEEK relative Posted/List text into an Australia/Sydney date only."""
+    text = str(posted_text or "").strip().casefold()
+    if not text:
         return None
-    if isinstance(value, str):
-        value = value.strip()
-        return value or None
-    return value
+    ref = reference.astimezone(SYDNEY) if reference else datetime.now(SYDNEY)
+
+    if "today" in text or "just now" in text:
+        return ref.date().isoformat()
+    if "yesterday" in text:
+        return (ref - timedelta(days=1)).date().isoformat()
+
+    number_match = re.search(
+        r"\b(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\b", text
+    )
+    if number_match:
+        value = int(number_match.group(1))
+        unit = number_match.group(2)
+        if unit.startswith("m"):
+            return (ref - timedelta(minutes=value)).date().isoformat()
+        if unit.startswith("h"):
+            return (ref - timedelta(hours=value)).date().isoformat()
+        return (ref - timedelta(days=value)).date().isoformat()
+
+    word_match = re.search(
+        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(minute|minutes|hour|hours|day|days)\b",
+        text,
+    )
+    if word_match:
+        value = _NUMBER_WORDS[word_match.group(1)]
+        unit = word_match.group(2)
+        if unit.startswith("minute"):
+            return (ref - timedelta(minutes=value)).date().isoformat()
+        if unit.startswith("hour"):
+            return (ref - timedelta(hours=value)).date().isoformat()
+        return (ref - timedelta(days=value)).date().isoformat()
+    return None
+
+
+def _clean_lines(page_text: str) -> list[str]:
+    return [
+        re.sub(r"\s+", " ", line.replace("\xa0", " ")).strip()
+        for line in str(page_text or "").splitlines()
+        if line.replace("\xa0", " ").strip()
+    ]
+
+
+def _strip_how_you_match(body: list[str]) -> list[str]:
+    if not body or body[0].casefold() != "how you match":
+        return body
+    for index, line in enumerate(body[1:18], start=1):
+        if re.match(r"^\+\d+\s+more", line, flags=re.IGNORECASE):
+            return body[index + 1 :]
+
+    start = 1
+    if start < len(body) and "match your profile" in body[start].casefold():
+        start += 1
+    scan_limit = min(len(body), start + 14)
+    for index in range(start, scan_limit):
+        line = body[index]
+        if len(line) >= 55 or re.search(r"[.!?]$", line):
+            return body[index:]
+    return body[start:]
+
+
+def extract_seek_jd_text(page_text: str) -> str:
+    """Extract the actual ad, excluding SEEK chrome, profile match and footer."""
+    lines = _clean_lines(page_text)
+    start = next(
+        (i + 1 for i, line in enumerate(lines[:80]) if line.casefold() == "save"),
+        None,
+    )
+    if start is None:
+        raise SeekJDFetchError("SEEK job page did not expose the JD start boundary")
+    stop = next(
+        (i for i in range(start, len(lines)) if lines[i].casefold() in _STOP_MARKERS),
+        len(lines),
+    )
+    body = _strip_how_you_match(lines[start:stop])
+    text = "\n".join(body).strip()
+    if len(text) < 80:
+        raise SeekJDFetchError("SEEK job page exposed an implausibly short JD")
+    return text
 
 
 def _seek_job_id(url: str) -> str:
@@ -61,6 +164,163 @@ def _seek_fetch_url(source_job_id: str, fallback_url: str) -> str:
     return f"https://au.seek.com/job/{source_job_id}" if source_job_id else fallback_url
 
 
+def _header(lines: list[str]) -> list[str]:
+    stop = next(
+        (i for i, line in enumerate(lines[:80]) if line.casefold() == "save"),
+        len(lines),
+    )
+    return lines[:stop]
+
+
+def _employment_type(header: list[str]) -> str | None:
+    values = {
+        "full time": "Full time",
+        "full-time": "Full time",
+        "part time": "Part time",
+        "part-time": "Part time",
+        "contract/temp": "Contract/Temp",
+        "casual": "Casual",
+    }
+    for line in reversed(header):
+        if line.casefold() in values:
+            return values[line.casefold()]
+    return None
+
+
+def _location_and_workplace(header: list[str]) -> tuple[str | None, str | None]:
+    for line in header:
+        if not re.search(r"\b(?:NSW|ACT|QLD|VIC|SA|WA|TAS|NT)\b", line):
+            continue
+        workplace = None
+        match = re.search(
+            r"\((Hybrid|Remote|On[- ]site)\)\s*$", line, flags=re.IGNORECASE
+        )
+        location = line
+        if match:
+            workplace = match.group(1).replace("On site", "On-site")
+            location = line[: match.start()].strip()
+        return location or None, workplace
+    return None, None
+
+
+def _classification(header: list[str]) -> tuple[str | None, str | None]:
+    for line in reversed(header):
+        match = re.match(r"^(.+?)\s+\((.+)\)$", line)
+        if not match:
+            continue
+        parent = match.group(2).strip()
+        if parent.casefold() in {"hybrid", "remote", "on-site", "on site"}:
+            continue
+        return parent, match.group(1).strip()
+    return None, None
+
+
+def _salary(header: list[str], elements: list[dict]) -> str | None:
+    for element in elements:
+        label = str(element.get("ariaLabel") or "").strip()
+        if label.casefold().startswith("salary"):
+            return label
+    for line in header:
+        low = line.casefold()
+        if (
+            low == "salary undisclosed"
+            or "$" in line
+            or re.search(r"\b(?:per hour|per day|per annum|p\.a\.|p\.d\.)\b", low)
+        ):
+            return line
+    return None
+
+
+def _employment_basis(employment_type: str | None, full_description: str) -> str | None:
+    if employment_type == "Contract/Temp":
+        return "Contract/Temp"
+    if employment_type == "Casual":
+        return "Casual"
+
+    # Only explicit employment-context phrases qualify. Bare words such as
+    # "permanent resident" or "contract updates" must not classify the role.
+    evidence = full_description[:1800]
+    patterns = (
+        (
+            r"\b(?:permanent\s+(?:full[- ]time\s+|part[- ]time\s+)?(?:role|position|employment|job|opportunity)|(?:role|position|employment|job)\s+is\s+permanent)\b",
+            "Permanent",
+        ),
+        (
+            r"\b(?:fixed[- ]term|maximum[- ]term|max[- ]term)\s+(?:role|position|contract|employment|job)\b",
+            "Fixed term",
+        ),
+        (
+            r"\b(?:\d+[- ](?:month|months|year|years)\s+contract|contract\s+(?:role|position|basis|employment|job)|on\s+(?:a\s+)?contract\s+basis)\b",
+            "Contract",
+        ),
+        (r"\btemporary\s+(?:role|position|assignment|employment|job)\b", "Temporary"),
+    )
+    for pattern, label in patterns:
+        if re.search(pattern, evidence, flags=re.IGNORECASE):
+            return label
+    return None
+
+
+def parse_seek_detail_snapshot(
+    snap: dict,
+    *,
+    expected_source_job_id: str | None = None,
+    reference: datetime | None = None,
+) -> SeekFetchedDetail:
+    page_url = str(snap.get("url") or "").strip()
+    page_text = str(snap.get("text") or "")
+    low = page_text.casefold()
+    if any(marker in low for marker in _CHALLENGE_MARKERS):
+        raise BrowserBrokerError("SEEK browser challenge while fetching JD")
+
+    actual_id = _seek_job_id(page_url)
+    expected_id = str(expected_source_job_id or "").strip()
+    if expected_id and actual_id != expected_id:
+        raise BrowserBrokerError(
+            f"SEEK tab ownership lost: expected job {expected_id}, browser is on {page_url!r}"
+        )
+    if not actual_id:
+        raise SeekJDFetchError(f"SEEK detail page has no job id: {page_url!r}")
+
+    lines = _clean_lines(page_text)
+    header = _header(lines)
+    full_description = extract_seek_jd_text(page_text)
+    employment_type = _employment_type(header)
+    location, workplace_type = _location_and_workplace(header)
+    classification_text, subclassification_text = _classification(header)
+    posted_text = next(
+        (
+            line
+            for line in header
+            if re.match(r"^(?:Posted|Listed)\s+", line, flags=re.IGNORECASE)
+        ),
+        None,
+    )
+    elements = list(snap.get("elements") or [])
+    quick_apply = any(
+        str(element.get("text") or "").strip().casefold() == "quick apply"
+        for element in elements
+    ) or any(line.casefold() == "quick apply" for line in header)
+
+    facts: dict[str, object] = {"source_job_id": actual_id}
+    optional = {
+        "location": location,
+        "classification_text": classification_text,
+        "subclassification_text": subclassification_text,
+        "employment_type": employment_type,
+        "employment_basis": _employment_basis(employment_type, full_description),
+        "workplace_type": workplace_type,
+        "salary_text": _salary(header, elements),
+        "posted_at": derive_posted_at(posted_text, reference=reference),
+        "easy_apply": True if quick_apply else None,
+        "apply_method": "quick_apply" if quick_apply else None,
+    }
+    facts.update(
+        {key: value for key, value in optional.items() if value not in (None, "")}
+    )
+    return SeekFetchedDetail(full_description=full_description, facts=facts)
+
+
 def fetch_seek_detail(
     page_id: int,
     url: str,
@@ -69,82 +329,47 @@ def fetch_seek_detail(
     timeout_seconds: float = 15.0,
     human_wait_seconds: float = HUMAN_CHECK_WAIT_SECONDS,
 ) -> SeekFetchedDetail:
-    """Read one SEEK JD and explicit structured source facts from the signed-in page."""
+    """Read one SEEK JD from a dedicated tab in Rob's signed-in Chrome."""
     expected_id = str(expected_source_job_id or _seek_job_id(url)).strip()
-    target_url = _seek_fetch_url(expected_id, url)
-    navigate(page_id, target_url)
-
+    navigate(page_id, _seek_fetch_url(expected_id, url))
     normal_deadline = time.monotonic() + timeout_seconds
     human_deadline: float | None = None
-    brought_forward = False
+    human_mode = False
     last_problem = "SEEK job detail did not become readable"
 
     while True:
-        raw = seek_job_detail(page_id).result
-        if not isinstance(raw, dict):
-            last_problem = "SEEK detail command returned no structured result"
-        else:
-            page_url = str(raw.get("page_url") or "").strip()
-            actual_page_id = _seek_job_id(page_url)
-            if expected_id and actual_page_id and actual_page_id != expected_id:
+        snap = snapshot(page_id, verbose=True).result or {}
+        text = str(snap.get("text") or "")
+        if any(marker in text.casefold() for marker in _CHALLENGE_MARKERS):
+            if not human_mode:
+                select_page(page_id, bring_to_front=True)
+                print(
+                    f"SEEK needs human confirmation for job {expected_id}; brought JMM tab to front.",
+                    flush=True,
+                )
+                human_mode = True
+                human_deadline = time.monotonic() + human_wait_seconds
+            elif human_deadline is not None and time.monotonic() >= human_deadline:
                 raise BrowserBrokerError(
-                    f"SEEK tab ownership lost: expected job {expected_id}, browser is on {page_url!r}"
+                    f"SEEK human-check wait expired for job {expected_id}"
                 )
-
-            if bool(raw.get("human_check")):
-                last_problem = f"SEEK needs human attention on job {expected_id or page_url}"
-                if time.monotonic() >= normal_deadline:
-                    if not brought_forward:
-                        select_page(page_id, bring_to_front=True)
-                        print(last_problem + "; brought dedicated JMM tab to front.", flush=True)
-                        brought_forward = True
-                        human_deadline = time.monotonic() + human_wait_seconds
-                    elif human_deadline is not None and time.monotonic() >= human_deadline:
-                        raise BrowserBrokerError(last_problem + "; human-check wait expired")
-                time.sleep(1.0 if brought_forward else 0.35)
-                continue
-
-            actual_id = str(raw.get("source_job_id") or "").strip()
-            if expected_id and actual_id != expected_id:
-                raise SeekJDFetchError(
-                    f"SEEK detail identity mismatch: expected {expected_id!r}, got {actual_id!r}"
-                )
-
-            description = str(raw.get("full_description") or "").strip()
-            if len(description) < 80:
-                last_problem = "SEEK returned an implausibly short JD"
-            else:
-                # Only explicit structured source facts belong here. Relative display
-                # labels and inferred/normalised employment basis are deliberately excluded.
-                facts: dict[str, object] = {}
-                for key in (
-                    "source_job_id",
-                    "title",
-                    "employer",
-                    "location",
-                    "classification_text",
-                    "subclassification_text",
-                    "employment_type",
-                    "workplace_type",
-                    "salary_text",
-                    "posted_at",
-                    "expires_at",
-                    "source_status",
-                    "easy_apply",
-                    "apply_method",
-                ):
-                    cleaned = _clean(raw.get(key))
-                    if cleaned is not None:
-                        facts[key] = cleaned
-                return SeekFetchedDetail(full_description=description, facts=facts)
-
-        if time.monotonic() >= normal_deadline:
+            time.sleep(1.0)
+            continue
+        try:
+            return parse_seek_detail_snapshot(snap, expected_source_job_id=expected_id)
+        except BrowserBrokerError:
+            raise
+        except SeekJDFetchError as exc:
+            last_problem = str(exc)
+        if not human_mode and time.monotonic() >= normal_deadline:
             raise SeekJDFetchError(last_problem)
         time.sleep(0.35)
 
 
 def fetch_seek_jd(page_id: int, url: str, *, timeout_seconds: float = 15.0) -> str:
-    return fetch_seek_detail(page_id, url, timeout_seconds=timeout_seconds).full_description
+    return fetch_seek_detail(
+        page_id, url, timeout_seconds=timeout_seconds
+    ).full_description
 
 
 def _partition_matches_days(url: str, days: int) -> bool:
@@ -153,7 +378,6 @@ def _partition_matches_days(url: str, days: int) -> bool:
 
 
 def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
-    """Return unique SEEK jobs proven present in the requested coverage window."""
     if not codes:
         return []
     placeholders = ",".join("?" for _ in codes)
@@ -181,7 +405,6 @@ def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
 
 
 def all_unfetched_seek_jobs() -> list[dict]:
-    """Return SEEK rows that have never had a successful JD fetch."""
     with connect() as conn:
         rows = conn.execute(
             """
@@ -196,7 +419,9 @@ def all_unfetched_seek_jobs() -> list[dict]:
     return [dict(row) for row in rows]
 
 
-def _merge_candidates(coverage: list[dict], *, include_existing_unfetched: bool) -> list[dict]:
+def _merge_candidates(
+    coverage: list[dict], *, include_existing_unfetched: bool
+) -> list[dict]:
     by_id = {int(row["id"]): row for row in coverage}
     if include_existing_unfetched:
         for row in all_unfetched_seek_jobs():
@@ -242,10 +467,14 @@ def enrich_seek_coverage_jds(
                 raise SeekJDFetchError(
                     f"SEEK detail identity mismatch: expected {expected_source_id!r}, got {actual_source_id!r}"
                 )
-            source_facts = {
-                key: value for key, value in detail.facts.items() if key != "source_job_id"
-            }
-            update_job_source_facts(job_id, **source_facts)
+            update_job_source_facts(
+                job_id,
+                **{
+                    key: value
+                    for key, value in detail.facts.items()
+                    if key != "source_job_id"
+                },
+            )
             store_job_jd_once(
                 job_id,
                 full_description=detail.full_description,

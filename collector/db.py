@@ -99,6 +99,7 @@ CANONICAL_DETAIL_FACT_COLUMNS = (
     "location",
     "salary_text",
     "employment_type",
+    "employment_basis",
     "workplace_type",
     "posted_at",
     "expires_at",
@@ -265,7 +266,6 @@ def _migrate_job_observation_state(conn: sqlite3.Connection) -> None:
     conn.execute("DROP INDEX IF EXISTS idx_jobs_archived_last_seen")
     for column in (
         "posted_text",
-        "employment_basis",
         "first_seen_at",
         "last_seen_at",
         "capture_count",
@@ -392,6 +392,7 @@ def init_db() -> None:
         _ensure_column(conn, "jobs", "jd_fetched_at", "jd_fetched_at TEXT")
         _ensure_column(conn, "jobs", "jd_source", "jd_source TEXT")
         _ensure_column(conn, "jobs", "geography_code", "geography_code TEXT")
+        _ensure_column(conn, "jobs", "employment_basis", "employment_basis TEXT")
         _ensure_column(conn, "jobs", "posted_at", "posted_at TEXT")
         _ensure_column(conn, "jobs", "expires_at", "expires_at TEXT")
         _ensure_column(conn, "jobs", "source_status", "source_status TEXT")
