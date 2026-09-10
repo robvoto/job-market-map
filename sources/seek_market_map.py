@@ -90,9 +90,10 @@ def _same_seek_page(actual_url: str, expected_url: str) -> bool:
     expected = urlsplit(str(expected_url or ""))
     if not actual.scheme or not actual.netloc:
         return True
-    if not (
-        actual.netloc.endswith("seek.com.au")
-        and expected.netloc.endswith("seek.com.au")
+    seek_hosts = {"au.seek.com", "seek.com.au", "www.seek.com.au"}
+    if (
+        actual.netloc.casefold() not in seek_hosts
+        or expected.netloc.casefold() not in seek_hosts
     ):
         return False
     if actual.path.rstrip("/") != expected.path.rstrip("/"):

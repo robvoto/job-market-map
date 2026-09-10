@@ -467,3 +467,21 @@ def test_resume_recovers_fully_persisted_leaf_without_browser(tmp_path, monkeypa
             (pid,),
         ).fetchone()
     assert tuple(row) == ("COMPLETE_RECOVERED", 2)
+
+
+def test_seek_page_ownership_accepts_live_au_seek_host():
+    from sources.seek_market_map import _same_seek_page
+
+    url = (
+        "https://au.seek.com/jobs-in-administration-office-support/"
+        "in-Australian-Capital-Territory-ACT?daterange=3&sortmode=ListedDate"
+    )
+    assert _same_seek_page(url, url) is True
+    assert (
+        _same_seek_page(
+            url + "&page=2",
+            url,
+        )
+        is True
+    )
+    assert _same_seek_page("https://www.linkedin.com/jobs/search/", url) is False
