@@ -22,6 +22,8 @@ GET /v3/coverage/seek
 
 `GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. Job payloads contain `identity_key` for stable cross-service correlation.
 
+When JMM has obtained a full JD, job payloads also expose the one current neutral JD as `full_description`, `jd_fetched_at`, and `jd_source`. JMM does not expose JD snapshot/version history.
+
 ## Consumer checkpoints
 
 ```text

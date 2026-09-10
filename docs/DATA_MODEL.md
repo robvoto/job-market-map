@@ -4,6 +4,8 @@
 
 Current neutral source-vacancy rows. Fields describe the vacancy and collection evidence only: source/source job ID, stable `identity_key`, URL, title, employer, geography/location, salary/work type, source posting metadata, card evidence, classifications, first/last seen, fingerprints and archive state.
 
+When a full JD has been obtained, the same canonical row may also hold `full_description`, `jd_fetched_at` and `jd_source`. JMM keeps one current JD only and reuses it; there is no JD snapshot/version history.
+
 There are no user or agent activity flags on this table.
 
 ## `card_captures`

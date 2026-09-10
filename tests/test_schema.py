@@ -36,6 +36,9 @@ def test_schema_is_neutral_and_keeps_consumer_checkpoints():
     assert forbidden.isdisjoint(job_columns)
     assert forbidden.isdisjoint(tomb_columns)
     assert "identity_key" in job_columns
+    assert {"full_description", "jd_fetched_at", "jd_source"} <= job_columns
+    assert "jd_snapshots" not in tables
+    assert "job_description_snapshots" not in tables
 
 
 def test_empty_obsolete_activity_scaffolding_is_removed(tmp_path, monkeypatch):

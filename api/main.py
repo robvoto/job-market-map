@@ -32,7 +32,7 @@ from collector.settings import (
 )
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 4
+SCHEMA_VERSION = 5
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 

@@ -13,7 +13,7 @@
 ## ADR-003 — Card-only mapping
 **Decision:** Full market mapping does not open individual JDs.
 
-**Reason:** Result cards can be collected at far higher throughput. JD opening belongs to a consumer after its own history/title screen.
+**Reason:** Result cards can be collected at far higher throughput. JD acquisition is a separate on-demand enrichment step; when a neutral JD is obtained, JMM remains its canonical owner rather than a consumer storing a duplicate raw copy.
 
 ## ADR-004 — Evidence-based, non-destructive duplicate linking
 **Decision:** Stable same-source identity upserts deterministically. Rich cross-source/same-title evidence creates duplicate links rather than destructive merges.
@@ -47,3 +47,8 @@
 `presented_by_agent` is agent-specific personal history; `viewed_by_user`, `applied`, `rejected`, `interview`, `no_response` and similar outcomes are user-specific history. None of these belong in neutral market rows or Job Market Map retention logic.
 
 **Reason:** A vacancy is the same market object regardless of which user or agent interacts with it. A single canonical personal-history owner avoids conflicting ledgers while keeping Job Market Map reusable by Job Hunter, Reset / Edge, Plan Z and future consumers.
+
+## ADR-010 — One current neutral JD belongs to JMM
+**Decision:** JMM stores at most one current neutral JD on the canonical `jobs` row using `full_description`, `jd_fetched_at` and `jd_source`. Assume the JD does not change. Do not create JD snapshot/version history, snapshot IDs, historical hashes or historical JD reconstruction.
+
+**Reason:** JMM is the single owner of neutral market evidence. A simple write-once JD avoids duplicate raw JD truth in consumers without introducing history machinery that is not required.

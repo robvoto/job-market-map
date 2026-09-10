@@ -8,6 +8,7 @@ It owns:
 - discovery query execution;
 - result-card extraction;
 - raw evidence capture;
+- one current neutral JD per job when obtained on demand;
 - source-normalised fields;
 - same-source identity;
 - conservative cross-source duplicate hints;
@@ -43,7 +44,7 @@ Other sources --------------------------------------/                 |
                      policy                      policy                            policy
 ```
 
-A consumer may decide that a card deserves an individual JD review. That deeper browser work occurs **outside** the neutral mapping stage.
+A consumer may decide that a card deserves an individual JD review. That acquisition occurs **outside** the neutral bulk-mapping stage, but the resulting neutral JD belongs in JMM and is reused from there rather than permanently duplicated by the consumer.
 
 ## Why SQLite
 

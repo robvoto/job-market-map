@@ -29,7 +29,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 4
+        assert payload["schema_version"] == 5
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
         assert "raw_card_text" not in payload["items"][0]

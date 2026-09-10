@@ -27,6 +27,65 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def get_job_jd(job_id: int) -> dict[str, object] | None:
+    """Return the one canonical neutral JD for a job, if JMM has it."""
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT id, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
+            (job_id,),
+        ).fetchone()
+    if row is None:
+        raise KeyError(f"job {job_id} not found")
+    if not str(row["full_description"] or "").strip():
+        return None
+    return dict(row)
+
+
+def store_job_jd_once(
+    job_id: int,
+    *,
+    full_description: str,
+    jd_fetched_at: str,
+    jd_source: str,
+) -> dict[str, object]:
+    """Store a neutral JD only when the canonical job does not already have one."""
+    if not str(full_description or "").strip():
+        raise ValueError("full_description is required")
+    fetched_at = str(jd_fetched_at or "").strip()
+    if not fetched_at:
+        raise ValueError("jd_fetched_at is required")
+    source = str(jd_source or "").strip()
+    if not source:
+        raise ValueError("jd_source is required")
+
+    init_db()
+    with connect() as conn:
+        existing = conn.execute(
+            "SELECT id, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
+            (job_id,),
+        ).fetchone()
+        if existing is None:
+            raise KeyError(f"job {job_id} not found")
+        if str(existing["full_description"] or "").strip():
+            return dict(existing)
+
+        conn.execute(
+            """
+            UPDATE jobs
+               SET full_description=?, jd_fetched_at=?, jd_source=?
+             WHERE id=?
+               AND (full_description IS NULL OR trim(full_description)='')
+            """,
+            (full_description, fetched_at, source, job_id),
+        )
+        stored = conn.execute(
+            "SELECT id, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
+            (job_id,),
+        ).fetchone()
+    return dict(stored)
+
+
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
     return (
         conn.execute(
@@ -161,6 +220,9 @@ def init_db() -> None:
             conn, "jobs", "subclassification_text", "subclassification_text TEXT"
         )
         _ensure_column(conn, "jobs", "card_tags_json", "card_tags_json TEXT")
+        _ensure_column(conn, "jobs", "full_description", "full_description TEXT")
+        _ensure_column(conn, "jobs", "jd_fetched_at", "jd_fetched_at TEXT")
+        _ensure_column(conn, "jobs", "jd_source", "jd_source TEXT")
         _ensure_column(conn, "jobs", "geography_code", "geography_code TEXT")
         _ensure_column(conn, "jobs", "core_fingerprint", "core_fingerprint TEXT")
         _ensure_column(
