@@ -32,10 +32,10 @@ def _cutoff_iso(days: int, now: datetime | None = None) -> str:
     return (_current(now) - timedelta(days=days)).isoformat(timespec="seconds")
 
 
-def _status_predicate(preserve_status_jobs: bool) -> str:
-    if not preserve_status_jobs:
+def _activity_predicate(preserve_activity_jobs: bool) -> str:
+    if not preserve_activity_jobs:
         return "1=1"
-    return "shown_to_rob=0 AND reviewed=0 AND applied=0 AND rejected=0 AND dismissed=0"
+    return "NOT EXISTS (SELECT 1 FROM user_job_activity_events a WHERE a.job_identity_key=jobs.identity_key)"
 
 
 def apply_retention(
@@ -43,7 +43,7 @@ def apply_retention(
     raw_capture_days: int | None = None,
     archive_after_days: int | None = None,
     remove_archived_after_days: int | None = None,
-    preserve_status_jobs: bool | None = None,
+    preserve_activity_jobs: bool | None = None,
     now: datetime | None = None,
 ) -> RetentionResult:
     """Apply configurable archive-then-remove policy while retaining tombstone identity."""
@@ -64,9 +64,9 @@ def apply_retention(
         else get_setting("retention.remove_archived_after_days")
     )
     preserve = bool(
-        preserve_status_jobs
-        if preserve_status_jobs is not None
-        else get_setting("retention.preserve_status_jobs_forever")
+        preserve_activity_jobs
+        if preserve_activity_jobs is not None
+        else get_setting("retention.preserve_activity_jobs_forever")
     )
     if min(raw_days, archive_days, remove_days) < 1:
         raise ValueError("retention days must be >= 1")
@@ -80,7 +80,7 @@ def apply_retention(
     raw_cutoff = _cutoff_iso(raw_days, current)
     archive_cutoff = _cutoff_iso(archive_days, current)
     remove_cutoff = _cutoff_iso(remove_days, current)
-    status_clause = _status_predicate(preserve)
+    activity_clause = _activity_predicate(preserve)
 
     with connect() as conn:
         captures_deleted = conn.execute(
@@ -97,7 +97,7 @@ def apply_retention(
                    raw_card_text=NULL
              WHERE last_seen_at < ?
                AND archived=0
-               AND {status_clause}
+               AND {activity_clause}
             """,
             (archived_at, archive_cutoff),
         ).rowcount
@@ -107,7 +107,7 @@ def apply_retention(
             SELECT * FROM jobs
              WHERE archived=1
                AND last_seen_at < ?
-               AND {status_clause}
+               AND {activity_clause}
              ORDER BY id
             """,
             (remove_cutoff,),
@@ -134,13 +134,13 @@ def apply_retention(
             conn.execute(
                 """
                 INSERT INTO job_tombstones(
-                    source, source_job_id, canonical_url, title, employer, location,
+                    source, source_job_id, identity_key, canonical_url, title, employer, location,
                     core_fingerprint, exact_card_fingerprint, first_seen_at, last_seen_at,
-                    capture_count, shown_to_rob, reviewed, applied, rejected, dismissed,
-                    query_history_json, removed_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    capture_count, query_history_json, removed_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(source, canonical_url) DO UPDATE SET
                     source_job_id=excluded.source_job_id,
+                    identity_key=excluded.identity_key,
                     title=excluded.title,
                     employer=excluded.employer,
                     location=excluded.location,
@@ -149,17 +149,13 @@ def apply_retention(
                     first_seen_at=MIN(job_tombstones.first_seen_at, excluded.first_seen_at),
                     last_seen_at=MAX(job_tombstones.last_seen_at, excluded.last_seen_at),
                     capture_count=MAX(job_tombstones.capture_count, excluded.capture_count),
-                    shown_to_rob=MAX(job_tombstones.shown_to_rob, excluded.shown_to_rob),
-                    reviewed=MAX(job_tombstones.reviewed, excluded.reviewed),
-                    applied=MAX(job_tombstones.applied, excluded.applied),
-                    rejected=MAX(job_tombstones.rejected, excluded.rejected),
-                    dismissed=MAX(job_tombstones.dismissed, excluded.dismissed),
                     query_history_json=excluded.query_history_json,
                     removed_at=excluded.removed_at
                 """,
                 (
                     job["source"],
                     job["source_job_id"],
+                    job["identity_key"],
                     job["canonical_url"],
                     job["title"],
                     job["employer"],
@@ -169,11 +165,6 @@ def apply_retention(
                     job["first_seen_at"],
                     job["last_seen_at"],
                     job["capture_count"],
-                    job["shown_to_rob"],
-                    job["reviewed"],
-                    job["applied"],
-                    job["rejected"],
-                    job["dismissed"],
                     json.dumps(history, ensure_ascii=False),
                     archived_at,
                 ),

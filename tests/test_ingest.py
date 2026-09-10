@@ -19,7 +19,7 @@ def test_canonicalise_url_drops_tracking_but_keeps_meaningful_query():
     )
 
 
-def test_same_source_id_upserts_without_resetting_status(tmp_path, monkeypatch):
+def test_same_source_id_upserts_without_mixing_user_activity(tmp_path, monkeypatch):
     ingest = _use_tmp_db(tmp_path, monkeypatch)
     first = ingest.ingest_card(
         CardObservation(
@@ -34,8 +34,13 @@ def test_same_source_id_upserts_without_resetting_status(tmp_path, monkeypatch):
             captured_at="2026-09-10T01:00:00+00:00",
         )
     )
-    with db.connect() as conn:
-        conn.execute("UPDATE jobs SET shown_to_rob = 1 WHERE id = ?", (first.job_id,))
+    from collector import activity
+
+    monkeypatch.setattr(activity, "connect", db.connect)
+    monkeypatch.setattr(activity, "init_db", db.init_db)
+    activity.record_activity(
+        first.job_id, user_key="rob", activity_type="shown", actor="test"
+    )
 
     second = ingest.ingest_card(
         CardObservation(
@@ -65,7 +70,13 @@ def test_same_source_id_upserts_without_resetting_status(tmp_path, monkeypatch):
             "SELECT COUNT(*) FROM job_query_hits WHERE job_id = ?", (first.job_id,)
         ).fetchone()[0]
     assert job["capture_count"] == 2
-    assert job["shown_to_rob"] == 1
+    assert "shown_to_rob" not in job
     assert job["location"] == "Sydney"
+    with db.connect() as conn:
+        current = conn.execute(
+            "SELECT active FROM user_job_activity_current WHERE user_key='rob' AND job_identity_key=? AND activity_type='shown'",
+            (job["identity_key"],),
+        ).fetchone()
+    assert current[0] == 1
     assert captures == 2
     assert hits == 2

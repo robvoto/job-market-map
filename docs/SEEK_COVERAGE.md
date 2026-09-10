@@ -88,7 +88,7 @@ uv run python -m scripts.run_seek_market_map --state NSW --state ACT
 ## Monitoring
 
 ```text
-GET /v1/coverage/seek
+GET /v2/coverage/seek
 ```
 
 Consumers should not assume SEEK is complete when a state status is `NOT_RUN`, `FAILED`, or starts with `INCOMPLETE`.

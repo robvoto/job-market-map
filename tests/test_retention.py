@@ -50,22 +50,23 @@ def test_compacts_old_unimportant_job_but_keeps_identity(tmp_path, monkeypatch):
     assert captures == 0
 
 
-def test_does_not_compact_old_job_with_meaningful_status(tmp_path, monkeypatch):
+def test_does_not_compact_old_job_with_user_activity(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
-    from collector import retention
+    from collector import activity, retention
 
-    monkeypatch.setattr(retention, "connect", db.connect)
-    monkeypatch.setattr(retention, "init_db", db.init_db)
+    for module in (retention, activity):
+        monkeypatch.setattr(module, "connect", db.connect)
+        monkeypatch.setattr(module, "init_db", db.init_db)
 
     db.init_db()
     now = datetime(2026, 9, 10, tzinfo=UTC)
     old = (now - timedelta(days=60)).isoformat(timespec="seconds")
     with db.connect() as conn:
-        cur = conn.execute(
+        job_id = conn.execute(
             """INSERT INTO jobs
             (source, source_job_id, canonical_url, title, employer, raw_card_text,
-             first_seen_at, last_seen_at, shown_to_rob)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)""",
+             first_seen_at, last_seen_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 "seek",
                 "2",
@@ -76,8 +77,10 @@ def test_does_not_compact_old_job_with_meaningful_status(tmp_path, monkeypatch):
                 old,
                 old,
             ),
-        )
-        job_id = cur.lastrowid
+        ).lastrowid
+    activity.record_activity(
+        job_id, user_key="rob", activity_type="shown", actor="test"
+    )
 
     result = retention.compact_stale_data(days=30, now=now)
     assert result.jobs_compacted == 0

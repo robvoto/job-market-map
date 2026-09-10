@@ -57,7 +57,7 @@ Disabling a query stops future collection but does not delete jobs or query hist
 
 Whole-state collection scope is stored as admin data. Current enabled geographies are NSW, ACT and QLD. The Admin page can enable/disable a configured geography without changing Python.
 
-`GET /v1/admin/geographies` and `PATCH /v1/admin/geographies/{code}` provide the same control for agents/admin tooling.
+`GET /v2/admin/geographies` and `PATCH /v2/admin/geographies/{code}` provide the same control for agents/admin tooling.
 
 ## SEEK completeness controls
 

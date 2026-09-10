@@ -10,7 +10,7 @@ Repository: `/home/robvoto/projects/job-market-map`
 
 Canonical runtime DB: `/home/robvoto/projects/job-market-map/data/market.db`
 
-Supported consumer boundary: local versioned API, currently `/v1`.
+Supported consumer boundary: local versioned API, currently `/v2`.
 
 ## Hard boundary
 This project is a **neutral collector/index**. Never add Job Hunter, Reset / Edge, Plan Z, CV, application or career-fit policy to ingestion.
@@ -37,9 +37,9 @@ Prior search knowledge may improve discovery-query coverage. It must not become 
 - A tombstoned exact source identity that reappears is previously seen, not newly discovered.
 
 ## Consumer/API rule
-Normal external consumers such as Job Hunter use the local `/v1` API. Do not couple them to SQLite columns or import mapper Python modules into those projects.
+Normal external consumers such as Job Hunter use the local `/v2` API. Do not couple them to SQLite columns or import mapper Python modules into those projects.
 
-For incremental consumption use `/v1/feed/jobs` and persist `next_cursor` only after safely processing the page. Status writes should include `actor` and `idempotency_key`.
+For incremental consumption use `/v2/feed/jobs` and persist `next_cursor` only after safely processing the page. User activity writes go to `/v2/users/{user_key}/jobs/{job_id}/activity` and should include `actor` and `idempotency_key`. Never add activity fields to the neutral job payload.
 
 Breaking API semantics require versioning. See `docs/CONSUMER_CONTRACT.md`.
 
@@ -51,13 +51,13 @@ For SEEK, a result partition above `collection.seek_partition_max_results` (defa
 
 A parent is complete only when all children are complete and their deduplicated union of SEEK job IDs covers the parent's reported count within the configured tolerance. Final oversized leaves remain `INCOMPLETE_OVERSIZE_UNSPLITTABLE`; never relabel them complete to finish a run.
 
-Use `GET /v1/coverage/seek` when a consumer needs proof of coverage. A non-empty feed does not prove the state crawl is complete.
+Use `GET /v2/coverage/seek` when a consumer needs proof of coverage. A non-empty feed does not prove the state crawl is complete.
 
 ## Named consumers
 Job Hunter, Plan Z and Reset / Edge should use independent named API checkpoints rather than creating new local seen/cursor files:
-- `/v1/consumers/job-hunter/feed`
-- `/v1/consumers/plan-z/feed`
-- `/v1/consumers/reset-edge/feed`
+- `/v2/consumers/job-hunter/feed`
+- `/v2/consumers/plan-z/feed`
+- `/v2/consumers/reset-edge/feed`
 
 Fetching never advances a checkpoint. Advance only after the consumer safely processes the returned page.
 
@@ -72,7 +72,7 @@ Routine operational tweaks belong in Admin/settings or operational query rows, n
 Settings include helper text and validation. Query registry sync must not silently undo Rob's disabled queries.
 
 ## Retention
-Default lifecycle is rich/current -> archived/compacted -> detailed unimportant row removed -> tombstone retained. Meaningful shown/reviewed/applied/rejected/dismissed history is preserved by default.
+Default lifecycle is rich/current -> archived/compacted -> detailed unimportant row removed -> tombstone retained. Per-user activity history is separate from neutral jobs and is preserved by stable job identity. Rich job rows with activity are protected by default retention settings.
 
 Never delete identity memory in a way that allows an old vacancy to return as falsely new. See `docs/RETENTION.md`.
 

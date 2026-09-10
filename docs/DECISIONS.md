@@ -26,7 +26,7 @@
 **Reason:** Old raw observations are low-value bulk, but identity memory prevents stale jobs being rediscovered as falsely new.
 
 ## ADR-006 — Versioned API is the consumer boundary
-**Decision:** Job Hunter and other agents consume `/v1`; they do not write SQLite directly.
+**Decision:** Job Hunter and other agents consume `/v2`; they do not write SQLite directly.
 
 **Reason:** A stable API can validate writes, provide cursors/idempotency, preserve lifecycle invariants and evolve storage without breaking every agent.
 
@@ -39,3 +39,9 @@
 **Decision:** The JSON query registry bootstraps known search coverage, while SQLite is the live operational state.
 
 **Reason:** Admin-added/disabled queries must take effect immediately and must not be undone by a seed sync.
+
+
+## ADR-007 — User activity is not market data
+**Decision:** `shown`, `seen`, `reviewed`, `applied`, `rejected`, and `dismissed` live in a per-user activity ledger keyed by stable job identity, never on neutral `jobs`/tombstones. The API moved to `/v2` before external consumer integration.
+
+**Reason:** A vacancy is the same market object regardless of which user or agent has interacted with it. Mixing user state into `jobs` breaks neutrality and multi-user/multi-agent reuse.

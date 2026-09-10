@@ -5,6 +5,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     id INTEGER PRIMARY KEY,
     source TEXT NOT NULL,
     source_job_id TEXT,
+    identity_key TEXT,
     canonical_url TEXT NOT NULL,
     title TEXT,
     employer TEXT,
@@ -29,13 +30,9 @@ CREATE TABLE IF NOT EXISTS jobs (
     possible_same_job_group TEXT,
     core_fingerprint TEXT,
     exact_card_fingerprint TEXT,
-    shown_to_rob INTEGER NOT NULL DEFAULT 0,
-    reviewed INTEGER NOT NULL DEFAULT 0,
-    applied INTEGER NOT NULL DEFAULT 0,
-    rejected INTEGER NOT NULL DEFAULT 0,
-    dismissed INTEGER NOT NULL DEFAULT 0,
     archived INTEGER NOT NULL DEFAULT 0,
     compacted_at TEXT,
+    UNIQUE(identity_key),
     UNIQUE(source, source_job_id),
     UNIQUE(source, canonical_url)
 );
@@ -78,22 +75,40 @@ CREATE TABLE IF NOT EXISTS job_query_hits (
     PRIMARY KEY(job_id, query_id)
 );
 
-CREATE TABLE IF NOT EXISTS job_status_events (
-    id INTEGER PRIMARY KEY,
-    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
-    event_type TEXT NOT NULL,
-    event_value INTEGER NOT NULL,
-    occurred_at TEXT NOT NULL,
-    actor TEXT,
-    note TEXT,
-    idempotency_key TEXT
-);
-
 CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title);
 CREATE INDEX IF NOT EXISTS idx_jobs_employer ON jobs(employer);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen_at);
-CREATE INDEX IF NOT EXISTS idx_jobs_flags ON jobs(shown_to_rob, reviewed, applied, rejected, dismissed);
+
+CREATE TABLE IF NOT EXISTS user_job_activity_events (
+    id INTEGER PRIMARY KEY,
+    user_key TEXT NOT NULL,
+    job_identity_key TEXT,
+    activity_type TEXT NOT NULL,
+    activity_value INTEGER NOT NULL,
+    occurred_at TEXT NOT NULL,
+    actor TEXT NOT NULL,
+    note TEXT,
+    idempotency_key TEXT
+);
+
+CREATE TABLE IF NOT EXISTS user_job_activity_current (
+    user_key TEXT NOT NULL,
+    job_identity_key TEXT,
+    activity_type TEXT NOT NULL,
+    active INTEGER NOT NULL,
+    updated_at TEXT NOT NULL,
+    last_event_id INTEGER NOT NULL,
+    PRIMARY KEY(user_key, job_identity_key, activity_type)
+);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_user_activity_idempotency
+    ON user_job_activity_events(user_key, actor, idempotency_key)
+    WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_user_activity_identity
+    ON user_job_activity_events(user_key, job_identity_key, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS idx_user_activity_current_active
+    ON user_job_activity_current(user_key, activity_type, active, job_identity_key);
 
 CREATE TABLE IF NOT EXISTS collection_runs (
     id INTEGER PRIMARY KEY,
@@ -157,6 +172,7 @@ CREATE TABLE IF NOT EXISTS job_tombstones (
     id INTEGER PRIMARY KEY,
     source TEXT NOT NULL,
     source_job_id TEXT,
+    identity_key TEXT,
     canonical_url TEXT NOT NULL,
     title TEXT,
     employer TEXT,
@@ -166,13 +182,9 @@ CREATE TABLE IF NOT EXISTS job_tombstones (
     first_seen_at TEXT NOT NULL,
     last_seen_at TEXT NOT NULL,
     capture_count INTEGER NOT NULL DEFAULT 0,
-    shown_to_rob INTEGER NOT NULL DEFAULT 0,
-    reviewed INTEGER NOT NULL DEFAULT 0,
-    applied INTEGER NOT NULL DEFAULT 0,
-    rejected INTEGER NOT NULL DEFAULT 0,
-    dismissed INTEGER NOT NULL DEFAULT 0,
     query_history_json TEXT,
     removed_at TEXT NOT NULL,
+    UNIQUE(identity_key),
     UNIQUE(source, source_job_id),
     UNIQUE(source, canonical_url)
 );

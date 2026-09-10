@@ -13,17 +13,15 @@ def _wire(tmp_path, monkeypatch):
     return retention, ingest
 
 
-def _insert_job(last_seen: str, *, status: bool = False):
+def _insert_job(last_seen: str):
     with db.connect() as conn:
-        cur = conn.execute(
+        return conn.execute(
             """INSERT INTO jobs(
                 source, source_job_id, canonical_url, title, employer, location,
-                raw_card_text, teaser_text, first_seen_at, last_seen_at,
-                shown_to_rob, archived, core_fingerprint
-            ) VALUES('seek','old1','https://seek.test/old1','Role','Acme','Sydney','raw','teaser',?,?,?,0,'core')""",
-            (last_seen, last_seen, int(status)),
-        )
-        return cur.lastrowid
+                raw_card_text, teaser_text, first_seen_at, last_seen_at, archived, core_fingerprint
+            ) VALUES('seek','old1','https://seek.test/old1','Role','Acme','Sydney','raw','teaser',?,?,0,'core')""",
+            (last_seen, last_seen),
+        ).lastrowid
 
 
 def test_archive_then_remove_to_tombstone(tmp_path, monkeypatch):
@@ -52,17 +50,24 @@ def test_archive_then_remove_to_tombstone(tmp_path, monkeypatch):
     assert tomb["employer"] == "Acme"
 
 
-def test_status_job_is_preserved_by_default(tmp_path, monkeypatch):
+def test_activity_job_is_preserved_by_default(tmp_path, monkeypatch):
     retention, _ = _wire(tmp_path, monkeypatch)
     db.init_db()
     now = datetime(2026, 9, 10, tzinfo=UTC)
     old = (now - timedelta(days=400)).isoformat(timespec="seconds")
-    job_id = _insert_job(old, status=True)
+    job_id = _insert_job(old)
+    from collector import activity
+
+    monkeypatch.setattr(activity, "connect", db.connect)
+    monkeypatch.setattr(activity, "init_db", db.init_db)
+    activity.record_activity(
+        job_id, user_key="rob", activity_type="applied", actor="test"
+    )
     result = retention.apply_retention(
         raw_capture_days=30,
         archive_after_days=30,
         remove_archived_after_days=120,
-        preserve_status_jobs=True,
+        preserve_activity_jobs=True,
         now=now,
     )
     assert result.jobs_archived == 0

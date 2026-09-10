@@ -7,6 +7,7 @@ from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from collector.db import connect, init_db
 from collector.duplicates import fingerprints, refresh_duplicate_links
+from collector.identity import job_identity_key
 from collector.models import CardObservation
 
 TRACKING_QUERY_KEYS = {
@@ -173,20 +174,25 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             historical = dict(tombstone) if tombstone else None
             first_seen_at = historical["first_seen_at"] if historical else captured_at
             prior_capture_count = int(historical["capture_count"]) if historical else 0
+            identity = (
+                historical["identity_key"]
+                if historical
+                else job_identity_key(source, source_job_id, canonical_url)
+            )
             cur = conn.execute(
                 """
                 INSERT INTO jobs(
-                    source, source_job_id, canonical_url, title, employer, location, geography_code,
+                    source, source_job_id, identity_key, canonical_url, title, employer, location, geography_code,
                     salary_text, employment_type, workplace_type, posted_text, posted_at,
                     reposted, applicant_count, easy_apply, teaser_text, raw_card_text,
                     classification_text, subclassification_text, card_tags_json,
-                    first_seen_at, last_seen_at, capture_count, archived,
-                    shown_to_rob, reviewed, applied, rejected, dismissed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                    first_seen_at, last_seen_at, capture_count, archived
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
                 """,
                 (
                     source,
                     source_job_id,
+                    identity,
                     canonical_url,
                     fields["title"],
                     fields["employer"],
@@ -208,11 +214,6 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                     first_seen_at,
                     captured_at,
                     prior_capture_count + 1,
-                    int(historical["shown_to_rob"]) if historical else 0,
-                    int(historical["reviewed"]) if historical else 0,
-                    int(historical["applied"]) if historical else 0,
-                    int(historical["rejected"]) if historical else 0,
-                    int(historical["dismissed"]) if historical else 0,
                 ),
             )
             job_id = int(cur.lastrowid)

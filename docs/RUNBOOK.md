@@ -62,4 +62,4 @@ A collection failure must leave prior successful ingests intact and enough curso
 uv run python -m scripts.run_seek_market_map
 ```
 
-Current enabled scope is NSW + ACT + QLD. The runner reuses one browser tab across states. Check `/v1/coverage/seek` afterwards; any `INCOMPLETE*` or `FAILED` partition means coverage is not proven complete.
+Current enabled scope is NSW + ACT + QLD. The runner reuses one browser tab across states. Check `/v2/coverage/seek` afterwards; any `INCOMPLETE*` or `FAILED` partition means coverage is not proven complete.
