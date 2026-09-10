@@ -15,7 +15,7 @@ Mechanics:
 
 Captured card data currently includes title, employer, source ID, URL, posted text, employment type, location, work arrangement, visible salary, teaser, classification/subclassification, selected card tags and raw card evidence.
 
-Known SEEK IDs are linked to current coverage without full re-ingest. If a canonical SEEK identity has no successful JD-fetch marker, its job page is opened once. JMM stores the full neutral JD and fills missing neutral detail facts exposed by the source page, including the exact SEEK `listedAt.dateTimeUtc` posting timestamp when present. Relative card labels such as `3h ago` remain raw capture evidence only. The permanent marker prevents normal future refetches after a successful detail capture.
+Known SEEK IDs are linked to current coverage without full re-ingest. If a canonical SEEK identity has no successful JD-fetch marker, its job page is opened once. JMM stores the full neutral JD and fills missing neutral detail facts exposed by the source page, including the exact SEEK `listedAt.dateTimeUtc` posting timestamp when present. Relative card labels such as `3h ago` remain raw capture evidence only. The permanent marker prevents normal future refetches after a successful detail capture. During JMM-007, this happens progressively inside the same pass: resumed/discovered jobs are JD-caught-up before coverage is allowed to run far ahead, and pass completion requires both coverage completion and zero required JD remainder.
 
 ## LinkedIn
 

@@ -85,7 +85,7 @@ When a source DOM changes:
 - add a regression fixture/test;
 - do not silently fill missing card fields during bulk mapping by opening JDs or switching to fit inference.
 
-JD enrichment is a separate operation. When a job page is deliberately opened for JD enrichment, capture the full source JD and any additional neutral structured source facts exposed by that same detail page. Never infer missing canonical facts from relative labels or prose when the source does not provide them explicitly.
+JD enrichment is a distinct source-detail operation, but for JMM-007 it is part of the same full-evidence pass rather than an optional later phase. On resume, existing discovered SEEK jobs are brought up to JD completeness before more coverage is collected; each completed coverage partition triggers JD catch-up; and the pass cannot be COMPLETE while any required SEEK JD remains unfetched. When a job page is deliberately opened for JD enrichment, capture the full source JD and any additional neutral structured source facts exposed by that same detail page. Never infer missing canonical facts from relative labels or prose when the source does not provide them explicitly.
 
 ## Browser rule
 

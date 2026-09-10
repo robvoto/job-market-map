@@ -120,18 +120,23 @@ def run_seek_cycle(
     days: int | None = None,
     should_stop: Callable[[], bool],
     deadline_reached: Callable[[], bool],
+    after_progress: Callable[[MarketMapResult], None] | None = None,
 ) -> SeekCycleResult:
     latest: dict[str, MarketMapResult] = {}
     total_processed = 0
     while True:
         if should_stop():
-            return SeekCycleResult("STOPPED", codes, total_processed, list(latest.values()))
+            return SeekCycleResult(
+                "STOPPED", codes, total_processed, list(latest.values())
+            )
         if deadline_reached():
             return SeekCycleResult(
                 "PARTIAL_TIME_LIMIT", codes, total_processed, list(latest.values())
             )
         if all_states_complete(codes):
-            return SeekCycleResult("COMPLETE", codes, total_processed, list(latest.values()))
+            return SeekCycleResult(
+                "COMPLETE", codes, total_processed, list(latest.values())
+            )
 
         pass_progress = 0
         for code in codes:
@@ -147,11 +152,17 @@ def run_seek_cycle(
             latest[code] = result
             pass_progress += result.partitions_processed
             total_processed += result.partitions_processed
+            if result.partitions_processed and after_progress is not None:
+                after_progress(result)
 
         if all_states_complete(codes):
-            return SeekCycleResult("COMPLETE", codes, total_processed, list(latest.values()))
+            return SeekCycleResult(
+                "COMPLETE", codes, total_processed, list(latest.values())
+            )
         if should_stop():
-            return SeekCycleResult("STOPPED", codes, total_processed, list(latest.values()))
+            return SeekCycleResult(
+                "STOPPED", codes, total_processed, list(latest.values())
+            )
         if deadline_reached():
             return SeekCycleResult(
                 "PARTIAL_TIME_LIMIT", codes, total_processed, list(latest.values())

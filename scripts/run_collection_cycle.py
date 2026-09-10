@@ -111,40 +111,64 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             list_page_id = int(open_tab("about:blank", active=False).result["pageId"])
-            result = run_seek_cycle(
-                page_id=list_page_id,
-                codes=codes,
-                days=days,
-                should_stop=stop_event.is_set,
-                deadline_reached=deadline_reached,
-            )
-
+            detail_page_id = int(open_tab("about:blank", active=False).result["pageId"])
             jd_result = None
-            final_status = result.status
-            if (
-                result.status == "COMPLETE"
-                and not stop_event.is_set()
-                and not deadline_reached()
-            ):
-                detail_page_id = int(
-                    open_tab("about:blank", active=False).result["pageId"]
-                )
+
+            def sweep_required_jds(*, include_existing_unfetched: bool = False) -> None:
+                nonlocal jd_result
+                if stop_event.is_set() or deadline_reached():
+                    return
                 jd_result = enrich_seek_coverage_jds(
                     page_id=detail_page_id,
                     codes=codes,
                     days=days,
                     should_stop=stop_event.is_set,
                     deadline_reached=deadline_reached,
-                    include_existing_unfetched=args.backfill_existing_jds,
+                    include_existing_unfetched=include_existing_unfetched,
                 )
-                if stop_event.is_set():
-                    final_status = "STOPPED"
-                elif deadline_reached() and jd_result.remaining:
-                    final_status = "PARTIAL_TIME_LIMIT"
-                elif jd_result.remaining:
-                    final_status = "PARTIAL_JD"
-                else:
-                    final_status = "COMPLETE"
+                print(
+                    "JD sweep: "
+                    f"candidates={jd_result.candidates}, cached={jd_result.cached}, "
+                    f"stored={jd_result.stored}, failed={jd_result.failed}, "
+                    f"remaining={jd_result.remaining}",
+                    flush=True,
+                )
+
+            # A JMM-007 pass is full-evidence, not card-only. Catch up any jobs
+            # already discovered by an interrupted/resumed pass before collecting more.
+            sweep_required_jds()
+
+            def after_coverage_progress(_result) -> None:
+                # Do not let coverage run thousands of jobs ahead of JD acquisition.
+                # Every completed partition is followed by a write-once JD catch-up.
+                sweep_required_jds()
+
+            result = run_seek_cycle(
+                page_id=list_page_id,
+                codes=codes,
+                days=days,
+                should_stop=stop_event.is_set,
+                deadline_reached=deadline_reached,
+                after_progress=after_coverage_progress,
+            )
+
+            # Final sweep proves the pass has the required JDs. The one-off legacy
+            # backfill is included only after current 3-day coverage is complete.
+            if result.status == "COMPLETE":
+                sweep_required_jds(
+                    include_existing_unfetched=args.backfill_existing_jds
+                )
+
+            if stop_event.is_set():
+                final_status = "STOPPED"
+            elif deadline_reached() and (jd_result is None or jd_result.remaining):
+                final_status = "PARTIAL_TIME_LIMIT"
+            elif result.status != "COMPLETE":
+                final_status = result.status
+            elif jd_result is None or jd_result.remaining:
+                final_status = "PARTIAL_JD"
+            else:
+                final_status = "COMPLETE"
 
             message = (
                 f"SEEK {mode} {days}d cycle {final_status.lower()}; "
