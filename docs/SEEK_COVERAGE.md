@@ -113,4 +113,4 @@ ACT is the first whole-state proof run. Current persisted state after a browser-
 - only unfinished classification: Trades & Services, **89** reported / **32** memberships persisted;
 - ACT root remains `FAILED` until that classification and parent aggregation finish.
 
-Do not call ACT exhaustive/complete yet. See `docs/CURRENT_STATE.md` for the exact recovery point.
+Do not call ACT exhaustive/complete yet. See local-only `docs/CURRENT_STATE.md` if present for the exact recovery point; the handoff is intentionally not tracked in Git.

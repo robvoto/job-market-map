@@ -68,4 +68,4 @@ The admin default partition chunk is intentionally small so ChatGPT/Claude tool-
 
 Use `--fresh` only when intentionally discarding resume behaviour for a fresh coverage pass.
 
-Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*`, `FAILED`, or `NOT_RUN` state means coverage is not proven complete. For the latest live recovery point, read `docs/CURRENT_STATE.md`.
+Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*`, `FAILED`, or `NOT_RUN` state means coverage is not proven complete. For the latest live recovery point, read local-only `docs/CURRENT_STATE.md` if present. That handoff is intentionally not tracked in Git.

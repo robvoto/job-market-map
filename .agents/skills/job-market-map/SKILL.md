@@ -10,7 +10,7 @@ Repository: `/home/robvoto/projects/job-market-map`
 Canonical runtime DB: `/home/robvoto/projects/job-market-map/data/market.db`
 Supported consumer API: `/v3`.
 
-For a continuation/new session, read `docs/CURRENT_STATE.md` first for the latest verified crawl state, blocker and exact resume point. Update that handoff whenever live state materially changes.
+For a continuation/new session, read local-only `docs/CURRENT_STATE.md` first **if present** for the latest verified crawl state, blocker and exact resume point. Keep that handoff current locally, but do not commit or push it to Git.
 
 ## Hard ownership boundary
 Job Market Map is neutral/global market infrastructure. It owns collection, source identity, evidence, duplicate links, coverage, retention and consumer checkpoints.
