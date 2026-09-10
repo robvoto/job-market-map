@@ -1,0 +1,79 @@
+PRAGMA foreign_keys = ON;
+PRAGMA journal_mode = WAL;
+
+CREATE TABLE IF NOT EXISTS jobs (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    source_job_id TEXT,
+    canonical_url TEXT NOT NULL,
+    title TEXT,
+    employer TEXT,
+    location TEXT,
+    salary_text TEXT,
+    employment_type TEXT,
+    workplace_type TEXT,
+    posted_text TEXT,
+    posted_at TEXT,
+    reposted INTEGER NOT NULL DEFAULT 0,
+    applicant_count INTEGER,
+    easy_apply INTEGER,
+    teaser_text TEXT,
+    raw_card_text TEXT,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    capture_count INTEGER NOT NULL DEFAULT 1,
+    possible_same_job_group TEXT,
+    shown_to_rob INTEGER NOT NULL DEFAULT 0,
+    reviewed INTEGER NOT NULL DEFAULT 0,
+    applied INTEGER NOT NULL DEFAULT 0,
+    rejected INTEGER NOT NULL DEFAULT 0,
+    dismissed INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(source, source_job_id),
+    UNIQUE(source, canonical_url)
+);
+
+CREATE TABLE IF NOT EXISTS card_captures (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    captured_at TEXT NOT NULL,
+    query_id INTEGER,
+    rank INTEGER,
+    page_number INTEGER,
+    raw_card_text TEXT,
+    raw_json TEXT
+);
+
+CREATE TABLE IF NOT EXISTS queries (
+    id INTEGER PRIMARY KEY,
+    source TEXT NOT NULL,
+    query_text TEXT NOT NULL,
+    location TEXT,
+    active INTEGER NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    UNIQUE(source, query_text, location)
+);
+
+CREATE TABLE IF NOT EXISTS job_query_hits (
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    query_id INTEGER NOT NULL REFERENCES queries(id) ON DELETE CASCADE,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    hit_count INTEGER NOT NULL DEFAULT 1,
+    PRIMARY KEY(job_id, query_id)
+);
+
+CREATE TABLE IF NOT EXISTS job_status_events (
+    id INTEGER PRIMARY KEY,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    event_type TEXT NOT NULL,
+    event_value INTEGER NOT NULL,
+    occurred_at TEXT NOT NULL,
+    actor TEXT,
+    note TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title);
+CREATE INDEX IF NOT EXISTS idx_jobs_employer ON jobs(employer);
+CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_jobs_flags ON jobs(shown_to_rob, reviewed, applied, rejected, dismissed);

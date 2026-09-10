@@ -1,0 +1,8 @@
+__pycache__/
+.pytest_cache/
+.venv/
+*.pyc
+data/*.db-shm
+data/*.db-wal
+exports/*
+!exports/.gitkeep

@@ -1,0 +1,13 @@
+[project]
+name = "job-market-map"
+version = "0.1.0"
+description = "Neutral local job market card collector and API"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.115",
+  "uvicorn>=0.30",
+  "pydantic>=2.8",
+]
+
+[tool.pytest.ini_options]
+pythonpath = ["."]
