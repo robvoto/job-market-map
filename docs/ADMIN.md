@@ -10,6 +10,21 @@ http://127.0.0.1:<configured-port>/admin
 
 The page exposes runtime settings with helper text and discovery-query enable/disable controls.
 
+
+## Service / scheduler controls
+
+The top Admin panel controls the running collector without killing the Admin API itself:
+- Run collection now;
+- graceful Stop current collection;
+- Pause / Resume overnight schedule;
+- set overnight time (default 02:00 local);
+- Backup DB now;
+- current PID/run/scheduler/backup status.
+
+There is no Windows Task Scheduler integration. Start the background Admin service with `./scripts/service.sh start`; it must remain running for the in-app overnight scheduler to fire. Manual and scheduled collection share the same cross-process lock and cannot overlap.
+
+Backups use SQLite's online backup API plus `PRAGMA integrity_check`; `backup.before_collection_enabled=true` and `backup.keep_count=14` by default. See `docs/SERVICE.md`.
+
 ## What is configurable without code
 
 ### Retention

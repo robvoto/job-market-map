@@ -72,3 +72,13 @@ def test_seed_removes_obsolete_personal_activity_settings(tmp_path, monkeypatch)
             "SELECT 1 FROM settings WHERE key='retention.preserve_activity_jobs_forever'"
         ).fetchone()
     assert row is None
+
+
+def test_scheduler_and_backup_settings_have_safe_defaults(tmp_path, monkeypatch):
+    settings = _wire(tmp_path, monkeypatch)
+    settings.seed_settings()
+    assert settings.get_setting("scheduler.enabled") is True
+    assert settings.get_setting("scheduler.daily_hour") == 2
+    assert settings.get_setting("scheduler.daily_minute") == 0
+    assert settings.get_setting("backup.before_collection_enabled") is True
+    assert settings.get_setting("backup.keep_count") == 14

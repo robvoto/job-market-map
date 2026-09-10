@@ -8,6 +8,7 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from collector.backup import create_backup, list_backups
 from collector.consumers import advance_checkpoint, get_checkpoint
 from collector.db import ROOT, connect, init_db
 from collector.geographies import (
@@ -19,6 +20,8 @@ from collector.query_admin import add_query, set_query_active
 from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
 from collector.retention import apply_retention
+from collector.scheduler import SCHEDULER
+from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
 from collector.settings import (
     SettingError,
     get_setting,
@@ -29,7 +32,7 @@ from collector.settings import (
 )
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 3
+SCHEMA_VERSION = 4
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -39,7 +42,11 @@ async def lifespan(_: FastAPI):
     seed_settings()
     seed_geographies()
     sync_registry()
-    yield
+    SCHEDULER.start()
+    try:
+        yield
+    finally:
+        SCHEDULER.stop()
 
 
 app = FastAPI(
@@ -460,3 +467,51 @@ def admin_toggle_geography(code: str, update: GeographyToggle):
 @app.post(f"/{API_VERSION}/admin/retention/run")
 def admin_run_retention():
     return apply_retention().__dict__
+
+
+@app.get(f"/{API_VERSION}/admin/service/status")
+def admin_service_status():
+    backups = list_backups(limit=1)
+    return {
+        "scheduler": SCHEDULER.status(),
+        "collection": PROCESS_MANAGER.status(),
+        "last_backup": backups[0] if backups else None,
+    }
+
+
+@app.post(f"/{API_VERSION}/admin/collection/run")
+def admin_start_collection():
+    try:
+        return PROCESS_MANAGER.start(trigger="manual")
+    except CollectionProcessError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.post(f"/{API_VERSION}/admin/collection/stop")
+def admin_stop_collection():
+    try:
+        return PROCESS_MANAGER.stop()
+    except CollectionProcessError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.post(f"/{API_VERSION}/admin/scheduler/pause")
+def admin_pause_scheduler():
+    setting = set_setting("scheduler.enabled", False, actor="rob-admin")
+    return {"ok": True, "setting": setting, "scheduler": SCHEDULER.status()}
+
+
+@app.post(f"/{API_VERSION}/admin/scheduler/resume")
+def admin_resume_scheduler():
+    setting = set_setting("scheduler.enabled", True, actor="rob-admin")
+    return {"ok": True, "setting": setting, "scheduler": SCHEDULER.status()}
+
+
+@app.get(f"/{API_VERSION}/admin/backups")
+def admin_backups(limit: int = Query(20, ge=1, le=120)):
+    return {"backups": list_backups(limit=limit)}
+
+
+@app.post(f"/{API_VERSION}/admin/backup/run")
+def admin_run_backup():
+    return create_backup().__dict__

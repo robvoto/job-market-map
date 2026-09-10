@@ -16,3 +16,21 @@ def test_admin_page_exposes_geography_and_seek_coverage_controls():
     assert "/admin/geographies" in html
     assert "/coverage/seek" in html
     assert "Market scope" in html
+
+
+def test_admin_page_exposes_collection_scheduler_and_backup_controls():
+    html = Path("api/admin.html").read_text(encoding="utf-8")
+    for token in (
+        "run-now",
+        "stop-collection",
+        "pause-schedule",
+        "resume-schedule",
+        "backup-now",
+        "schedule-time",
+        "/admin/service/status",
+        "/admin/collection/run",
+        "/admin/collection/stop",
+        "/admin/backup/run",
+    ):
+        assert token in html
+    assert "No Windows Task Scheduler is used" in html

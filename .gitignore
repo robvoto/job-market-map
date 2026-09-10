@@ -223,3 +223,6 @@ data/*.db-shm
 data/*.db-wal
 exports/*
 !exports/.gitkeep
+backups/*.db
+logs/*.log
+data/*.lock

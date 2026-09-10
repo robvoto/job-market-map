@@ -1,0 +1,89 @@
+from __future__ import annotations
+
+import os
+import threading
+from datetime import datetime, timedelta
+
+from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
+from collector.service_state import scheduler_state, update_scheduler_state
+from collector.settings import get_setting
+
+
+class SchedulerService:
+    def __init__(self) -> None:
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    @property
+    def active(self) -> bool:
+        return bool(self._thread and self._thread.is_alive())
+
+    def start(self) -> bool:
+        if self.active:
+            return True
+        if os.environ.get("JOB_MARKET_MAP_SCHEDULER_SERVICE") != "1":
+            return False
+        self._stop.clear()
+        self._thread = threading.Thread(target=self._loop, name="job-market-map-scheduler", daemon=True)
+        self._thread.start()
+        return True
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread and self._thread.is_alive():
+            self._thread.join(timeout=5)
+        self._thread = None
+
+    @staticmethod
+    def schedule_window(now: datetime | None = None) -> tuple[datetime, datetime]:
+        current = now or datetime.now().astimezone()
+        hour = int(get_setting("scheduler.daily_hour"))
+        minute = int(get_setting("scheduler.daily_minute"))
+        start = current.replace(hour=hour, minute=minute, second=0, microsecond=0)
+        end = start + timedelta(minutes=int(get_setting("scheduler.run_window_minutes")))
+        return start, end
+
+    def due_now(self, now: datetime | None = None) -> bool:
+        current = now or datetime.now().astimezone()
+        if not bool(get_setting("scheduler.enabled")):
+            return False
+        start, end = self.schedule_window(current)
+        if not (start <= current <= end):
+            return False
+        state = scheduler_state()
+        return str(state.get("last_attempt_local_date") or "") != current.date().isoformat()
+
+    def status(self) -> dict:
+        now = datetime.now().astimezone()
+        start, _ = self.schedule_window(now)
+        state = scheduler_state()
+        last_attempt = str(state.get("last_attempt_local_date") or "")
+        next_run = start
+        if now > start or last_attempt == now.date().isoformat():
+            next_run = start + timedelta(days=1)
+        return {
+            "service_active": self.active,
+            "enabled": bool(get_setting("scheduler.enabled")),
+            "daily_time_local": f"{int(get_setting('scheduler.daily_hour')):02d}:{int(get_setting('scheduler.daily_minute')):02d}",
+            "next_run_at": next_run.isoformat(timespec="seconds"),
+            **state,
+        }
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            now = datetime.now().astimezone()
+            update_scheduler_state(heartbeat_at=now.isoformat(timespec="seconds"))
+            if self.due_now(now):
+                update_scheduler_state(
+                    last_attempt_local_date=now.date().isoformat(),
+                    last_status="STARTING",
+                    last_message="Overnight SEEK collection is due.",
+                )
+                try:
+                    PROCESS_MANAGER.start(trigger="scheduled")
+                except CollectionProcessError as exc:
+                    update_scheduler_state(last_status="SKIPPED_ACTIVE", last_message=str(exc))
+            self._stop.wait(int(get_setting("scheduler.poll_seconds")))
+
+
+SCHEDULER = SchedulerService()

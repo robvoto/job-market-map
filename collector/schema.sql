@@ -210,3 +210,48 @@ CREATE TABLE IF NOT EXISTS consumer_checkpoints (
     updated_at TEXT NOT NULL,
     note TEXT
 );
+
+-- Long-running collection/service control. This is neutral operational state,
+-- not user/job activity.
+CREATE TABLE IF NOT EXISTS market_collection_runs (
+    id INTEGER PRIMARY KEY,
+    trigger TEXT NOT NULL,
+    source_scope TEXT NOT NULL,
+    mode TEXT NOT NULL,
+    status TEXT NOT NULL,
+    pid INTEGER,
+    started_at TEXT NOT NULL,
+    finished_at TEXT,
+    backup_path TEXT,
+    states_json TEXT,
+    message TEXT,
+    error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_market_collection_runs_started
+    ON market_collection_runs(started_at DESC);
+
+CREATE TABLE IF NOT EXISTS scheduler_state (
+    id INTEGER PRIMARY KEY CHECK(id=1),
+    heartbeat_at TEXT,
+    last_attempt_local_date TEXT,
+    last_started_at TEXT,
+    last_finished_at TEXT,
+    last_status TEXT,
+    last_message TEXT
+);
+
+INSERT OR IGNORE INTO scheduler_state(id) VALUES(1);
+
+CREATE TABLE IF NOT EXISTS seek_coverage_history (
+    id INTEGER PRIMARY KEY,
+    captured_at TEXT NOT NULL,
+    geography_code TEXT NOT NULL,
+    root_status TEXT NOT NULL,
+    reported_results INTEGER,
+    covered_unique_jobs INTEGER NOT NULL DEFAULT 0,
+    incomplete_partitions INTEGER NOT NULL DEFAULT 0
+);
+
+CREATE INDEX IF NOT EXISTS idx_seek_coverage_history_geo_time
+    ON seek_coverage_history(geography_code, captured_at DESC);

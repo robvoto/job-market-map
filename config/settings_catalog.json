@@ -197,6 +197,74 @@
       "min": 1024,
       "max": 65535,
       "help": "Local-only API listen port used by the start script. Change here rather than editing Python."
+    },
+    {
+      "key": "scheduler.enabled",
+      "category": "Scheduler",
+      "type": "boolean",
+      "default": true,
+      "help": "Run the neutral overnight collection scheduler while the Job Market Map API service is running. Pause this to stop automatic overnight starts; Run Now remains available."
+    },
+    {
+      "key": "scheduler.daily_hour",
+      "category": "Scheduler",
+      "type": "integer",
+      "default": 2,
+      "min": 0,
+      "max": 23,
+      "help": "Local host hour (0-23) for the daily overnight collection window. WSL currently uses AEST/AEDT local time. Default 02:00."
+    },
+    {
+      "key": "scheduler.daily_minute",
+      "category": "Scheduler",
+      "type": "integer",
+      "default": 0,
+      "min": 0,
+      "max": 59,
+      "help": "Local minute for the daily overnight collection window. Combined with scheduler.daily_hour."
+    },
+    {
+      "key": "scheduler.run_window_minutes",
+      "category": "Scheduler",
+      "type": "integer",
+      "default": 240,
+      "min": 15,
+      "max": 720,
+      "help": "How long after the configured overnight time the scheduler may still start that day's run. Prevents a service started in the afternoon from unexpectedly launching a missed overnight crawl."
+    },
+    {
+      "key": "scheduler.poll_seconds",
+      "category": "Scheduler",
+      "type": "integer",
+      "default": 30,
+      "min": 5,
+      "max": 300,
+      "help": "How often the in-app scheduler checks whether the overnight run is due. This does not control collection speed."
+    },
+    {
+      "key": "scheduler.max_runtime_minutes",
+      "category": "Scheduler",
+      "type": "integer",
+      "default": 300,
+      "min": 15,
+      "max": 720,
+      "help": "Maximum wall-clock time for one manual or scheduled SEEK whole-state collection process. If reached, progress is preserved and the next run resumes it."
+    },
+    {
+      "key": "backup.before_collection_enabled",
+      "category": "Backup",
+      "type": "boolean",
+      "default": true,
+      "help": "Create and integrity-check a SQLite online backup immediately before each manual or scheduled collection process. Strongly recommended."
+    },
+    {
+      "key": "backup.keep_count",
+      "category": "Backup",
+      "type": "integer",
+      "default": 14,
+      "min": 3,
+      "max": 120,
+      "help": "Number of newest verified market.db backups retained in the local backups folder. Older backup files are removed after a successful new backup."
     }
   ]
 }

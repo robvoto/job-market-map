@@ -90,3 +90,15 @@ Rob/admin: `docs/ADMIN.md`
 ## Geography and SEEK completeness
 
 Current whole-state scope is **NSW + ACT + QLD**. SEEK coverage is independent of role-keyword discovery and recursively partitions oversized result sets: state -> classification -> subclassification -> work type. Default maximum is 450 reported results per leaf. Parent completeness is based on the deduplicated union of child SEEK job IDs and fails closed when coverage is short. See `docs/SEEK_COVERAGE.md`.
+
+## Running as a local service
+
+Start once in the background:
+
+```bash
+./scripts/service.sh start
+```
+
+Admin: `http://127.0.0.1:8770/admin`
+
+The in-app scheduler defaults to 02:00 local time and is controlled from Admin. It currently schedules the proven whole-state SEEK stage only. Manual and scheduled collection share one cross-process lock, so they cannot overlap. A verified SQLite online backup is created before each collection by default. See `docs/SERVICE.md`.

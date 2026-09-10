@@ -1,5 +1,21 @@
 # Runbook
 
+## Start the Admin + in-app scheduler service
+
+```bash
+./scripts/service.sh start
+```
+
+Then open `http://127.0.0.1:8770/admin`. The service runs in the background; the UI starts/stops collection and pauses/resumes the overnight scheduler. No Windows Task Scheduler is used.
+
+```bash
+./scripts/service.sh status
+./scripts/service.sh stop
+```
+
+Before every manual/scheduled collection, a verified SQLite backup is created by default. Only one collection process can hold `data/collection.lock`.
+
+
 ## Check project
 
 ```bash

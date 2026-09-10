@@ -12,6 +12,24 @@ body{font-family:system-ui,sans-serif;max-width:1100px;margin:32px auto;padding:
 <h1>Job Market Map Admin</h1>
 <p class="muted">Runtime controls. Changes are stored in SQLite and do not require Python edits. Helper text explains what each setting changes.</p>
 <div id="status" class="status"></div>
+<h2>Service & collection</h2>
+<p class="muted">The Admin/API service stays running. These controls start/stop the collector and pause/resume the overnight scheduler. No Windows Task Scheduler is used.</p>
+<div class="setting">
+  <div id="service-summary">Loading service status…</div>
+  <div class="row" style="margin-top:10px">
+    <button id="run-now">Run collection now</button>
+    <button id="stop-collection">Stop current collection</button>
+    <button id="pause-schedule">Pause overnight schedule</button>
+    <button id="resume-schedule">Resume overnight schedule</button>
+    <button id="backup-now">Backup DB now</button>
+    <button id="refresh-service">Refresh status</button>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <label>Overnight time <input id="schedule-time" type="time" value="02:00"></label>
+    <button id="save-schedule-time">Save overnight time</button>
+  </div>
+  <div class="help">Scheduled source currently: whole-state SEEK for enabled NSW / ACT / QLD. An unfinished coverage cycle resumes; a new fresh cycle starts only after all enabled states are complete. The API service must be running overnight.</div>
+</div>
 <h2>Market scope</h2><p class="muted">Enabled whole-state geographies used by collection consumers. Current intended scope: NSW + ACT + QLD.</p><div id="geographies"></div><div id="coverage"></div>
 <div class="row"><button id="run-retention">Run retention now</button><span class="muted">Uses the current Retention settings below.</span></div>
 <h2>Settings</h2><div id="settings"></div>
@@ -23,6 +41,18 @@ body{font-family:system-ui,sans-serif;max-width:1100px;margin:32px auto;padding:
 const api='/v3';
 const status=(m,e=false)=>{const el=document.getElementById('status');el.textContent=m;el.className='status'+(e?' error':'')};
 async function j(url,opt){const r=await fetch(url,opt);const x=await r.json();if(!r.ok)throw new Error(x.detail||r.statusText);return x}
+
+async function loadService(){
+ const x=await j(api+'/admin/service/status'); const s=x.scheduler||{}, c=x.collection||{}, b=x.last_backup;
+ const last=c.latest_run||{};
+ document.getElementById('service-summary').innerHTML=`<strong>Collector:</strong> ${c.active?'RUNNING':'idle'}${c.pid?' · PID '+c.pid:''}<br><strong>Overnight scheduler:</strong> ${s.enabled?'enabled':'paused'} · service ${s.service_active?'active':'not active'} · ${s.daily_time_local||'—'} · next ${s.next_run_at||'—'}<br><strong>Last collection:</strong> ${last.status||'none'}${last.started_at?' · '+last.started_at:''}${last.message?' · '+last.message:''}<br><strong>Last backup:</strong> ${b?b.name+' · '+Math.round(b.size_bytes/1024)+' KB':'none yet'}`;
+ document.getElementById('schedule-time').value=s.daily_time_local||'02:00';
+ document.getElementById('run-now').disabled=!!c.active;
+ document.getElementById('stop-collection').disabled=!c.active;
+ document.getElementById('pause-schedule').disabled=!s.enabled;
+ document.getElementById('resume-schedule').disabled=!!s.enabled;
+}
+async function saveScheduleTime(){const value=document.getElementById('schedule-time').value;if(!/^\d{2}:\d{2}$/.test(value))throw new Error('Choose a valid time');const [hour,minute]=value.split(':').map(Number);for(const [key,val] of [['scheduler.daily_hour',hour],['scheduler.daily_minute',minute]])await j(`${api}/admin/settings/${encodeURIComponent(key)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value:val,actor:'rob-admin'})});status('Overnight time saved: '+value);await loadService();await loadSettings()}
 async function loadGeographies(){const {geographies}=await j(api+'/admin/geographies');const root=document.getElementById('geographies');root.innerHTML='';for(const g of geographies){const d=document.createElement('div');d.className='setting';d.innerHTML=`<div class="row"><input data-geo="${g.code}" type="checkbox" ${g.enabled?'checked':''}><strong>${g.code} — ${g.label}</strong></div><div class="help">${g.help_text}</div>`;root.appendChild(d)}root.onchange=async e=>{if(!e.target.dataset.geo)return;try{await j(`${api}/admin/geographies/${e.target.dataset.geo}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:e.target.checked,actor:'rob-admin'})});status('Geography updated');await loadCoverage()}catch(err){status(err.message,true)}}}
 async function loadCoverage(){const x=await j(api+'/coverage/seek');const root=document.getElementById('coverage');root.innerHTML='<h3>SEEK coverage</h3>';for(const g of x.geographies){const d=document.createElement('div');d.className='setting';d.innerHTML=`<strong>${g.geography_code}: ${g.status}</strong> · reported ${g.reported_results??'—'} · covered ${g.covered_unique_jobs} · incomplete partitions ${g.incomplete_partitions}`;root.appendChild(d)}}
 async function loadSettings(){
@@ -34,8 +64,16 @@ async function loadSettings(){
  root.onclick=async e=>{try{const key=e.target.dataset.save||e.target.dataset.reset;if(!key)return;if(e.target.dataset.reset){await j(`${api}/admin/settings/${encodeURIComponent(key)}/reset`,{method:'POST'})}else{const el=root.querySelector(`[data-key="${key}"]`);let value=el.type==='checkbox'?el.checked:Number(el.value);await j(`${api}/admin/settings/${encodeURIComponent(key)}`,{method:'PUT',headers:{'Content-Type':'application/json'},body:JSON.stringify({value,actor:'rob-admin'})})}status('Saved '+key);await loadSettings()}catch(err){status(err.message,true)}}
 }
 async function loadQueries(){const {queries}=await j(api+'/admin/queries');const root=document.getElementById('queries');root.innerHTML='';for(const q of queries){const d=document.createElement('div');d.className='query';d.innerHTML=`<input data-qid="${q.id}" type="checkbox" ${q.active?'checked':''}><div><strong>${q.query_text}</strong> <span class="muted">${q.source} · ${q.location||'anywhere'}</span></div><small>${q.registry_key||'admin query'}</small>`;root.appendChild(d)}root.onchange=async e=>{if(!e.target.dataset.qid)return;try{await j(`${api}/admin/queries/${e.target.dataset.qid}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})});status('Query updated')}catch(err){status(err.message,true)}}}
+
+document.getElementById('run-now').onclick=async()=>{try{const x=await j(api+'/admin/collection/run',{method:'POST'});status(`Collection started (PID ${x.pid}). A verified backup is created first.`);setTimeout(loadService,500)}catch(err){status(err.message,true)}};
+document.getElementById('stop-collection').onclick=async()=>{try{const x=await j(api+'/admin/collection/stop',{method:'POST'});status(x.message);await loadService()}catch(err){status(err.message,true)}};
+document.getElementById('pause-schedule').onclick=async()=>{try{await j(api+'/admin/scheduler/pause',{method:'POST'});status('Overnight schedule paused.');await loadService();await loadSettings()}catch(err){status(err.message,true)}};
+document.getElementById('resume-schedule').onclick=async()=>{try{await j(api+'/admin/scheduler/resume',{method:'POST'});status('Overnight schedule resumed.');await loadService();await loadSettings()}catch(err){status(err.message,true)}};
+document.getElementById('backup-now').onclick=async()=>{try{const x=await j(api+'/admin/backup/run',{method:'POST'});status(`Backup verified: ${x.path}`);await loadService()}catch(err){status(err.message,true)}};
+document.getElementById('refresh-service').onclick=()=>loadService().catch(err=>status(err.message,true));
+document.getElementById('save-schedule-time').onclick=()=>saveScheduleTime().catch(err=>status(err.message,true));
 document.getElementById('run-retention').onclick=async()=>{try{const x=await j(api+'/admin/retention/run',{method:'POST'});status(`Retention complete: archived ${x.jobs_archived}, removed ${x.jobs_removed}, raw captures deleted ${x.captures_deleted}`)}catch(err){status(err.message,true)}};
 document.getElementById('add-query').onclick=async()=>{try{const query_text=document.getElementById('new-query').value.trim();if(!query_text)throw new Error('Enter a query');await j(api+'/admin/queries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:document.getElementById('new-source').value,geography_code:document.getElementById('new-geo').value,query_text,location:document.getElementById('new-location').value,origins:['rob-admin'],active:true})});document.getElementById('new-query').value='';status('Query added');await loadQueries()}catch(err){status(err.message,true)}};
-loadGeographies().catch(err=>status(err.message,true));loadCoverage().catch(err=>status(err.message,true));loadSettings();loadQueries().catch(err=>status(err.message,true));
+loadService().catch(err=>status(err.message,true));loadGeographies().catch(err=>status(err.message,true));loadCoverage().catch(err=>status(err.message,true));loadSettings();loadQueries().catch(err=>status(err.message,true));
 </script>
 </body></html>

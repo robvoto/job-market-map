@@ -29,7 +29,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 3
+        assert payload["schema_version"] == 4
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
         assert "raw_card_text" not in payload["items"][0]
@@ -153,3 +153,32 @@ def test_v3_stats_is_neutral_and_does_not_require_activity_tables(
         assert body["api_version"] == "v3"
         assert "user_activity_events" not in body
         assert "activity_users" not in body
+
+
+def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        from api import main as api_main
+
+        monkeypatch.setattr(
+            api_main.PROCESS_MANAGER,
+            "status",
+            lambda: {"active": False, "pid": None, "latest_run": None, "lock": {"active": False}},
+        )
+        monkeypatch.setattr(
+            api_main.SCHEDULER,
+            "status",
+            lambda: {"service_active": True, "enabled": True, "daily_time_local": "02:00"},
+        )
+        monkeypatch.setattr(api_main, "list_backups", lambda limit=20: [])
+        monkeypatch.setattr(
+            api_main.PROCESS_MANAGER,
+            "start",
+            lambda trigger: {"started": True, "pid": 123, "trigger": trigger},
+        )
+
+        status = client.get("/v3/admin/service/status")
+        assert status.status_code == 200
+        assert status.json()["scheduler"]["daily_time_local"] == "02:00"
+        started = client.post("/v3/admin/collection/run")
+        assert started.status_code == 200
+        assert started.json() == {"started": True, "pid": 123, "trigger": "manual"}
