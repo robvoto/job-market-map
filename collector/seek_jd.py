@@ -7,7 +7,12 @@ from datetime import datetime, timedelta
 from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 
-from collector.browser_broker import BrowserBrokerError, navigate, select_page, snapshot
+from collector.browser_broker import (
+    BrowserBrokerError,
+    navigate,
+    seek_job_detail,
+    select_page,
+)
 from collector.db import connect, store_job_jd_once, update_job_source_facts
 
 SYDNEY = ZoneInfo("Australia/Sydney")
@@ -321,6 +326,21 @@ def parse_seek_detail_snapshot(
     return SeekFetchedDetail(full_description=full_description, facts=facts)
 
 
+def _posted_date_from_source(posted_at: object, posted_text: object) -> str | None:
+    raw = str(posted_at or "").strip()
+    if raw:
+        try:
+            value = raw.replace("Z", "+00:00")
+            parsed = datetime.fromisoformat(value)
+            if parsed.tzinfo is not None:
+                parsed = parsed.astimezone(SYDNEY)
+            return parsed.date().isoformat()
+        except ValueError:
+            if re.match(r"^\d{4}-\d{2}-\d{2}", raw):
+                return raw[:10]
+    return derive_posted_at(str(posted_text or ""))
+
+
 def fetch_seek_detail(
     page_id: int,
     url: str,
@@ -329,7 +349,7 @@ def fetch_seek_detail(
     timeout_seconds: float = 15.0,
     human_wait_seconds: float = HUMAN_CHECK_WAIT_SECONDS,
 ) -> SeekFetchedDetail:
-    """Read one SEEK JD from a dedicated tab in Rob's signed-in Chrome."""
+    """Read one SEEK JD + structured facts from JMM's dedicated signed-in Chrome tab."""
     expected_id = str(expected_source_job_id or _seek_job_id(url)).strip()
     navigate(page_id, _seek_fetch_url(expected_id, url))
     normal_deadline = time.monotonic() + timeout_seconds
@@ -338,29 +358,76 @@ def fetch_seek_detail(
     last_problem = "SEEK job detail did not become readable"
 
     while True:
-        snap = snapshot(page_id, verbose=True).result or {}
-        text = str(snap.get("text") or "")
-        if any(marker in text.casefold() for marker in _CHALLENGE_MARKERS):
-            if not human_mode:
-                select_page(page_id, bring_to_front=True)
-                print(
-                    f"SEEK needs human confirmation for job {expected_id}; brought JMM tab to front.",
-                    flush=True,
-                )
-                human_mode = True
-                human_deadline = time.monotonic() + human_wait_seconds
-            elif human_deadline is not None and time.monotonic() >= human_deadline:
+        raw = seek_job_detail(page_id).result
+        if not isinstance(raw, dict):
+            last_problem = "SEEK detail command returned no structured result"
+        else:
+            page_url = str(raw.get("page_url") or "").strip()
+            actual_page_id = _seek_job_id(page_url)
+            if expected_id and actual_page_id and actual_page_id != expected_id:
                 raise BrowserBrokerError(
-                    f"SEEK human-check wait expired for job {expected_id}"
+                    f"SEEK tab ownership lost: expected job {expected_id}, browser is on {page_url!r}"
                 )
-            time.sleep(1.0)
-            continue
-        try:
-            return parse_seek_detail_snapshot(snap, expected_source_job_id=expected_id)
-        except BrowserBrokerError:
-            raise
-        except SeekJDFetchError as exc:
-            last_problem = str(exc)
+
+            if bool(raw.get("human_check")):
+                last_problem = (
+                    f"SEEK needs human attention for job {expected_id or page_url}"
+                )
+                if not human_mode and time.monotonic() >= normal_deadline:
+                    select_page(page_id, bring_to_front=True)
+                    print(last_problem + "; brought JMM tab to front.", flush=True)
+                    human_mode = True
+                    human_deadline = time.monotonic() + human_wait_seconds
+                elif (
+                    human_mode
+                    and human_deadline is not None
+                    and time.monotonic() >= human_deadline
+                ):
+                    raise BrowserBrokerError(
+                        last_problem + "; human-check wait expired"
+                    )
+                time.sleep(1.0 if human_mode else 0.35)
+                continue
+
+            actual_id = str(raw.get("source_job_id") or "").strip()
+            if expected_id and actual_id != expected_id:
+                raise SeekJDFetchError(
+                    f"SEEK detail identity mismatch: expected {expected_id!r}, got {actual_id!r}"
+                )
+            description = (
+                str(raw.get("full_description") or "").replace("\xa0", " ").strip()
+            )
+            if len(description) < 80:
+                last_problem = "SEEK returned an implausibly short JD"
+            else:
+                facts: dict[str, object] = {"source_job_id": actual_id}
+                for key in (
+                    "title",
+                    "employer",
+                    "location",
+                    "classification_text",
+                    "subclassification_text",
+                    "employment_type",
+                    "employment_basis",
+                    "workplace_type",
+                    "salary_text",
+                    "expires_at",
+                    "source_status",
+                    "easy_apply",
+                    "apply_method",
+                ):
+                    value = raw.get(key)
+                    if isinstance(value, str):
+                        value = value.strip()
+                    if value not in (None, ""):
+                        facts[key] = value
+                posted_at = _posted_date_from_source(
+                    raw.get("posted_at"), raw.get("posted_text")
+                )
+                if posted_at:
+                    facts["posted_at"] = posted_at
+                return SeekFetchedDetail(full_description=description, facts=facts)
+
         if not human_mode and time.monotonic() >= normal_deadline:
             raise SeekJDFetchError(last_problem)
         time.sleep(0.35)
