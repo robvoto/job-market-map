@@ -253,3 +253,79 @@ def test_known_seek_card_is_not_reingested_on_daily_coverage(tmp_path, monkeypat
             (partition_id,),
         ).fetchone()
     assert membership[0] == existing.job_id
+
+
+def test_enrichment_honours_max_attempts(tmp_path, monkeypatch):
+    from collector import db, seek_jd
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(seek_jd, "connect", db.connect)
+    db.init_db()
+    with db.connect() as conn:
+        partition_id = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,max_results_threshold,first_seen_at,updated_at
+            ) VALUES('ACT',NULL,'state','ACT',
+                'https://au.seek.com/jobs/in-Australian-Capital-Territory-ACT?daterange=3',
+                'COMPLETE',450,'x','x')"""
+        ).lastrowid
+        for index in range(12):
+            source_id = str(90000000 + index)
+            job_id = conn.execute(
+                "INSERT INTO jobs(source,source_job_id,canonical_url,identity_key) VALUES('seek',?,?,?)",
+                (
+                    source_id,
+                    f"https://au.seek.com/job/{source_id}",
+                    f"seek:id:{source_id}",
+                ),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+                (partition_id, job_id, "x"),
+            )
+
+    attempts = []
+
+    def fake_fetch(_page_id, url, *, expected_source_job_id):
+        attempts.append(expected_source_job_id)
+        return seek_jd.SeekFetchedDetail(
+            full_description=("Valid JD text " * 10).strip(),
+            facts={"source_job_id": expected_source_job_id},
+        )
+
+    monkeypatch.setattr(seek_jd, "fetch_seek_detail", fake_fetch)
+    monkeypatch.setattr(seek_jd, "update_job_source_facts", lambda *_a, **_k: None)
+    monkeypatch.setattr(seek_jd, "store_job_jd_once", lambda *_a, **_k: None)
+
+    result = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+        max_attempts=10,
+    )
+
+    assert result.attempted == 10
+    assert result.stored == 10
+    assert len(attempts) == 10
+    assert result.remaining == 2
+
+
+def test_security_job_text_is_not_human_check():
+    from collector.seek_jd import parse_seek_detail_snapshot
+
+    snap = {
+        "url": "https://au.seek.com/job/94535996",
+        "text": """Security Clearance Administration Officer
+Airservices Australia
+Canberra ACT
+Contract/Temp
+Save
+We coordinate personnel security checks, security clearances and background checking processes for employees and contractors. This is a legitimate job description and is deliberately longer than eighty characters.
+Employer questions
+""",
+        "elements": [],
+    }
+    detail = parse_seek_detail_snapshot(snap, expected_source_job_id="94535996")
+    assert "security checks" in detail.full_description

@@ -105,7 +105,7 @@ _SEEK_DETAIL_JS = r"""
     'confirm you are human',
     'verify you are human',
     'just a moment',
-    'security check',
+    'performing security verification',
     'enable javascript and cookies to continue',
     'access denied'
   ].some(x => low.includes(x) || document.title.toLowerCase().includes(x));

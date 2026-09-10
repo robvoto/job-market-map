@@ -23,7 +23,7 @@ _CHALLENGE_MARKERS = (
     "confirm you are human",
     "verify you are human",
     "captcha",
-    "security check",
+    "performing security verification",
     "enable javascript and cookies to continue",
     "access denied",
 )
@@ -409,6 +409,7 @@ def enrich_seek_coverage_jds(
     should_stop,
     deadline_reached,
     include_existing_unfetched: bool = False,
+    max_attempts: int | None = None,
 ) -> SeekJDEnrichmentResult:
     rows = _merge_candidates(
         coverage_seek_jobs(codes=codes, days=days),
@@ -425,6 +426,8 @@ def enrich_seek_coverage_jds(
         if job_id in completed_ids:
             continue
         if should_stop() or deadline_reached():
+            break
+        if max_attempts is not None and attempted >= max_attempts:
             break
         attempted += 1
         try:

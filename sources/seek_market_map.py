@@ -38,7 +38,7 @@ CHALLENGE_TEXT = (
     "verification successful. waiting for www.seek.com.au to respond",
     "__cf_chl",
     "captcha",
-    "security check",
+    "performing security verification",
     "enable javascript and cookies to continue",
 )
 HUMAN_CHECK_WAIT_SECONDS = 900.0
