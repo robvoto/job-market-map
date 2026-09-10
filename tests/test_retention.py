@@ -91,3 +91,41 @@ def test_default_retention_preserves_historical_evidence(tmp_path, monkeypatch):
     assert job["teaser_text"] == "possible scam wording"
     assert job["raw_card_text"] == "original raw evidence"
     assert capture[0] == "original capture evidence"
+
+
+def test_permanent_jd_fetch_registry_survives_job_removal(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    from collector import retention
+
+    monkeypatch.setattr(retention, "connect", db.connect)
+    monkeypatch.setattr(retention, "init_db", db.init_db)
+    db.init_db()
+    now = datetime(2026, 9, 10, tzinfo=UTC)
+    old = (now - timedelta(days=200)).isoformat(timespec="seconds")
+    with db.connect() as conn:
+        job_id = conn.execute(
+            """INSERT INTO jobs(source,source_job_id,canonical_url,title,first_seen_at,last_seen_at)
+               VALUES('seek','perm1','https://seek.test/perm1','Role',?,?,?)""".replace(",?,?,?)", ",?,?)"),
+            (old, old),
+        ).lastrowid
+
+    db.store_job_jd_once(
+        job_id,
+        full_description="Permanent fetch memory must outlive the bulky JD record.",
+        jd_fetched_at=old,
+        jd_source="seek_job_page",
+    )
+    result = retention.apply_retention(
+        archive_after_days=30,
+        remove_archived_after_days=120,
+        archive_jobs_enabled=True,
+        remove_archived_jobs_enabled=True,
+        now=now,
+    )
+    assert result.jobs_removed == 1
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0] == 0
+        marker = conn.execute(
+            "SELECT identity_key FROM jd_fetch_registry WHERE identity_key='seek:id:perm1'"
+        ).fetchone()
+    assert marker is not None

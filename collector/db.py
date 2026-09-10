@@ -27,6 +27,72 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def get_job_by_source_id(source: str, source_job_id: str) -> dict[str, object] | None:
+    """Return an active canonical job by trustworthy source ID."""
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM jobs WHERE source=? AND source_job_id=?",
+            (str(source).strip().casefold(), str(source_job_id).strip()),
+        ).fetchone()
+    return dict(row) if row else None
+
+
+def job_jd_fetch_completed(job_id: int) -> bool:
+    """Return whether this canonical identity has ever had a successful JD fetch."""
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT 1
+              FROM jobs j
+              JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
+             WHERE j.id=?
+            """,
+            (job_id,),
+        ).fetchone()
+    return row is not None
+
+
+def _record_successful_jd_fetch(conn: sqlite3.Connection, row: sqlite3.Row) -> None:
+    conn.execute(
+        """
+        INSERT INTO jd_fetch_registry(
+            identity_key,source,source_job_id,canonical_url,fetched_at,jd_source
+        ) VALUES(?,?,?,?,?,?)
+        ON CONFLICT(identity_key) DO NOTHING
+        """,
+        (
+            row["identity_key"],
+            row["source"],
+            row["source_job_id"],
+            row["canonical_url"],
+            row["jd_fetched_at"],
+            row["jd_source"],
+        ),
+    )
+
+
+def _backfill_jd_fetch_registry(conn: sqlite3.Connection) -> None:
+    """Preserve permanent fetch memory for JDs stored before the registry existed."""
+    # This migration is only needed once. Avoid rescanning all jobs on every
+    # store_job_jd_once() call during a large initial enrichment run.
+    if conn.execute("SELECT 1 FROM jd_fetch_registry LIMIT 1").fetchone():
+        return
+    rows = conn.execute(
+        """
+        SELECT identity_key,source,source_job_id,canonical_url,jd_fetched_at,jd_source
+          FROM jobs
+         WHERE identity_key IS NOT NULL AND trim(identity_key)<>''
+           AND full_description IS NOT NULL AND trim(full_description)<>''
+           AND jd_fetched_at IS NOT NULL AND trim(jd_fetched_at)<>''
+           AND jd_source IS NOT NULL AND trim(jd_source)<>''
+        """
+    ).fetchall()
+    for row in rows:
+        _record_successful_jd_fetch(conn, row)
+
+
 def get_job_jd(job_id: int) -> dict[str, object] | None:
     """Return the one canonical neutral JD for a job, if JMM has it."""
     init_db()
@@ -62,13 +128,20 @@ def store_job_jd_once(
     init_db()
     with connect() as conn:
         existing = conn.execute(
-            "SELECT id, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
+            "SELECT id, identity_key, source, source_job_id, canonical_url, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
             (job_id,),
         ).fetchone()
         if existing is None:
             raise KeyError(f"job {job_id} not found")
         if str(existing["full_description"] or "").strip():
-            return dict(existing)
+            if existing["jd_fetched_at"] and existing["jd_source"]:
+                _record_successful_jd_fetch(conn, existing)
+            return {
+                "id": existing["id"],
+                "full_description": existing["full_description"],
+                "jd_fetched_at": existing["jd_fetched_at"],
+                "jd_source": existing["jd_source"],
+            }
 
         conn.execute(
             """
@@ -80,10 +153,16 @@ def store_job_jd_once(
             (full_description, fetched_at, source, job_id),
         )
         stored = conn.execute(
-            "SELECT id, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
+            "SELECT id, identity_key, source, source_job_id, canonical_url, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
             (job_id,),
         ).fetchone()
-    return dict(stored)
+        _record_successful_jd_fetch(conn, stored)
+    return {
+        "id": stored["id"],
+        "full_description": stored["full_description"],
+        "jd_fetched_at": stored["jd_fetched_at"],
+        "jd_source": stored["jd_source"],
+    }
 
 
 def _table_exists(conn: sqlite3.Connection, table: str) -> bool:
@@ -256,6 +335,7 @@ def init_db() -> None:
 
         _backfill_identity(conn, "jobs")
         _backfill_identity(conn, "job_tombstones")
+        _backfill_jd_fetch_registry(conn)
         _remove_obsolete_personal_activity_scaffolding(conn)
         _ensure_identity_triggers(conn)
 

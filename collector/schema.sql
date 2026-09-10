@@ -40,6 +40,18 @@ CREATE TABLE IF NOT EXISTS jobs (
     UNIQUE(source, canonical_url)
 );
 
+CREATE TABLE IF NOT EXISTS jd_fetch_registry (
+    identity_key TEXT PRIMARY KEY,
+    source TEXT NOT NULL,
+    source_job_id TEXT,
+    canonical_url TEXT NOT NULL,
+    fetched_at TEXT NOT NULL,
+    jd_source TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_jd_fetch_registry_source_id
+    ON jd_fetch_registry(source, source_job_id);
+
 CREATE TABLE IF NOT EXISTS card_captures (
     id INTEGER PRIMARY KEY,
     job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,

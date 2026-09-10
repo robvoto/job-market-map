@@ -53,7 +53,7 @@ def test_hot_get_setting_does_not_reseed_existing_catalog(tmp_path, monkeypatch)
         return original()
 
     monkeypatch.setattr(settings, "seed_settings", counted_seed)
-    assert settings.get_setting("collection.default_freshness_days") == 7
+    assert settings.get_setting("collection.default_freshness_days") == 1
     assert calls["count"] == 0
 
 

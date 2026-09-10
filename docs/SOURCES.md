@@ -2,11 +2,11 @@
 
 ## SEEK
 
-Status: card-only extraction implemented.
+Status: result-card discovery plus write-once JD enrichment implemented.
 
 Mechanics:
 - query encoded in SEEK search path;
-- `daterange=7` and listed-date ordering supported;
+- one-off first live load uses `daterange=3`; normal ongoing discovery uses `daterange=1` with listed-date ordering;
 - one page currently exposes about 32 cards in a Human MCP snapshot;
 - pagination uses `page=N`;
 - collector validates source job link order against repeated card blocks;
@@ -15,7 +15,7 @@ Mechanics:
 
 Captured card data currently includes title, employer, source ID, URL, posted text, employment type, location, work arrangement, visible salary, teaser, classification/subclassification, selected card tags and raw card evidence.
 
-Individual JDs are not opened.
+Known SEEK IDs are linked to current coverage without full re-ingest. If a canonical SEEK identity has no successful JD-fetch marker, its job page is opened once, the neutral JD is stored, and the permanent marker prevents normal future refetches.
 
 ## LinkedIn
 

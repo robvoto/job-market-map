@@ -72,10 +72,10 @@ The port itself is an admin setting and takes effect on the next API start.
 - one-off JMM-006 bootstrap from trustworthy existing Job Hunter neutral job/JD evidence: implemented
 - opt-in retention controls with preserve-evidence defaults: implemented
 - 109 neutral query specs expanded across NSW/ACT/QLD (684 seeded source-geography searches)
-- SEEK card-only parser + recursive whole-state NSW/ACT/QLD partition coverage: implemented
+- SEEK recent-window discovery + recursive whole-state NSW/ACT/QLD coverage + write-once JD enrichment: implemented
 - LinkedIn card-only parser + resumable arbitrary-offset traversal: implemented
 - APSJobs neutral collector: pending
-- individual JD collection: deliberately outside the neutral mapping stage
+- permanent SEEK JD fetch memory: implemented; successfully fetched jobs are not reopened on later daily runs
 
 Measured 10 Sep 2026: one SEEK `technical implementation` search exposed **220 cards over seven populated pages**, with **0 individual JD opens**. LinkedIn card collection is resumable because large virtualised result sets exceed one bounded execution. See `docs/BENCHMARKS.md`.
 

@@ -53,10 +53,10 @@
       "key": "collection.default_freshness_days",
       "category": "Collection",
       "type": "integer",
-      "default": 7,
+      "default": 1,
       "min": 1,
       "max": 30,
-      "help": "Default source freshness horizon for market collection when a run does not explicitly supply one."
+      "help": "Normal ongoing SEEK freshness horizon. Keep at 1 day for fast daily discovery; one-off bootstrap runs may explicitly request a wider window."
     },
     {
       "key": "collection.seek_page_load_seconds",

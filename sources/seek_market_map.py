@@ -258,13 +258,37 @@ def _collect_leaf(
             for card in cards
             if card.source_job_id and card.source_job_id not in seen
         ]
+        source_ids = [str(card.source_job_id) for card in new_cards if card.source_job_id]
+        existing_by_source_id: dict[str, int] = {}
+        if source_ids:
+            placeholders = ",".join("?" for _ in source_ids)
+            with connect() as conn:
+                existing_by_source_id = {
+                    str(row["source_job_id"]): int(row["id"])
+                    for row in conn.execute(
+                        f"SELECT id,source_job_id FROM jobs WHERE source='seek' AND source_job_id IN ({placeholders})",
+                        source_ids,
+                    )
+                }
+
         for card in new_cards:
-            seen.add(card.source_job_id or card.canonical_url)
-            result = ingest_card(card)
+            source_id = str(card.source_job_id)
+            seen.add(source_id)
+            job_id = existing_by_source_id.get(source_id)
+            if job_id is None:
+                job_id = ingest_card(card).job_id
+            else:
+                # Daily scans only need to prove this known identity is still present.
+                # Avoid creating another raw card capture or rerunning duplicate work.
+                with connect() as conn:
+                    conn.execute(
+                        "UPDATE jobs SET last_seen_at=?, archived=0, compacted_at=NULL WHERE id=?",
+                        (_now(), job_id),
+                    )
             with connect() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
-                    (partition_id, result.job_id, _now()),
+                    (partition_id, job_id, _now()),
                 )
         if len(seen) + tolerance >= reported:
             return "COMPLETE", len(seen)

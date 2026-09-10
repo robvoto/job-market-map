@@ -117,6 +117,7 @@ def run_seek_cycle(
     *,
     page_id: int,
     codes: list[str],
+    days: int | None = None,
     should_stop: Callable[[], bool],
     deadline_reached: Callable[[], bool],
 ) -> SeekCycleResult:
@@ -139,6 +140,7 @@ def run_seek_cycle(
             result = collect_seek_state(
                 code,
                 page_id=page_id,
+                days=days,
                 max_partitions=1,
                 resume=True,
             )

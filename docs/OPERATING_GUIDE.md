@@ -88,3 +88,14 @@ For signed-in sources, use HUMAN_MCP_SECURE and Rob's existing signed-in Chrome.
 ## Campaign browser ownership
 
 A full campaign opens **one new workflow-owned tab inside the already-running Rob Chrome profile** and reuses that page across source/query steps. It must not create one Chrome profile, browser process, or tab per job/query. Standalone diagnostics may open one dedicated tab for that one diagnostic.
+## SEEK daily collection
+
+Normal ongoing SEEK collection uses the latest **1 day** only. Known SEEK source job IDs are recognised from JMM and do not go through full card ingestion or JD fetching again. Only identities without a successful permanent JD-fetch marker are eligible for JD acquisition.
+
+The one-off first full-evidence load is explicitly wider and does not change the normal default:
+
+```bash
+uv run python -m scripts.run_collection_cycle --trigger manual --days 3 --max-runtime-minutes 0
+```
+
+After that, normal scheduler/Admin/manual runs use the configured freshness setting; the default is 1 day.

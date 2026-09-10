@@ -20,6 +20,7 @@ def test_schema_is_neutral_and_keeps_consumer_checkpoints():
         "queries",
         "job_query_hits",
         "consumer_checkpoints",
+        "jd_fetch_registry",
     } <= tables
     assert "user_job_activity_events" not in tables
     assert "user_job_activity_current" not in tables

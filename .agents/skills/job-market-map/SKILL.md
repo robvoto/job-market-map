@@ -61,20 +61,20 @@ Target persistence on `jobs`:
 - `jd_source`
 
 Behaviour:
-- if JMM already has `full_description`, reuse it;
-- otherwise fetch the JD once, store it in JMM, and reuse it thereafter;
-- broad market mapping remains card-only and must not open every JD;
+- a successful JD fetch is remembered permanently by canonical identity, independently of whether bulky JD text is later retained;
+- if that permanent marker exists, never fetch that source job again during normal collection;
+- if the marker is absent, fetch the JD once, store it in JMM, record the permanent marker, and reuse it thereafter;
+- the one-off first SEEK load uses a 3-day window; normal ongoing SEEK discovery uses a 1-day window;
 - Job Hunter reads the neutral JD from JMM for analysis and must not permanently maintain another duplicate raw JD copy.
 
-## Collection order
-1. Search result cards only.
-2. Parse all reliable card-visible fields.
-3. Preserve raw card evidence.
-4. Same-source identity upsert.
-5. Generate non-destructive duplicate evidence links.
-6. Record query/partition provenance.
-7. Do not open JD.
-8. Do not score fit.
+## SEEK collection order
+1. Read the configured recent SEEK result window (normally 1 day; first live load explicitly 3 days).
+2. Parse reliable card-visible identity/evidence.
+3. For a known source job ID, record current coverage/last-seen only; do not re-ingest the full card or reopen its JD.
+4. For a new job, create the canonical market record and preserve its source card evidence.
+5. If the permanent JD-fetch marker is absent, open the job page once, extract the neutral JD, store it, and record successful fetch memory.
+6. Generate non-destructive duplicate evidence links and query/partition provenance.
+7. Do not score fit or add personal activity.
 
 Unknown beats inference. Capture rich card evidence because it materially improves cross-source duplicate detection.
 
