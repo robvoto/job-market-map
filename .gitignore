@@ -6,3 +6,5 @@ data/*.db-shm
 data/*.db-wal
 exports/*
 !exports/.gitkeep
+
+data/*.db

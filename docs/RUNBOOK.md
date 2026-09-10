@@ -1,0 +1,56 @@
+# Runbook
+
+## Check project
+
+```bash
+cd /home/robvoto/projects/job-market-map
+uv run pytest -q
+```
+
+## Initialise / migrate DB
+
+```bash
+uv run python collector/db.py
+```
+
+## Sync discovery registry
+
+```bash
+uv run python -m collector.query_registry
+```
+
+## Run one exhaustive SEEK query
+
+```bash
+uv run python -m scripts.run_seek_query "technical implementation" --location "Sydney NSW" --days 7
+```
+
+The SEEK query should finish only on a verified terminal/no-new-result state. A safety-page limit is a failure, not completion.
+
+## Run/resume LinkedIn
+
+```bash
+uv run python -m scripts.run_linkedin_chunk "technical implementation" --location "Sydney NSW" --days 7 --max-offsets 8
+```
+
+Do not add `--reset` during normal continuation. Reset is for an intentional re-crawl from offset zero.
+
+## Start local API
+
+```bash
+./scripts/start-api.sh
+```
+
+## Compact stale data
+
+```bash
+uv run python -m collector.retention
+```
+
+## Browser prerequisite
+
+The canonical Human MCP/browser broker should already be running. Do not launch another MCP server. If browser access fails, use the Human MCP health/recovery tooling rather than a new Chrome profile.
+
+## Failure rule
+
+A collection failure must leave prior successful ingests intact and enough cursor/run state to diagnose/resume. Never convert a parser/browser failure into a successful `COMPLETE` run just to keep the campaign moving.

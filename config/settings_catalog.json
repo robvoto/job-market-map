@@ -1,0 +1,154 @@
+{
+  "version": 1,
+  "settings": [
+    {
+      "key": "retention.raw_capture_days",
+      "category": "Retention",
+      "type": "integer",
+      "default": 30,
+      "min": 1,
+      "max": 365,
+      "help": "Keep repeated raw card-capture evidence for this many days. Older captures are deleted even when the canonical job identity is retained."
+    },
+    {
+      "key": "retention.archive_after_days",
+      "category": "Retention",
+      "type": "integer",
+      "default": 30,
+      "min": 1,
+      "max": 730,
+      "help": "Archive stale jobs after this many days since last seen. Archiving removes bulky current card text for jobs with no Rob status but keeps searchable identity/history."
+    },
+    {
+      "key": "retention.remove_archived_after_days",
+      "category": "Retention",
+      "type": "integer",
+      "default": 120,
+      "min": 2,
+      "max": 3650,
+      "help": "After this many days since last seen, remove an unimportant archived job's detailed row and retain only a small tombstone identity so rediscovery is still recognised as previously seen. Must be greater than archive_after_days."
+    },
+    {
+      "key": "retention.preserve_status_jobs_forever",
+      "category": "Retention",
+      "type": "boolean",
+      "default": true,
+      "help": "Never automatically remove detailed job rows that have been shown, reviewed, applied, rejected or dismissed."
+    },
+    {
+      "key": "collection.default_freshness_days",
+      "category": "Collection",
+      "type": "integer",
+      "default": 7,
+      "min": 1,
+      "max": 30,
+      "help": "Default source freshness horizon for market collection when a run does not explicitly supply one."
+    },
+    {
+      "key": "collection.seek_page_load_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 2.0,
+      "min": 0,
+      "max": 15,
+      "help": "Initial SEEK navigation settling time before card-state polling begins."
+    },
+    {
+      "key": "collection.seek_parse_wait_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 15.0,
+      "min": 2,
+      "max": 60,
+      "help": "Maximum bounded wait for a SEEK page to become a valid card page or explicit terminal page."
+    },
+    {
+      "key": "collection.seek_safety_page_limit",
+      "category": "Collection",
+      "type": "integer",
+      "default": 250,
+      "min": 2,
+      "max": 1000,
+      "help": "Runaway-loop protection only. Hitting this limit is a FAILED/incomplete run, never successful exhaustion."
+    },
+    {
+      "key": "collection.linkedin_initial_wait_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 2.0,
+      "min": 0,
+      "max": 15,
+      "help": "Initial LinkedIn navigation settling time before card-state polling begins."
+    },
+    {
+      "key": "collection.linkedin_parse_wait_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 12.0,
+      "min": 2,
+      "max": 60,
+      "help": "Maximum bounded wait for a LinkedIn offset to expose parseable result cards."
+    },
+    {
+      "key": "collection.linkedin_chunk_offsets",
+      "category": "Collection",
+      "type": "integer",
+      "default": 8,
+      "min": 1,
+      "max": 50,
+      "help": "Number of LinkedIn result offsets to process per resumable chunk. This bounds one agent call without limiting total market coverage."
+    },
+    {
+      "key": "collection.campaign_query_chunk_size",
+      "category": "Collection",
+      "type": "integer",
+      "default": 10,
+      "min": 1,
+      "max": 250,
+      "help": "Number of source/query combinations processed per campaign invocation. This is a resumable execution chunk, not a market-coverage limit."
+    },
+    {
+      "key": "dedupe.near_match_min_score",
+      "category": "Duplicates",
+      "type": "number",
+      "default": 0.92,
+      "min": 0.75,
+      "max": 1.0,
+      "help": "Minimum evidence score for recording a non-destructive possible duplicate link between two separately sourced job rows."
+    },
+    {
+      "key": "dedupe.enable_near_match",
+      "category": "Duplicates",
+      "type": "boolean",
+      "default": true,
+      "help": "Allow title/employer/location plus rich card evidence to create possible-duplicate links. Exact same-source IDs remain deterministic regardless of this setting."
+    },
+    {
+      "key": "api.default_page_size",
+      "category": "API",
+      "type": "integer",
+      "default": 100,
+      "min": 10,
+      "max": 1000,
+      "help": "Default number of jobs returned by feed/search endpoints when a consumer does not specify a limit."
+    },
+    {
+      "key": "api.max_page_size",
+      "category": "API",
+      "type": "integer",
+      "default": 1000,
+      "min": 100,
+      "max": 5000,
+      "help": "Maximum jobs returned in a single API page to keep consumer calls bounded."
+    },
+    {
+      "key": "api.port",
+      "category": "API",
+      "type": "integer",
+      "default": 8770,
+      "min": 1024,
+      "max": 65535,
+      "help": "Local-only API listen port used by the start script. Change here rather than editing Python."
+    }
+  ]
+}

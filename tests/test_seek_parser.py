@@ -1,0 +1,41 @@
+import json
+from pathlib import Path
+
+import pytest
+
+from sources.seek import SeekParseError, parse_seek_snapshot
+
+
+def test_real_benchmark_snapshot_parses_all_seek_cards():
+    snapshot = json.loads(
+        Path("tests/fixtures/seek_snapshot.json").read_text(encoding="utf-8")
+    )
+    cards = parse_seek_snapshot(
+        snapshot, query_text="technical implementation", query_location="Sydney NSW"
+    )
+    assert len(cards) == 32
+    assert cards[0].source_job_id == "94548768"
+    assert cards[0].title == "M365 Solution Consultant"
+    assert cards[0].employer == "Green Light PS Pty Ltd"
+    assert cards[0].employment_type == "Contract/Temp"
+    assert cards[0].workplace_type == "Hybrid"
+    assert cards[0].salary_text == "Competitive"
+    assert "Strong applicant" in (cards[0].raw_json or {})["card_tags"]
+
+    fde = next(
+        card for card in cards if card.title == "Forward Deployed Engineer, Scams"
+    )
+    assert fde.source_job_id == "94544633"
+    assert fde.employer == "Australian Financial Complaints Authority Limited"
+    assert fde.classification_text == "Information & Communication Technology"
+    assert fde.subclassification_text == "Engineering - Software"
+    assert "software, AI, automation and data solutions" in (fde.teaser_text or "")
+
+
+def test_seek_parser_fails_on_link_block_count_mismatch():
+    snapshot = {
+        "text": "Listed one hour ago\nRole\nat\nEmployer\nThis is a Full time job\nSydney NSW\n1h ago",
+        "elements": [],
+    }
+    with pytest.raises(SeekParseError, match="no parseable cards"):
+        parse_seek_snapshot(snapshot, query_text="x", query_location="Sydney")
