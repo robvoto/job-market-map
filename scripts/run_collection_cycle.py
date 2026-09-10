@@ -7,7 +7,7 @@ from dataclasses import asdict
 from threading import Event
 
 from collector.backup import create_backup
-from collector.browser_broker import open_tab
+from collector.browser_broker import close_browser, open_tab
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.seek_cycle import (
     all_states_complete,
@@ -198,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
         finally:
             print(f"Collection failed: {exc}", flush=True)
         return 1
+    finally:
+        close_browser()
 
 
 if __name__ == "__main__":

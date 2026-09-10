@@ -5,14 +5,15 @@ def test_browser_broker_error_is_runtime_error():
     assert issubclass(BrowserBrokerError, RuntimeError)
 
 
-def test_broker_source_uses_base64_response_transport():
+def test_browser_uses_visible_persistent_jmm_profile():
     import inspect
 
     import collector.browser_broker as broker
 
-    source = inspect.getsource(broker.browser_command)
-    assert "ToBase64String" in source
-    assert "b64decode" in source
+    source = inspect.getsource(broker.start_browser)
+    assert "launch_persistent_context" in source
+    assert "headless=False" in source
+    assert broker.SEEK_PLAYWRIGHT_USER_DATA_DIR.name == "playwright_jmm_seek_user_data"
 
 
 def test_snapshot_retries_one_broker_timeout(monkeypatch):

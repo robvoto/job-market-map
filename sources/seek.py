@@ -254,3 +254,66 @@ def seek_refinement_links(
             seen.add(href)
             rows.append({"level": child_level, "label": label, "url": href})
     return rows
+
+
+def parse_seek_dom_cards(
+    cards: list[dict[str, Any]],
+    *,
+    query_text: str | None,
+    query_location: str | None,
+    page_number: int = 1,
+    captured_at: str | None = None,
+    geography_code: str | None = None,
+) -> list[CardObservation]:
+    """Build neutral observations from SEEK's stable job-card DOM selectors."""
+    observations: list[CardObservation] = []
+    for rank, card in enumerate(cards, start=1):
+        source_job_id = str(card.get("source_job_id") or "").strip()
+        url = str(card.get("canonical_url") or "").strip()
+        title = str(card.get("title") or "").strip()
+        if not source_job_id or not JOB_ID_RE.search(url) or not title:
+            raise SeekParseError(f"invalid SEEK DOM card at rank {rank}: {card!r}")
+        observations.append(
+            CardObservation(
+                source="seek",
+                source_job_id=source_job_id,
+                canonical_url=url,
+                title=title,
+                employer=str(card.get("employer") or "").strip() or None,
+                location=str(card.get("location") or "").strip() or None,
+                geography_code=geography_code,
+                salary_text=str(card.get("salary_text") or "").strip() or None,
+                employment_type=str(card.get("employment_type") or "").strip() or None,
+                workplace_type=str(card.get("workplace_type") or "").strip() or None,
+                posted_text=str(card.get("posted_text") or "").strip() or None,
+                teaser_text=str(card.get("teaser_text") or "").strip() or None,
+                raw_card_text=str(card.get("raw_card_text") or "").strip() or None,
+                classification_text=str(card.get("classification_text") or "").strip()
+                or None,
+                subclassification_text=str(
+                    card.get("subclassification_text") or ""
+                ).strip()
+                or None,
+                card_tags=list(card.get("card_tags") or []),
+                raw_json={
+                    "classification_text": str(
+                        card.get("classification_text") or ""
+                    ).strip()
+                    or None,
+                    "subclassification_text": str(
+                        card.get("subclassification_text") or ""
+                    ).strip()
+                    or None,
+                    "card_tags": list(card.get("card_tags") or []),
+                    "recruiter": str(card.get("recruiter") or "").strip() or None,
+                },
+                query_text=query_text,
+                query_location=query_location,
+                rank=rank,
+                page_number=page_number,
+                captured_at=captured_at,
+            )
+        )
+    if not observations:
+        raise SeekParseError("SEEK DOM exposed no job cards")
+    return observations

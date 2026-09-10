@@ -83,7 +83,7 @@ Completed partitions are skipped without consuming the budget. Already-split par
 
 `--max-partitions` limits one execution window; it is **not** a coverage limit. Use `--fresh` only for an intentional re-crawl, not normal continuation.
 
-The runner uses one workflow-owned tab inside Rob's existing Chrome for the invocation.
+The runner uses JMM's own visible persistent Playwright Chromium profile (`data/playwright_jmm_seek_user_data`). It is separate from Rob's normal Chrome and from Job Hunter's SEEK profile; the same JMM browser session is reused for the invocation and can stay visible for human verification.
 
 Selected states:
 

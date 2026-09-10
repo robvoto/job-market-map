@@ -89,11 +89,11 @@ JD enrichment is a separate operation. When a job page is deliberately opened fo
 
 ## Browser rule
 
-For signed-in sources, use HUMAN_MCP_SECURE and Rob's existing signed-in Chrome. One mapping run owns one browser tab/session. Do not start another Human MCP server or another Chrome profile merely because other agents are active.
+JMM collection uses its own visible persistent Playwright Chromium profile at `data/playwright_jmm_seek_user_data`. It must not reuse Rob's normal Chrome or Job Hunter's SEEK profile. One collection run owns/reuses the JMM browser session; genuine human verification is completed in that visible window and the run resumes.
 
 ## Campaign browser ownership
 
-A full campaign opens **one new workflow-owned tab inside the already-running Rob Chrome profile** and reuses that page across source/query steps. It must not create one Chrome profile, browser process, or tab per job/query. Standalone diagnostics may open one dedicated tab for that one diagnostic.
+A full campaign starts/reuses **one JMM-owned persistent Playwright browser context** and reuses a small number of workflow pages across source/query steps. It must not create a browser/profile per job or query. The JMM profile is isolated from both Rob's normal Chrome and Job Hunter's browser profile.
 ## SEEK daily collection
 
 Normal ongoing SEEK collection uses the latest **1 day** only. Known SEEK source job IDs are recognised from JMM and do not go through full card ingestion or JD fetching again. Only identities without a successful permanent JD-fetch marker are eligible for JD acquisition.

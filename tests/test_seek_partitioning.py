@@ -341,7 +341,12 @@ def test_resume_split_parent_processes_child_without_consuming_parent_budget(
     )
     monkeypatch.setattr(
         market,
-        "parse_seek_snapshot",
+        "seek_cards",
+        lambda *_a, **_k: type("Response", (), {"result": [{}]})(),
+    )
+    monkeypatch.setattr(
+        market,
+        "parse_seek_dom_cards",
         lambda *_a, **_k: [
             type(
                 "Card",

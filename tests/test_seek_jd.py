@@ -12,10 +12,7 @@ def _wire(tmp_path, monkeypatch):
     return seek_jd
 
 
-def test_detail_snapshot_calculates_date_only_and_strips_personal_match():
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
-
+def test_detail_snapshot_keeps_relative_posted_text_noncanonical_and_strips_personal_match():
     from collector.seek_jd import parse_seek_detail_snapshot
 
     snap = {
@@ -45,15 +42,11 @@ Your application will include questions.
 """,
         "elements": [{"text": "Quick apply", "ariaLabel": "Apply for role"}],
     }
-    detail = parse_seek_detail_snapshot(
-        snap,
-        expected_source_job_id="12345678",
-        reference=datetime(2026, 9, 11, 0, 30, tzinfo=ZoneInfo("Australia/Sydney")),
-    )
+    detail = parse_seek_detail_snapshot(snap, expected_source_job_id="12345678")
 
-    assert detail.facts["posted_at"] == "2026-09-10"
+    assert "posted_at" not in detail.facts
+    assert "employment_basis" not in detail.facts
     assert detail.facts["employment_type"] == "Contract/Temp"
-    assert detail.facts["employment_basis"] == "Contract/Temp"
     assert detail.facts["workplace_type"] == "Hybrid"
     assert (
         detail.facts["classification_text"] == "Information & Communication Technology"
@@ -64,37 +57,33 @@ Your application will include questions.
     assert "Employer questions" not in detail.full_description
 
 
-def test_posted_date_uses_relative_duration_across_midnight():
-    from datetime import datetime
-    from zoneinfo import ZoneInfo
+def test_fetch_detail_accepts_only_exact_structured_posted_timestamp(monkeypatch):
+    from collector import seek_jd
+    from collector.browser_broker import BrokerResponse
 
-    from collector.seek_jd import derive_posted_at
-
-    ref = datetime(2026, 9, 11, 0, 30, tzinfo=ZoneInfo("Australia/Sydney"))
-    assert derive_posted_at("Posted 1d ago", reference=ref) == "2026-09-10"
-    assert derive_posted_at("Posted 2h ago", reference=ref) == "2026-09-10"
-    assert derive_posted_at("Listed four hours ago", reference=ref) == "2026-09-10"
-    assert derive_posted_at("Listed ten minutes ago", reference=ref) == "2026-09-11"
-
-
-def test_employment_basis_requires_explicit_job_context():
-    from collector.seek_jd import _employment_basis
-
-    assert (
-        _employment_basis("Full time", "This is a permanent role based in Canberra.")
-        == "Permanent"
+    monkeypatch.setattr(seek_jd, "navigate", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        seek_jd,
+        "seek_job_detail",
+        lambda *_a, **_k: BrokerResponse(
+            result={
+                "source_job_id": "12345678",
+                "full_description": "A source-backed job description that is deliberately longer than eighty characters so validation succeeds without ambiguity.",
+                "posted_at": "2026-09-10T01:02:03.456Z",
+                "employment_type": "Contract/Temp",
+                "page_url": "https://au.seek.com/job/12345678",
+                "human_check": False,
+            },
+            elapsed_seconds=0.1,
+        ),
     )
-    assert (
-        _employment_basis("Full time", "This is a 12 month contract role in Sydney.")
-        == "Contract"
+    detail = seek_jd.fetch_seek_detail(
+        1,
+        "https://au.seek.com/job/12345678",
+        expected_source_job_id="12345678",
     )
-    assert (
-        _employment_basis(
-            "Full time",
-            "Applicants must be permanent residents. Manage contract updates.",
-        )
-        is None
-    )
+    assert detail.facts["posted_at"] == "2026-09-10T01:02:03.456Z"
+    assert "employment_basis" not in detail.facts
 
 
 def test_enrichment_fetches_once_then_permanently_skips_same_job(tmp_path, monkeypatch):
@@ -132,7 +121,6 @@ def test_enrichment_fetches_once_then_permanently_skips_same_job(tmp_path, monke
                 "source_job_id": "12345678",
                 "posted_at": "2026-09-10",
                 "employment_type": "Contract/Temp",
-                "employment_basis": "Contract/Temp",
                 "workplace_type": "Hybrid",
                 "location": "Sydney NSW",
                 "salary_text": "$900 - $1000 p.d.",
@@ -152,12 +140,11 @@ def test_enrichment_fetches_once_then_permanently_skips_same_job(tmp_path, monke
     assert calls["count"] == 1
     with db.connect() as conn:
         job = conn.execute(
-            "SELECT posted_at,employment_type,employment_basis,workplace_type,location,salary_text FROM jobs WHERE id=?",
+            "SELECT posted_at,employment_type,workplace_type,location,salary_text FROM jobs WHERE id=?",
             (job_id,),
         ).fetchone()
     assert tuple(job) == (
         "2026-09-10",
-        "Contract/Temp",
         "Contract/Temp",
         "Hybrid",
         "Sydney NSW",
@@ -222,7 +209,12 @@ def test_known_seek_card_is_not_reingested_on_daily_coverage(tmp_path, monkeypat
     )
     monkeypatch.setattr(
         market,
-        "parse_seek_snapshot",
+        "seek_cards",
+        lambda *_a, **_k: type("Response", (), {"result": [{}]})(),
+    )
+    monkeypatch.setattr(
+        market,
+        "parse_seek_dom_cards",
         lambda *_a, **_k: [
             CardObservation(
                 source="seek",

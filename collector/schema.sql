@@ -13,7 +13,6 @@ CREATE TABLE IF NOT EXISTS jobs (
     geography_code TEXT,
     salary_text TEXT,
     employment_type TEXT,
-    employment_basis TEXT,
     workplace_type TEXT,
     posted_at TEXT,
     expires_at TEXT,

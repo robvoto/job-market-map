@@ -10,6 +10,7 @@ from collector.browser_broker import (
     click,
     navigate,
     open_tab,
+    seek_cards,
     select_page,
     snapshot,
 )
@@ -19,7 +20,7 @@ from collector.ingest import ingest_card
 from collector.settings import get_setting
 from sources.seek import (
     SeekParseError,
-    parse_seek_snapshot,
+    parse_seek_dom_cards,
     seek_refinement_links,
     seek_result_count,
 )
@@ -296,8 +297,8 @@ def _collect_leaf(
         text = str(snap.get("text") or "")
         if any(marker in text.casefold() for marker in TERMINAL_TEXT):
             break
-        cards = parse_seek_snapshot(
-            snap,
+        cards = parse_seek_dom_cards(
+            list(seek_cards(page_id).result or []),
             query_text=None,
             query_location=None,
             page_number=page,

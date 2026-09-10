@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import time
 from dataclasses import dataclass
-from datetime import datetime, timedelta
+from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
 from zoneinfo import ZoneInfo
 
@@ -35,18 +35,6 @@ _STOP_MARKERS = {
     "be careful",
     "job seekers",
 }
-_NUMBER_WORDS = {
-    "one": 1,
-    "two": 2,
-    "three": 3,
-    "four": 4,
-    "five": 5,
-    "six": 6,
-    "seven": 7,
-    "eight": 8,
-    "nine": 9,
-    "ten": 10,
-}
 
 
 class SeekJDFetchError(RuntimeError):
@@ -71,47 +59,6 @@ class SeekJDEnrichmentResult:
 
 def _now() -> str:
     return datetime.now(SYDNEY).isoformat(timespec="seconds")
-
-
-def derive_posted_at(
-    posted_text: str | None, *, reference: datetime | None = None
-) -> str | None:
-    """Convert SEEK relative Posted/List text into an Australia/Sydney date only."""
-    text = str(posted_text or "").strip().casefold()
-    if not text:
-        return None
-    ref = reference.astimezone(SYDNEY) if reference else datetime.now(SYDNEY)
-
-    if "today" in text or "just now" in text:
-        return ref.date().isoformat()
-    if "yesterday" in text:
-        return (ref - timedelta(days=1)).date().isoformat()
-
-    number_match = re.search(
-        r"\b(\d+)\s*(m|min|mins|minute|minutes|h|hr|hrs|hour|hours|d|day|days)\b", text
-    )
-    if number_match:
-        value = int(number_match.group(1))
-        unit = number_match.group(2)
-        if unit.startswith("m"):
-            return (ref - timedelta(minutes=value)).date().isoformat()
-        if unit.startswith("h"):
-            return (ref - timedelta(hours=value)).date().isoformat()
-        return (ref - timedelta(days=value)).date().isoformat()
-
-    word_match = re.search(
-        r"\b(one|two|three|four|five|six|seven|eight|nine|ten)\s+(minute|minutes|hour|hours|day|days)\b",
-        text,
-    )
-    if word_match:
-        value = _NUMBER_WORDS[word_match.group(1)]
-        unit = word_match.group(2)
-        if unit.startswith("minute"):
-            return (ref - timedelta(minutes=value)).date().isoformat()
-        if unit.startswith("hour"):
-            return (ref - timedelta(hours=value)).date().isoformat()
-        return (ref - timedelta(days=value)).date().isoformat()
-    return None
 
 
 def _clean_lines(page_text: str) -> list[str]:
@@ -236,42 +183,13 @@ def _salary(header: list[str], elements: list[dict]) -> str | None:
     return None
 
 
-def _employment_basis(employment_type: str | None, full_description: str) -> str | None:
-    if employment_type == "Contract/Temp":
-        return "Contract/Temp"
-    if employment_type == "Casual":
-        return "Casual"
-
-    # Only explicit employment-context phrases qualify. Bare words such as
-    # "permanent resident" or "contract updates" must not classify the role.
-    evidence = full_description[:1800]
-    patterns = (
-        (
-            r"\b(?:permanent\s+(?:full[- ]time\s+|part[- ]time\s+)?(?:role|position|employment|job|opportunity)|(?:role|position|employment|job)\s+is\s+permanent)\b",
-            "Permanent",
-        ),
-        (
-            r"\b(?:fixed[- ]term|maximum[- ]term|max[- ]term)\s+(?:role|position|contract|employment|job)\b",
-            "Fixed term",
-        ),
-        (
-            r"\b(?:\d+[- ](?:month|months|year|years)\s+contract|contract\s+(?:role|position|basis|employment|job)|on\s+(?:a\s+)?contract\s+basis)\b",
-            "Contract",
-        ),
-        (r"\btemporary\s+(?:role|position|assignment|employment|job)\b", "Temporary"),
-    )
-    for pattern, label in patterns:
-        if re.search(pattern, evidence, flags=re.IGNORECASE):
-            return label
-    return None
-
-
 def parse_seek_detail_snapshot(
     snap: dict,
     *,
     expected_source_job_id: str | None = None,
     reference: datetime | None = None,
 ) -> SeekFetchedDetail:
+    del reference
     page_url = str(snap.get("url") or "").strip()
     page_text = str(snap.get("text") or "")
     low = page_text.casefold()
@@ -293,14 +211,6 @@ def parse_seek_detail_snapshot(
     employment_type = _employment_type(header)
     location, workplace_type = _location_and_workplace(header)
     classification_text, subclassification_text = _classification(header)
-    posted_text = next(
-        (
-            line
-            for line in header
-            if re.match(r"^(?:Posted|Listed)\s+", line, flags=re.IGNORECASE)
-        ),
-        None,
-    )
     elements = list(snap.get("elements") or [])
     quick_apply = any(
         str(element.get("text") or "").strip().casefold() == "quick apply"
@@ -313,10 +223,8 @@ def parse_seek_detail_snapshot(
         "classification_text": classification_text,
         "subclassification_text": subclassification_text,
         "employment_type": employment_type,
-        "employment_basis": _employment_basis(employment_type, full_description),
         "workplace_type": workplace_type,
         "salary_text": _salary(header, elements),
-        "posted_at": derive_posted_at(posted_text, reference=reference),
         "easy_apply": True if quick_apply else None,
         "apply_method": "quick_apply" if quick_apply else None,
     }
@@ -326,19 +234,16 @@ def parse_seek_detail_snapshot(
     return SeekFetchedDetail(full_description=full_description, facts=facts)
 
 
-def _posted_date_from_source(posted_at: object, posted_text: object) -> str | None:
-    raw = str(posted_at or "").strip()
-    if raw:
-        try:
-            value = raw.replace("Z", "+00:00")
-            parsed = datetime.fromisoformat(value)
-            if parsed.tzinfo is not None:
-                parsed = parsed.astimezone(SYDNEY)
-            return parsed.date().isoformat()
-        except ValueError:
-            if re.match(r"^\d{4}-\d{2}-\d{2}", raw):
-                return raw[:10]
-    return derive_posted_at(str(posted_text or ""))
+def _exact_source_timestamp(value: object) -> str | None:
+    """Accept only an exact structured source timestamp; never derive from relative text."""
+    raw = str(value or "").strip()
+    if not raw:
+        return None
+    try:
+        datetime.fromisoformat(raw)
+    except ValueError:
+        return None
+    return raw
 
 
 def fetch_seek_detail(
@@ -349,7 +254,7 @@ def fetch_seek_detail(
     timeout_seconds: float = 15.0,
     human_wait_seconds: float = HUMAN_CHECK_WAIT_SECONDS,
 ) -> SeekFetchedDetail:
-    """Read one SEEK JD + structured facts from JMM's dedicated signed-in Chrome tab."""
+    """Read one SEEK JD + structured facts from JMM's dedicated Playwright tab."""
     expected_id = str(expected_source_job_id or _seek_job_id(url)).strip()
     navigate(page_id, _seek_fetch_url(expected_id, url))
     normal_deadline = time.monotonic() + timeout_seconds
@@ -373,9 +278,12 @@ def fetch_seek_detail(
                 last_problem = (
                     f"SEEK needs human attention for job {expected_id or page_url}"
                 )
-                if not human_mode and time.monotonic() >= normal_deadline:
+                if not human_mode:
                     select_page(page_id, bring_to_front=True)
-                    print(last_problem + "; brought JMM tab to front.", flush=True)
+                    print(
+                        last_problem + "; JMM browser is waiting for verification.",
+                        flush=True,
+                    )
                     human_mode = True
                     human_deadline = time.monotonic() + human_wait_seconds
                 elif (
@@ -408,7 +316,6 @@ def fetch_seek_detail(
                     "classification_text",
                     "subclassification_text",
                     "employment_type",
-                    "employment_basis",
                     "workplace_type",
                     "salary_text",
                     "expires_at",
@@ -421,9 +328,7 @@ def fetch_seek_detail(
                         value = value.strip()
                     if value not in (None, ""):
                         facts[key] = value
-                posted_at = _posted_date_from_source(
-                    raw.get("posted_at"), raw.get("posted_text")
-                )
+                posted_at = _exact_source_timestamp(raw.get("posted_at"))
                 if posted_at:
                     facts["posted_at"] = posted_at
                 return SeekFetchedDetail(full_description=description, facts=facts)

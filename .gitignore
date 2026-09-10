@@ -228,3 +228,6 @@ logs/*.log
 data/*.lock
 
 data/*.logpath
+
+# JMM-owned persistent Playwright browser profile
+data/playwright_jmm_seek_user_data/

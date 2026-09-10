@@ -68,7 +68,7 @@ The database is the shared canonical state. Collectors and agents must:
 - record observations rather than overwriting history destructively;
 - never infer that another agent's presence is an error.
 
-Browser concurrency is owned by Human MCP, not this project. Signed-in card collection must reuse Rob's existing browser and one workflow-owned tab/session.
+Browser ownership is local to JMM collection. JMM uses one visible persistent Playwright Chromium context with its own user-data directory; it does not share Rob's ordinary Chrome tabs or Job Hunter's SEEK profile. Collection remains single-writer/run-locked and reuses workflow pages inside that context.
 
 ## Identity strategy
 

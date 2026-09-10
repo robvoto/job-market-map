@@ -7,7 +7,7 @@ Status: result-card discovery plus write-once JD enrichment implemented.
 Mechanics:
 - query encoded in SEEK search path;
 - one-off first live load uses `daterange=3`; normal ongoing discovery uses `daterange=1` with listed-date ordering;
-- one page currently exposes about 32 cards in a Human MCP snapshot;
+- one SEEK result page typically exposes about 32 cards in JMM's Playwright snapshot;
 - pagination uses `page=N`;
 - collector validates source job link order against repeated card blocks;
 - explicit terminal state `No matching search results` ends the query cleanly;

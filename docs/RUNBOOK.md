@@ -65,7 +65,7 @@ uv run python -m collector.retention
 
 ## Browser prerequisite
 
-The canonical Human MCP/browser broker should already be running. Do not launch another MCP server. If browser access fails, use the Human MCP health/recovery tooling rather than a new Chrome profile.
+JMM starts its own visible persistent Playwright Chromium session when collection begins, using `data/playwright_jmm_seek_user_data`. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, complete it in the visible JMM browser and let the run continue.
 
 ## Failure rule
 
