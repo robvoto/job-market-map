@@ -27,7 +27,10 @@ For the canonical Google Sheet backlog, do **not** use browser automation as the
 Canonical backlog spreadsheet ID: `1UX7xEKgHi1gRkPs9PGqDlWLfWSiMgRKkDKPYTXtygOs`.
 Spreadsheet file name: `job_market_map_backlog`.
 Actual worksheet/tab name: `Backlog`.
-Do not confuse the file name with the tab name.
+Do not confuse the file name with the tab name. For native Sheets calls, always use `sheet_name="Backlog"`; never pass `job_market_map_backlog` as `sheet_name`.
+
+Canonical read example:
+`HUMAN_MCP_SECURE.sheets_read_rows(spreadsheet_id="1UX7xEKgHi1gRkPs9PGqDlWLfWSiMgRKkDKPYTXtygOs", sheet_name="Backlog")`.
 
 Native Sheets access uses service account `job-hunter-backlog@angular-log-prj.iam.gserviceaccount.com`. A Google 403 means this account does not have permission to the Sheet; grant/share access to this account before diagnosing MCP or browser failure.
 
