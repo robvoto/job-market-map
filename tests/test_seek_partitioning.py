@@ -490,3 +490,44 @@ def test_seek_page_ownership_accepts_live_au_seek_host():
         is True
     )
     assert _same_seek_page("https://www.linkedin.com/jobs/search/", url) is False
+
+
+def test_wait_snapshot_waits_through_cloudflare_challenge(monkeypatch):
+    import sources.seek_market_map as market
+    from collector.browser_broker import BrokerResponse
+
+    states = iter(
+        [
+            {
+                "url": "https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=3",
+                "text": "Just a moment...\nPerforming security verification",
+            },
+            {
+                "url": "https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=3",
+                "text": "25 jobs in New South Wales",
+            },
+        ]
+    )
+    selected = []
+    monkeypatch.setattr(
+        market,
+        "snapshot",
+        lambda *_a, **_k: BrokerResponse(result=next(states), elapsed_seconds=0.1),
+    )
+    monkeypatch.setattr(
+        market,
+        "select_page",
+        lambda page_id, *, bring_to_front=False: selected.append(
+            (page_id, bring_to_front)
+        ),
+    )
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+
+    result = market._wait_snapshot(
+        42,
+        expected_url="https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=3",
+        timeout=1,
+    )
+
+    assert result["text"] == "25 jobs in New South Wales"
+    assert selected == [(42, True)]
