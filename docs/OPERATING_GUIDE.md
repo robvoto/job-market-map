@@ -90,6 +90,7 @@ JD enrichment is a separate operation. When a job page is deliberately opened fo
 ## Browser rule
 
 JMM collection uses its own visible persistent Playwright Chromium profile at `data/playwright_jmm_seek_user_data`. It must not reuse Rob's normal Chrome or Job Hunter's SEEK profile. One collection run owns/reuses the JMM browser session; genuine human verification is completed in that visible window and the run resumes.
+For long-running manual/MCP starts, use `scripts/start_collection_service.sh ...`; it launches the same `scripts.run_collection_cycle` runner in the user systemd manager so JMM's Chromium is not terminated when a temporary shell closes.
 
 ## Campaign browser ownership
 

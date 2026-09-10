@@ -67,6 +67,14 @@ uv run python -m collector.retention
 
 JMM starts its own visible persistent Playwright Chromium session when collection begins, using `data/playwright_jmm_seek_user_data`. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, complete it in the visible JMM browser and let the run continue.
 
+For a long-running/manual collection launched from MCP or another temporary shell, start the existing collection runner inside JMM's user-service scope so the visible Chromium process survives after the calling shell exits:
+
+```bash
+scripts/start_collection_service.sh --trigger manual --days 3 --backfill-existing-jds --max-runtime-minutes 0
+```
+
+This is only a durable launcher; `scripts.run_collection_cycle` remains the single collection runner.
+
 ## Failure rule
 
 A collection failure must leave prior successful ingests intact and enough cursor/run state to diagnose/resume. Never convert a parser/browser failure into a successful `COMPLETE` run just to keep the campaign moving.
