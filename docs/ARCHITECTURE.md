@@ -12,7 +12,7 @@ It owns:
 - same-source identity;
 - conservative cross-source duplicate hints;
 - first/last-seen lifecycle;
-- separate per-user activity ledger and consumer-progress checkpoints;
+- consumer-progress checkpoints for feed processing;
 - API access for multiple agents;
 - retention and compaction.
 

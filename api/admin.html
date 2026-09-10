@@ -20,7 +20,7 @@ body{font-family:system-ui,sans-serif;max-width:1100px;margin:32px auto;padding:
 <div class="row"><select id="new-source"><option>seek</option><option>linkedin</option><option>apsjobs</option></select><select id="new-geo"><option>NSW</option><option>ACT</option><option>QLD</option></select><input id="new-query" placeholder="New discovery query"><input id="new-location" value="New South Wales NSW" placeholder="Source location"><button id="add-query">Add query</button></div>
 <div id="queries"></div></details>
 <script>
-const api='/v2';
+const api='/v3';
 const status=(m,e=false)=>{const el=document.getElementById('status');el.textContent=m;el.className='status'+(e?' error':'')};
 async function j(url,opt){const r=await fetch(url,opt);const x=await r.json();if(!r.ok)throw new Error(x.detail||r.statusText);return x}
 async function loadGeographies(){const {geographies}=await j(api+'/admin/geographies');const root=document.getElementById('geographies');root.innerHTML='';for(const g of geographies){const d=document.createElement('div');d.className='setting';d.innerHTML=`<div class="row"><input data-geo="${g.code}" type="checkbox" ${g.enabled?'checked':''}><strong>${g.code} — ${g.label}</strong></div><div class="help">${g.help_text}</div>`;root.appendChild(d)}root.onchange=async e=>{if(!e.target.dataset.geo)return;try{await j(`${api}/admin/geographies/${e.target.dataset.geo}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:e.target.checked,actor:'rob-admin'})});status('Geography updated');await loadCoverage()}catch(err){status(err.message,true)}}}

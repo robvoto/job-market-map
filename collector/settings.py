@@ -34,9 +34,9 @@ def seed_settings() -> int:
     init_db()
     catalog = _catalog()
     with connect() as conn:
-        legacy = conn.execute(
-            "SELECT value_json, updated_at, updated_by FROM settings WHERE key='retention.preserve_status_jobs_forever'"
-        ).fetchone()
+        conn.execute(
+            "DELETE FROM settings WHERE key IN ('retention.preserve_activity_jobs_forever','retention.preserve_status_jobs_forever')"
+        )
         for key, spec in catalog.items():
             conn.execute(
                 """
@@ -63,19 +63,6 @@ def seed_settings() -> int:
                     spec["help"],
                     _now(),
                 ),
-            )
-        if legacy:
-            current = conn.execute(
-                "SELECT updated_by FROM settings WHERE key='retention.preserve_activity_jobs_forever'"
-            ).fetchone()
-            if current and current[0] is None:
-                conn.execute(
-                    """UPDATE settings SET value_json=?, updated_at=?, updated_by='schema-migration'
-                       WHERE key='retention.preserve_activity_jobs_forever'""",
-                    (legacy[0], legacy[1]),
-                )
-            conn.execute(
-                "DELETE FROM settings WHERE key='retention.preserve_status_jobs_forever'"
             )
     return len(catalog)
 

@@ -51,3 +51,20 @@ def test_hot_get_setting_does_not_reseed_existing_catalog(tmp_path, monkeypatch)
     monkeypatch.setattr(settings, "seed_settings", counted_seed)
     assert settings.get_setting("collection.default_freshness_days") == 7
     assert calls["count"] == 0
+
+
+def test_seed_removes_obsolete_personal_activity_settings(tmp_path, monkeypatch):
+    settings = _wire(tmp_path, monkeypatch)
+    settings.seed_settings()
+    with db.connect() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO settings(
+                key,category,value_type,value_json,default_json,help_text,updated_at
+            ) VALUES('retention.preserve_activity_jobs_forever','Retention','boolean','true','true','obsolete','x')"""
+        )
+    settings.seed_settings()
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM settings WHERE key='retention.preserve_activity_jobs_forever'"
+        ).fetchone()
+    assert row is None

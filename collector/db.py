@@ -9,13 +9,13 @@ ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data" / "market.db"
 SCHEMA_PATH = ROOT / "collector" / "schema.sql"
 
-LEGACY_ACTIVITY_MAP = {
-    "shown_to_rob": "shown",
-    "reviewed": "reviewed",
-    "applied": "applied",
-    "rejected": "rejected",
-    "dismissed": "dismissed",
-}
+LEGACY_PERSONAL_COLUMNS = (
+    "shown_to_rob",
+    "reviewed",
+    "applied",
+    "rejected",
+    "dismissed",
+)
 
 
 def connect() -> sqlite3.Connection:
@@ -63,140 +63,56 @@ def _backfill_identity(conn: sqlite3.Connection, table: str) -> None:
         )
 
 
-def _project_activity(
-    conn: sqlite3.Connection,
-    *,
-    event_id: int,
-    user_key: str,
-    identity_key: str,
-    activity_type: str,
-    active: int,
-    occurred_at: str,
-) -> None:
-    conn.execute(
-        """
-        INSERT INTO user_job_activity_current(
-            user_key, job_identity_key, activity_type, active, updated_at, last_event_id
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_key, job_identity_key, activity_type) DO UPDATE SET
-            active=excluded.active,
-            updated_at=excluded.updated_at,
-            last_event_id=excluded.last_event_id
-        """,
-        (user_key, identity_key, activity_type, active, occurred_at, event_id),
-    )
+def _remove_obsolete_personal_activity_scaffolding(conn: sqlite3.Connection) -> None:
+    """Remove the abandoned local activity model only when it contains no personal data.
 
-
-def _migrate_legacy_activity(conn: sqlite3.Connection) -> None:
-    """Move early global Rob-status state into the per-user activity ledger, then drop it."""
-    job_columns = _columns(conn, "jobs")
-    legacy_columns = [name for name in LEGACY_ACTIVITY_MAP if name in job_columns]
-
-    if _table_exists(conn, "job_status_events"):
-        rows = conn.execute(
-            """
-            SELECT e.*, j.identity_key
-              FROM job_status_events e
-              JOIN jobs j ON j.id=e.job_id
-             ORDER BY e.occurred_at, e.id
-            """
-        ).fetchall()
-        for row in rows:
-            activity_type = LEGACY_ACTIVITY_MAP.get(
-                row["event_type"], row["event_type"]
-            )
-            if activity_type not in set(LEGACY_ACTIVITY_MAP.values()) | {"seen"}:
-                continue
-            actor = row["actor"] or "legacy"
-            migration_key = f"legacy-status-event:{row['id']}"
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO user_job_activity_events(
-                    user_key, job_identity_key, activity_type, activity_value,
-                    occurred_at, actor, note, idempotency_key
-                ) VALUES ('rob', ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    row["identity_key"],
-                    activity_type,
-                    int(row["event_value"]),
-                    row["occurred_at"],
-                    actor,
-                    row["note"],
-                    migration_key,
-                ),
-            )
-            event = conn.execute(
-                "SELECT id FROM user_job_activity_events WHERE user_key='rob' AND actor=? AND idempotency_key=?",
-                (actor, migration_key),
-            ).fetchone()
-            if event:
-                _project_activity(
-                    conn,
-                    event_id=int(event[0]),
-                    user_key="rob",
-                    identity_key=row["identity_key"],
-                    activity_type=activity_type,
-                    active=int(row["event_value"]),
-                    occurred_at=row["occurred_at"],
+    Job Market Map is neutral/global. JH-305 owns personal activity. If an older
+    database contains non-empty activity state, fail closed rather than silently
+    deleting or re-homing personal history.
+    """
+    for table in (
+        "user_job_activity_events",
+        "user_job_activity_current",
+        "job_status_events",
+    ):
+        if _table_exists(conn, table):
+            count = int(conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()[0])
+            if count:
+                raise RuntimeError(
+                    f"obsolete personal activity table {table} contains {count} rows; "
+                    "migrate that data to Job Hunter JH-305 before removing the table"
                 )
-        conn.execute("DROP TABLE job_status_events")
 
-    for legacy_field in legacy_columns:
-        activity_type = LEGACY_ACTIVITY_MAP[legacy_field]
-        rows = conn.execute(
-            f"SELECT id, identity_key, last_seen_at FROM jobs WHERE {legacy_field}=1"
-        ).fetchall()
-        for row in rows:
-            current = conn.execute(
-                """
-                SELECT active FROM user_job_activity_current
-                 WHERE user_key='rob' AND job_identity_key=? AND activity_type=?
-                """,
-                (row["identity_key"], activity_type),
-            ).fetchone()
-            if current and int(current[0]) == 1:
-                continue
-            actor = "schema-migration"
-            migration_key = f"legacy-flag:{row['identity_key']}:{activity_type}"
-            conn.execute(
-                """
-                INSERT OR IGNORE INTO user_job_activity_events(
-                    user_key, job_identity_key, activity_type, activity_value,
-                    occurred_at, actor, note, idempotency_key
-                ) VALUES ('rob', ?, ?, 1, ?, ?, ?, ?)
-                """,
-                (
-                    row["identity_key"],
-                    activity_type,
-                    row["last_seen_at"],
-                    actor,
-                    f"Migrated legacy jobs.{legacy_field}=1",
-                    migration_key,
-                ),
+    job_columns = _columns(conn, "jobs")
+    for column in LEGACY_PERSONAL_COLUMNS:
+        if column in job_columns:
+            count = int(
+                conn.execute(f"SELECT COUNT(*) FROM jobs WHERE {column}=1").fetchone()[
+                    0
+                ]
             )
-            event = conn.execute(
-                "SELECT id FROM user_job_activity_events WHERE user_key='rob' AND actor=? AND idempotency_key=?",
-                (actor, migration_key),
-            ).fetchone()
-            if event:
-                _project_activity(
-                    conn,
-                    event_id=int(event[0]),
-                    user_key="rob",
-                    identity_key=row["identity_key"],
-                    activity_type=activity_type,
-                    active=1,
-                    occurred_at=row["last_seen_at"],
+            if count:
+                raise RuntimeError(
+                    f"legacy jobs.{column} contains {count} personal-state rows; "
+                    "migrate that data to Job Hunter JH-305 before removing the column"
                 )
 
     conn.execute("DROP INDEX IF EXISTS idx_jobs_flags")
-    for column in legacy_columns:
-        conn.execute(f"ALTER TABLE jobs DROP COLUMN {column}")
+    conn.execute("DROP INDEX IF EXISTS idx_user_activity_idempotency")
+    conn.execute("DROP INDEX IF EXISTS idx_user_activity_identity")
+    conn.execute("DROP INDEX IF EXISTS idx_user_activity_current_active")
+    for table in (
+        "job_status_events",
+        "user_job_activity_current",
+        "user_job_activity_events",
+    ):
+        if _table_exists(conn, table):
+            conn.execute(f"DROP TABLE {table}")
 
-    tombstone_columns = _columns(conn, "job_tombstones")
-    for column in LEGACY_ACTIVITY_MAP:
-        if column in tombstone_columns:
+    for column in LEGACY_PERSONAL_COLUMNS:
+        if column in _columns(conn, "jobs"):
+            conn.execute(f"ALTER TABLE jobs DROP COLUMN {column}")
+        if column in _columns(conn, "job_tombstones"):
             conn.execute(f"ALTER TABLE job_tombstones DROP COLUMN {column}")
 
 
@@ -278,7 +194,7 @@ def init_db() -> None:
 
         _backfill_identity(conn, "jobs")
         _backfill_identity(conn, "job_tombstones")
-        _migrate_legacy_activity(conn)
+        _remove_obsolete_personal_activity_scaffolding(conn)
         _ensure_identity_triggers(conn)
 
         conn.execute(

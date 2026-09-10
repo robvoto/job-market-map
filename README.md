@@ -22,7 +22,7 @@ Fit and application judgement belong to consumers.
 2. **Capture rich source evidence** — title, employer, location, salary/work type when visible, classification, snippets, tags and raw card text.
 3. **No fit filtering during collection.** Strange edge roles, BA roles, trainees and bad matches can all exist in the neutral map.
 4. **Same-source identity upserts; rich duplicate evidence links cross-posts without destructive merging.**
-5. **SQLite is canonical local storage; `/v2` HTTP is the supported consumer contract.**
+5. **SQLite is canonical local storage; `/v3` HTTP is the supported consumer contract.**
 6. **Admin settings/query controls handle normal tuning without Python edits.**
 7. **Retention archives first, removes detailed stale rows later, and keeps tombstone identity memory.**
 8. **User interaction is stored in a separate per-user activity ledger; neutral job rows contain no shown/reviewed/applied/rejected state.**
@@ -65,7 +65,7 @@ The port itself is an admin setting and takes effect on the next API start.
 ## Current implementation
 
 - SQLite canonical store: implemented
-- versioned `/v2` consumer API: implemented
+- versioned `/v3` consumer API: implemented
 - Rob admin settings/query controls: implemented
 - status history + idempotent writes: implemented
 - duplicate fingerprints/evidence links: implemented

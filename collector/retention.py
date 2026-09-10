@@ -32,18 +32,11 @@ def _cutoff_iso(days: int, now: datetime | None = None) -> str:
     return (_current(now) - timedelta(days=days)).isoformat(timespec="seconds")
 
 
-def _activity_predicate(preserve_activity_jobs: bool) -> str:
-    if not preserve_activity_jobs:
-        return "1=1"
-    return "NOT EXISTS (SELECT 1 FROM user_job_activity_events a WHERE a.job_identity_key=jobs.identity_key)"
-
-
 def apply_retention(
     *,
     raw_capture_days: int | None = None,
     archive_after_days: int | None = None,
     remove_archived_after_days: int | None = None,
-    preserve_activity_jobs: bool | None = None,
     now: datetime | None = None,
 ) -> RetentionResult:
     """Apply configurable archive-then-remove policy while retaining tombstone identity."""
@@ -63,11 +56,6 @@ def apply_retention(
         if remove_archived_after_days is not None
         else get_setting("retention.remove_archived_after_days")
     )
-    preserve = bool(
-        preserve_activity_jobs
-        if preserve_activity_jobs is not None
-        else get_setting("retention.preserve_activity_jobs_forever")
-    )
     if min(raw_days, archive_days, remove_days) < 1:
         raise ValueError("retention days must be >= 1")
     if remove_days <= archive_days:
@@ -80,7 +68,6 @@ def apply_retention(
     raw_cutoff = _cutoff_iso(raw_days, current)
     archive_cutoff = _cutoff_iso(archive_days, current)
     remove_cutoff = _cutoff_iso(remove_days, current)
-    activity_clause = _activity_predicate(preserve)
 
     with connect() as conn:
         captures_deleted = conn.execute(
@@ -89,7 +76,7 @@ def apply_retention(
         ).rowcount
 
         jobs_archived = conn.execute(
-            f"""
+            """
             UPDATE jobs
                SET archived=1,
                    compacted_at=?,
@@ -97,17 +84,15 @@ def apply_retention(
                    raw_card_text=NULL
              WHERE last_seen_at < ?
                AND archived=0
-               AND {activity_clause}
             """,
             (archived_at, archive_cutoff),
         ).rowcount
 
         removable = conn.execute(
-            f"""
+            """
             SELECT * FROM jobs
              WHERE archived=1
                AND last_seen_at < ?
-               AND {activity_clause}
              ORDER BY id
             """,
             (remove_cutoff,),

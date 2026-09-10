@@ -80,35 +80,6 @@ CREATE INDEX IF NOT EXISTS idx_jobs_employer ON jobs(employer);
 CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at);
 CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen_at);
 
-CREATE TABLE IF NOT EXISTS user_job_activity_events (
-    id INTEGER PRIMARY KEY,
-    user_key TEXT NOT NULL,
-    job_identity_key TEXT,
-    activity_type TEXT NOT NULL,
-    activity_value INTEGER NOT NULL,
-    occurred_at TEXT NOT NULL,
-    actor TEXT NOT NULL,
-    note TEXT,
-    idempotency_key TEXT
-);
-
-CREATE TABLE IF NOT EXISTS user_job_activity_current (
-    user_key TEXT NOT NULL,
-    job_identity_key TEXT,
-    activity_type TEXT NOT NULL,
-    active INTEGER NOT NULL,
-    updated_at TEXT NOT NULL,
-    last_event_id INTEGER NOT NULL,
-    PRIMARY KEY(user_key, job_identity_key, activity_type)
-);
-
-CREATE UNIQUE INDEX IF NOT EXISTS idx_user_activity_idempotency
-    ON user_job_activity_events(user_key, actor, idempotency_key)
-    WHERE idempotency_key IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_user_activity_identity
-    ON user_job_activity_events(user_key, job_identity_key, occurred_at DESC);
-CREATE INDEX IF NOT EXISTS idx_user_activity_current_active
-    ON user_job_activity_current(user_key, activity_type, active, job_identity_key);
 
 CREATE TABLE IF NOT EXISTS collection_runs (
     id INTEGER PRIMARY KEY,

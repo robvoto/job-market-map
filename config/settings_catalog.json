@@ -17,7 +17,7 @@
       "default": 30,
       "min": 1,
       "max": 730,
-      "help": "Archive stale neutral jobs after this many days since last seen. Archiving removes bulky current card text unless activity-preservation requires the rich row to remain."
+      "help": "Archive stale neutral jobs after this many days since last seen. Archiving removes bulky current card text while preserving market identity/history."
     },
     {
       "key": "retention.remove_archived_after_days",
@@ -27,13 +27,6 @@
       "min": 2,
       "max": 3650,
       "help": "After this many days since last seen, remove an unimportant archived job's detailed row and retain only a small tombstone identity so rediscovery is still recognised as previously seen. Must be greater than archive_after_days."
-    },
-    {
-      "key": "retention.preserve_activity_jobs_forever",
-      "category": "Retention",
-      "type": "boolean",
-      "default": true,
-      "help": "Never automatically archive/remove a detailed market job that has any per-user activity history. User activity stays in its own ledger and is not stored on the neutral job row."
     },
     {
       "key": "collection.default_freshness_days",

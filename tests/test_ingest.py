@@ -19,7 +19,7 @@ def test_canonicalise_url_drops_tracking_but_keeps_meaningful_query():
     )
 
 
-def test_same_source_id_upserts_without_mixing_user_activity(tmp_path, monkeypatch):
+def test_same_source_id_upserts_neutral_market_row(tmp_path, monkeypatch):
     ingest = _use_tmp_db(tmp_path, monkeypatch)
     first = ingest.ingest_card(
         CardObservation(
@@ -34,14 +34,6 @@ def test_same_source_id_upserts_without_mixing_user_activity(tmp_path, monkeypat
             captured_at="2026-09-10T01:00:00+00:00",
         )
     )
-    from collector import activity
-
-    monkeypatch.setattr(activity, "connect", db.connect)
-    monkeypatch.setattr(activity, "init_db", db.init_db)
-    activity.record_activity(
-        first.job_id, user_key="rob", activity_type="shown", actor="test"
-    )
-
     second = ingest.ingest_card(
         CardObservation(
             source="linkedin",
@@ -70,13 +62,17 @@ def test_same_source_id_upserts_without_mixing_user_activity(tmp_path, monkeypat
             "SELECT COUNT(*) FROM job_query_hits WHERE job_id = ?", (first.job_id,)
         ).fetchone()[0]
     assert job["capture_count"] == 2
-    assert "shown_to_rob" not in job
+    assert job["identity_key"] == "linkedin:id:123"
     assert job["location"] == "Sydney"
-    with db.connect() as conn:
-        current = conn.execute(
-            "SELECT active FROM user_job_activity_current WHERE user_key='rob' AND job_identity_key=? AND activity_type='shown'",
-            (job["identity_key"],),
-        ).fetchone()
-    assert current[0] == 1
+    forbidden = {
+        "shown_to_rob",
+        "shown",
+        "seen",
+        "reviewed",
+        "applied",
+        "rejected",
+        "dismissed",
+    }
+    assert forbidden.isdisjoint(job.keys())
     assert captures == 2
     assert hits == 2

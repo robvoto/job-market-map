@@ -10,7 +10,7 @@ import json
 from urllib.parse import urlencode
 from urllib.request import urlopen
 
-BASE_URL = "http://127.0.0.1:8770/v2"
+BASE_URL = "http://127.0.0.1:8770/v3"
 
 
 def fetch_jobs(after_id: int = 0, limit: int = 100) -> dict:

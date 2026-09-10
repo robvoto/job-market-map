@@ -3,13 +3,11 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
-from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
-from collector.activity import ACTIVITY_TYPES, get_job_activity, record_activity
 from collector.consumers import advance_checkpoint, get_checkpoint
 from collector.db import ROOT, connect, init_db
 from collector.geographies import (
@@ -30,8 +28,8 @@ from collector.settings import (
     set_setting,
 )
 
-API_VERSION = "v2"
-SCHEMA_VERSION = 2
+API_VERSION = "v3"
+SCHEMA_VERSION = 3
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -46,18 +44,10 @@ async def lifespan(_: FastAPI):
 
 app = FastAPI(
     title="Job Market Map",
-    version="0.3.0",
+    version="0.4.0",
     description="Neutral local job-market feed for Job Hunter, Reset / Edge, Plan Z and other consumers.",
     lifespan=lifespan,
 )
-
-
-class ActivityUpdate(BaseModel):
-    activity_type: str
-    value: bool = True
-    actor: str | None = Field(default=None, max_length=100)
-    note: str | None = Field(default=None, max_length=2000)
-    idempotency_key: str | None = Field(default=None, max_length=200)
 
 
 class SettingUpdate(BaseModel):
@@ -178,12 +168,6 @@ def stats():
             tombstones=conn.execute("SELECT COUNT(*) FROM job_tombstones").fetchone()[
                 0
             ],
-            user_activity_events=conn.execute(
-                "SELECT COUNT(*) FROM user_job_activity_events"
-            ).fetchone()[0],
-            activity_users=conn.execute(
-                "SELECT COUNT(DISTINCT user_key) FROM user_job_activity_events"
-            ).fetchone()[0],
         )
     return {"api_version": API_VERSION, "schema_version": SCHEMA_VERSION, **result}
 
@@ -240,67 +224,6 @@ def job_feed(
     }
 
 
-@app.get(f"/{API_VERSION}/users/{{user_key}}/feed/jobs")
-def user_job_feed(
-    user_key: str,
-    after_id: int = Query(0, ge=0),
-    limit: int | None = Query(None, ge=1),
-    source: str | None = None,
-    geography_code: str | None = None,
-    include_raw: bool = True,
-    exclude_activity: Annotated[list[str] | None, Query()] = None,
-):
-    resolved_limit = _limit(limit)
-    excluded = [
-        value.strip().casefold() for value in (exclude_activity or []) if value.strip()
-    ]
-    invalid = sorted(set(excluded) - ACTIVITY_TYPES)
-    if invalid:
-        raise HTTPException(400, f"unsupported exclude_activity: {', '.join(invalid)}")
-    clauses = ["j.id > ?", "j.archived=0"]
-    params: list[object] = [after_id]
-    if source:
-        clauses.append("j.source=?")
-        params.append(source.casefold())
-    if geography_code:
-        clauses.append("j.geography_code=?")
-        params.append(geography_code.upper())
-    if excluded:
-        placeholders = ",".join("?" for _ in excluded)
-        clauses.append(
-            f"NOT EXISTS (SELECT 1 FROM user_job_activity_current a "
-            f"WHERE a.user_key=? AND a.job_identity_key=j.identity_key "
-            f"AND a.active=1 AND a.activity_type IN ({placeholders}))"
-        )
-        params.extend([user_key.strip().casefold(), *excluded])
-    where = " AND ".join(clauses)
-    with connect() as conn:
-        rows = conn.execute(
-            f"""
-            SELECT j.*,
-                   (SELECT COUNT(*) FROM duplicate_links d
-                     WHERE d.job_id_a=j.id OR d.job_id_b=j.id) AS duplicate_link_count
-              FROM jobs j
-             WHERE {where}
-             ORDER BY j.id ASC
-             LIMIT ?
-            """,
-            (*params, resolved_limit + 1),
-        ).fetchall()
-    has_more = len(rows) > resolved_limit
-    rows = rows[:resolved_limit]
-    return {
-        "api_version": API_VERSION,
-        "schema_version": SCHEMA_VERSION,
-        "generated_at": _now(),
-        "user_key": user_key.strip().casefold(),
-        "excluded_activity": excluded,
-        "items": [_job_payload(row, include_raw=include_raw) for row in rows],
-        "next_cursor": int(rows[-1]["id"]) if rows else after_id,
-        "has_more": has_more,
-    }
-
-
 @app.get(f"/{API_VERSION}/consumers/{{consumer_key}}/state")
 def consumer_state(consumer_key: str):
     return get_checkpoint(consumer_key)
@@ -313,24 +236,8 @@ def consumer_feed(
     geography_code: str | None = None,
     source: str | None = None,
     include_raw: bool = True,
-    user_key: str | None = None,
-    exclude_activity: Annotated[list[str] | None, Query()] = None,
 ):
     checkpoint = get_checkpoint(consumer_key)
-    if user_key or (exclude_activity or []):
-        if not user_key:
-            raise HTTPException(
-                400, "user_key is required when exclude_activity is supplied"
-            )
-        return user_job_feed(
-            user_key=user_key,
-            after_id=int(checkpoint["last_job_id"]),
-            limit=limit,
-            source=source,
-            geography_code=geography_code,
-            include_raw=include_raw,
-            exclude_activity=exclude_activity or [],
-        )
     return job_feed(
         after_id=int(checkpoint["last_job_id"]),
         limit=limit,
@@ -443,50 +350,6 @@ def get_job(job_id: int):
         "captures": captures,
         "query_hits": query_hits,
         "duplicates": duplicates,
-    }
-
-
-@app.get(f"/{API_VERSION}/users/{{user_key}}/jobs/{{job_id}}/activity")
-def job_activity(
-    user_key: str, job_id: int, history_limit: int = Query(100, ge=1, le=1000)
-):
-    try:
-        return get_job_activity(job_id, user_key=user_key, history_limit=history_limit)
-    except KeyError:
-        raise HTTPException(404, "job not found") from None
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-
-
-@app.post(f"/{API_VERSION}/users/{{user_key}}/jobs/{{job_id}}/activity")
-def update_activity(user_key: str, job_id: int, update: ActivityUpdate):
-    if update.activity_type.strip().casefold() not in ACTIVITY_TYPES:
-        raise HTTPException(
-            400, f"activity_type must be one of: {', '.join(sorted(ACTIVITY_TYPES))}"
-        )
-    try:
-        result = record_activity(
-            job_id,
-            user_key=user_key,
-            activity_type=update.activity_type,
-            value=update.value,
-            actor=update.actor,
-            note=update.note,
-            idempotency_key=update.idempotency_key,
-        )
-    except KeyError:
-        raise HTTPException(404, "job not found") from None
-    except ValueError as exc:
-        raise HTTPException(400, str(exc)) from None
-    return {
-        "ok": True,
-        "job_id": job_id,
-        "user_key": result.user_key,
-        "job_identity_key": result.job_identity_key,
-        "activity_type": result.activity_type,
-        "value": result.value,
-        "changed": result.changed,
-        "event_id": result.event_id,
     }
 
 
