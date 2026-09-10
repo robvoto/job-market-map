@@ -16,7 +16,7 @@ def _seed_isolated_registry(tmp_path, monkeypatch):
 
 def test_campaign_uses_registry_without_fit_filtering(tmp_path, monkeypatch):
     campaign, _ = _seed_isolated_registry(tmp_path, monkeypatch)
-    runs = campaign.registry_runs(sources={"seek"})
+    runs = campaign.registry_runs(sources={"linkedin"})
     assert len(runs) == 327
     assert any(run["registry_key"] == "normal-business-analyst" for run in runs)
     assert any(run["registry_key"] == "edge-technical-customer-success" for run in runs)
@@ -26,14 +26,14 @@ def test_campaign_uses_registry_without_fit_filtering(tmp_path, monkeypatch):
 def test_campaign_db_query_toggle_is_operational(tmp_path, monkeypatch):
     campaign, query_admin = _seed_isolated_registry(tmp_path, monkeypatch)
     row = query_admin.add_query(
-        source="seek", query_text="unique admin query", active=True
+        source="linkedin", query_text="unique admin query", active=True
     )
     assert any(
-        r["query_id"] == row["id"] for r in campaign.registry_runs(sources={"seek"})
+        r["query_id"] == row["id"] for r in campaign.registry_runs(sources={"linkedin"})
     )
     query_admin.set_query_active(row["id"], False)
     assert not any(
-        r["query_id"] == row["id"] for r in campaign.registry_runs(sources={"seek"})
+        r["query_id"] == row["id"] for r in campaign.registry_runs(sources={"linkedin"})
     )
 
 
@@ -90,3 +90,21 @@ def test_multi_step_campaign_opens_one_tab_and_reuses_page_id(monkeypatch):
     assert len(steps) == 3
     assert opened["count"] == 1
     assert page_ids == [777, 777, 777]
+
+
+def test_seek_keyword_registry_is_supplemental_and_off_by_default(
+    tmp_path, monkeypatch
+):
+    campaign, _ = _seed_isolated_registry(tmp_path, monkeypatch)
+    assert campaign.registry_runs(sources={"seek"}) == []
+
+
+def test_seek_keyword_registry_can_be_enabled_by_admin_setting(tmp_path, monkeypatch):
+    campaign, _ = _seed_isolated_registry(tmp_path, monkeypatch)
+    from collector import settings
+
+    monkeypatch.setattr(settings, "connect", db.connect)
+    monkeypatch.setattr(settings, "init_db", db.init_db)
+    settings.seed_settings()
+    settings.set_setting("collection.seek_keyword_queries_enabled", True, actor="test")
+    assert len(campaign.registry_runs(sources={"seek"})) == 327

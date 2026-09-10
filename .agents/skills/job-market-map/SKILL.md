@@ -45,7 +45,7 @@ Breaking API semantics require versioning. See `docs/CONSUMER_CONTRACT.md`.
 
 
 ## Geography and SEEK completeness
-Current configured whole-state scope is NSW + ACT + QLD. SEEK whole-state coverage is separate from role-keyword discovery.
+Current configured whole-state scope is NSW + ACT + QLD. SEEK whole-state coverage is separate from role-keyword discovery. Whole-state partitioning is the primary SEEK collection path; SEEK keyword-registry runs are supplemental and disabled by default to avoid redundant hundreds of searches.
 
 For SEEK, a result partition above `collection.seek_partition_max_results` (default 450) is **incomplete by definition** until split. Split order is state -> SEEK classification -> SEEK subclassification -> work type. Use SEEK's own live refinement links; do not invent classification IDs.
 

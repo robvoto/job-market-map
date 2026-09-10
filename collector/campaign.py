@@ -23,9 +23,14 @@ class CampaignStep:
 
 def registry_runs(*, sources: set[str] | None = None) -> list[dict]:
     enabled_geographies = {row["code"] for row in list_geographies(enabled_only=True)}
+    seek_keyword_queries_enabled = bool(
+        get_setting("collection.seek_keyword_queries_enabled")
+    )
     runs = []
     for row in list_queries(active_only=True):
         if sources and row["source"] not in sources:
+            continue
+        if row["source"] == "seek" and not seek_keyword_queries_enabled:
             continue
         if (
             row.get("geography_code")

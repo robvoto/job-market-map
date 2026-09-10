@@ -65,3 +65,6 @@ Whole-state collection scope is stored as admin data. Current enabled geographie
 - `collection.seek_completion_count_tolerance` — default 5; small live-market count drift tolerated when reconciling a leaf or parent union.
 
 These settings affect completeness semantics, so helper text is displayed in Admin. See `docs/SEEK_COVERAGE.md` before changing them.
+
+
+`collection.seek_keyword_queries_enabled` is off by default. Whole-state partition coverage is the primary SEEK feed; turning this on adds the role-keyword SEEK registry as supplemental collection and substantially increases request volume.

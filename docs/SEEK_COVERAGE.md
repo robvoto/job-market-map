@@ -92,3 +92,8 @@ GET /v1/coverage/seek
 ```
 
 Consumers should not assume SEEK is complete when a state status is `NOT_RUN`, `FAILED`, or starts with `INCOMPLETE`.
+
+
+## Keyword searches are supplemental
+
+The whole-state partitioner is the primary SEEK coverage mechanism. The 109-role query registry is retained for cross-source discovery and optional SEEK provenance, but `collection.seek_keyword_queries_enabled=false` by default prevents hundreds of redundant SEEK searches after the whole-state crawl exists. Rob can enable it in Admin if there is a specific reason to compare keyword-query behaviour.
