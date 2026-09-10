@@ -38,6 +38,11 @@ def main(argv: list[str] | None = None) -> int:
         help="Override the normal freshness window for this run only (initial load uses 3).",
     )
     parser.add_argument(
+        "--backfill-existing-jds",
+        action="store_true",
+        help="Also fetch JDs for older SEEK rows that have never had a successful JD fetch.",
+    )
+    parser.add_argument(
         "--max-runtime-minutes",
         type=int,
         default=None,
@@ -100,7 +105,10 @@ def main(argv: list[str] | None = None) -> int:
             started = time.monotonic()
 
             def deadline_reached() -> bool:
-                return bool(max_minutes) and (time.monotonic() - started) >= max_minutes * 60
+                return (
+                    bool(max_minutes)
+                    and (time.monotonic() - started) >= max_minutes * 60
+                )
 
             list_page_id = int(open_tab("about:blank", active=False).result["pageId"])
             result = run_seek_cycle(
@@ -113,14 +121,21 @@ def main(argv: list[str] | None = None) -> int:
 
             jd_result = None
             final_status = result.status
-            if result.status == "COMPLETE" and not stop_event.is_set() and not deadline_reached():
-                detail_page_id = int(open_tab("about:blank", active=False).result["pageId"])
+            if (
+                result.status == "COMPLETE"
+                and not stop_event.is_set()
+                and not deadline_reached()
+            ):
+                detail_page_id = int(
+                    open_tab("about:blank", active=False).result["pageId"]
+                )
                 jd_result = enrich_seek_coverage_jds(
                     page_id=detail_page_id,
                     codes=codes,
                     days=days,
                     should_stop=stop_event.is_set,
                     deadline_reached=deadline_reached,
+                    include_existing_unfetched=args.backfill_existing_jds,
                 )
                 if stop_event.is_set():
                     final_status = "STOPPED"
@@ -157,7 +172,11 @@ def main(argv: list[str] | None = None) -> int:
                 },
                 flush=True,
             )
-            return 0 if final_status in {"COMPLETE", "PARTIAL_TIME_LIMIT", "STOPPED"} else 1
+            return (
+                0
+                if final_status in {"COMPLETE", "PARTIAL_TIME_LIMIT", "STOPPED"}
+                else 1
+            )
     except CollectionAlreadyRunning as exc:
         print(str(exc), flush=True)
         return 3
@@ -165,7 +184,10 @@ def main(argv: list[str] | None = None) -> int:
         try:
             if "run_id" in locals():
                 finish_market_run(
-                    run_id, status="FAILED", message="Collection failed.", error=str(exc)
+                    run_id,
+                    status="FAILED",
+                    message="Collection failed.",
+                    error=str(exc),
                 )
             if args.trigger == "scheduled":
                 update_scheduler_state(

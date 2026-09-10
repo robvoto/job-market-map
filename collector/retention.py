@@ -105,27 +105,38 @@ def apply_retention(
 
         jobs_archived = 0
         if archive_jobs:
-            jobs_archived = conn.execute(
-                """
-                UPDATE jobs
-                   SET archived=1,
-                       compacted_at=?,
-                       teaser_text=NULL,
-                       raw_card_text=NULL
-                 WHERE last_seen_at < ?
-                   AND archived=0
-                """,
-                (archived_at, archive_cutoff),
-            ).rowcount
+            archive_ids = [
+                int(row[0])
+                for row in conn.execute(
+                    """
+                    SELECT job_id FROM job_observation_state
+                     WHERE last_seen_at < ? AND archived=0
+                    """,
+                    (archive_cutoff,),
+                )
+            ]
+            if archive_ids:
+                placeholders = ",".join("?" for _ in archive_ids)
+                conn.execute(
+                    f"UPDATE job_observation_state SET archived=1, compacted_at=? WHERE job_id IN ({placeholders})",
+                    (archived_at, *archive_ids),
+                )
+                conn.execute(
+                    f"UPDATE jobs SET teaser_text=NULL, raw_card_text=NULL WHERE id IN ({placeholders})",
+                    archive_ids,
+                )
+                jobs_archived = len(archive_ids)
 
         removable = []
         if remove_archived:
             removable = conn.execute(
                 """
-                SELECT * FROM jobs
-                 WHERE archived=1
-                   AND last_seen_at < ?
-                 ORDER BY id
+                SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count
+                  FROM jobs j
+                  JOIN job_observation_state s ON s.job_id=j.id
+                 WHERE s.archived=1
+                   AND s.last_seen_at < ?
+                 ORDER BY j.id
                 """,
                 (remove_cutoff,),
             ).fetchall()

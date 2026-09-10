@@ -226,3 +226,5 @@ exports/*
 backups/*.db
 logs/*.log
 data/*.lock
+
+data/*.logpath

@@ -16,21 +16,14 @@ def test_compacts_old_neutral_job_but_keeps_identity(tmp_path, monkeypatch):
     with db.connect() as conn:
         job_id = conn.execute(
             """INSERT INTO jobs
-            (source, source_job_id, canonical_url, title, employer, teaser_text, raw_card_text,
-             first_seen_at, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
-            (
-                "linkedin",
-                "1",
-                "https://example/jobs/1",
-                "Role",
-                "Company",
-                "teaser",
-                "raw",
-                old,
-                old,
-            ),
+            (source, source_job_id, canonical_url, title, employer, teaser_text, raw_card_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
+            ("linkedin", "1", "https://example/jobs/1", "Role", "Company", "teaser", "raw"),
         ).lastrowid
+        conn.execute(
+            "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at) VALUES(?,?,?)",
+            (job_id, old, old),
+        )
         conn.execute(
             "INSERT INTO card_captures(job_id, captured_at, raw_card_text) VALUES (?, ?, ?)",
             (job_id, old, "raw capture"),
@@ -41,8 +34,11 @@ def test_compacts_old_neutral_job_but_keeps_identity(tmp_path, monkeypatch):
     assert result.jobs_compacted == 1
     with db.connect() as conn:
         job = conn.execute("SELECT * FROM jobs WHERE id = ?", (job_id,)).fetchone()
+        state = conn.execute(
+            "SELECT * FROM job_observation_state WHERE job_id=?", (job_id,)
+        ).fetchone()
         captures = conn.execute("SELECT COUNT(*) FROM card_captures").fetchone()[0]
-    assert job["archived"] == 1
+    assert state["archived"] == 1
     assert job["raw_card_text"] is None
     assert job["title"] == "Role"
     assert job["employer"] == "Company"
@@ -65,12 +61,15 @@ def test_default_retention_preserves_historical_evidence(tmp_path, monkeypatch):
     with db.connect() as conn:
         job_id = conn.execute(
             """INSERT INTO jobs
-            (source, source_job_id, canonical_url, title, employer, teaser_text, raw_card_text,
-             first_seen_at, last_seen_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (source, source_job_id, canonical_url, title, employer, teaser_text, raw_card_text)
+            VALUES (?, ?, ?, ?, ?, ?, ?)""",
             ("seek", "safe1", "https://seek.test/safe1", "Role", "Company",
-             "possible scam wording", "original raw evidence", old, old),
+             "possible scam wording", "original raw evidence"),
         ).lastrowid
+        conn.execute(
+            "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at) VALUES(?,?,?)",
+            (job_id, old, old),
+        )
         conn.execute(
             "INSERT INTO card_captures(job_id, captured_at, raw_card_text) VALUES (?, ?, ?)",
             (job_id, old, "original capture evidence"),
@@ -84,10 +83,13 @@ def test_default_retention_preserves_historical_evidence(tmp_path, monkeypatch):
     assert result.tombstones_written == 0
     with db.connect() as conn:
         job = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        state = conn.execute(
+            "SELECT * FROM job_observation_state WHERE job_id=?", (job_id,)
+        ).fetchone()
         capture = conn.execute(
             "SELECT raw_card_text FROM card_captures WHERE job_id=?", (job_id,)
         ).fetchone()
-    assert job["archived"] == 0
+    assert state["archived"] == 0
     assert job["teaser_text"] == "possible scam wording"
     assert job["raw_card_text"] == "original raw evidence"
     assert capture[0] == "original capture evidence"
@@ -104,10 +106,13 @@ def test_permanent_jd_fetch_registry_survives_job_removal(tmp_path, monkeypatch)
     old = (now - timedelta(days=200)).isoformat(timespec="seconds")
     with db.connect() as conn:
         job_id = conn.execute(
-            """INSERT INTO jobs(source,source_job_id,canonical_url,title,first_seen_at,last_seen_at)
-               VALUES('seek','perm1','https://seek.test/perm1','Role',?,?,?)""".replace(",?,?,?)", ",?,?)"),
-            (old, old),
+            """INSERT INTO jobs(source,source_job_id,canonical_url,title)
+               VALUES('seek','perm1','https://seek.test/perm1','Role')"""
         ).lastrowid
+        conn.execute(
+            "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at) VALUES(?,?,?)",
+            (job_id, old, old),
+        )
 
     db.store_job_jd_once(
         job_id,

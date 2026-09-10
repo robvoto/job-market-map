@@ -55,6 +55,8 @@ It does **not** own personal activity/outcomes. Do not add `shown`, `seen`, `pre
 ## JD ownership — approved simple model
 JMM owns the one neutral/current raw JD for a job. Assume the JD does not change; do not build JD version history, multiple snapshots, snapshot IDs, hashes for historical reconstruction, or a historical JD ledger.
 
+Canonical `jobs` rows contain source vacancy facts, not collector calculations. `posted_at` is stored only from an exact source timestamp (for SEEK, `listedAt.dateTimeUtc`). Never derive it from relative labels such as `3h ago`. Relative labels belong only in raw capture evidence. Collector lifecycle (`first_seen_at`, `last_seen_at`, `capture_count`, archive/compaction state) belongs in `job_observation_state`, not `jobs`. Keep the exact source work type in `employment_type`; do not infer Permanent/Contract basis from ambiguous labels or JD prose.
+
 Target persistence on `jobs`:
 - `full_description`
 - `jd_fetched_at`
@@ -70,9 +72,9 @@ Behaviour:
 ## SEEK collection order
 1. Read the configured recent SEEK result window (normally 1 day; first live load explicitly 3 days).
 2. Parse reliable card-visible identity/evidence.
-3. For a known source job ID, record current coverage/last-seen only; do not re-ingest the full card or reopen its JD.
+3. For a known source job ID, record current coverage/operational last-seen only; do not re-ingest the full card or reopen its JD.
 4. For a new job, create the canonical market record and preserve its source card evidence.
-5. If the permanent JD-fetch marker is absent, open the job page once, extract the neutral JD, store it, and record successful fetch memory.
+5. If the permanent JD-fetch marker is absent, open the job page once, extract the neutral JD plus explicit structured neutral source facts, store them fill-only, and record successful fetch memory. Failed/human-check fetches create no success marker.
 6. Generate non-destructive duplicate evidence links and query/partition provenance.
 7. Do not score fit or add personal activity.
 

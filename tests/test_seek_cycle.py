@@ -15,8 +15,8 @@ def test_completed_coverage_is_snapshotted_then_reset_without_deleting_jobs(tmp_
     cycle = _wire(tmp_path, monkeypatch)
     with db.connect() as conn:
         job_id = conn.execute(
-            """INSERT INTO jobs(source,source_job_id,canonical_url,geography_code,first_seen_at,last_seen_at)
-               VALUES('seek','1','https://seek.test/1','ACT','2026-09-10','2026-09-10')"""
+            """INSERT INTO jobs(source,source_job_id,canonical_url,geography_code)
+               VALUES('seek','1','https://seek.test/1','ACT')"""
         ).lastrowid
         root_id = conn.execute(
             """INSERT INTO seek_partitions(geography_code,parent_id,level,label,url,status,reported_results,collected_unique_jobs,max_results_threshold,first_seen_at,updated_at,completed_at)

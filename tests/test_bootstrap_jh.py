@@ -171,8 +171,9 @@ def test_apply_imports_only_neutral_fields_copies_jd_and_is_idempotent(tmp_path,
     assert job["salary_text"] is None
     assert job["employment_type"] is None
     assert job["workplace_type"] is None
-    assert job["posted_text"] is None
+    assert "posted_text" not in job
     assert job["posted_at"] is None
+    assert {"first_seen_at", "last_seen_at", "capture_count", "archived", "compacted_at"}.isdisjoint(job)
     assert job["teaser_text"] is None
     assert job["full_description"] == source_jd
     assert job["jd_fetched_at"] == "2026-09-09T12:00:00+00:00"
@@ -183,6 +184,61 @@ def test_apply_imports_only_neutral_fields_copies_jd_and_is_idempotent(tmp_path,
     assert "fit_score" not in captures[0][0]
     assert "is_liked" not in captures[0][0]
     assert "PERSONAL SNAPSHOT" not in str(job)
+
+
+def test_source_backed_seek_detail_imports_exact_market_facts(tmp_path, monkeypatch):
+    payload = _payload(
+        "seek:123", url="https://www.seek.com.au/job/123", jd="Full neutral JD"
+    )
+    payload["detail_evidence"]["raw_source_payload"] = {
+        "jobdetails": {
+            "result": {
+                "job": {
+                    "id": 123,
+                    "title": "Business Analyst",
+                    "advertiser": {"name": "Acme"},
+                    "location": {"label": "Sydney NSW"},
+                    "salary": {"label": "$900 - $1000 p.d."},
+                    "workTypes": {"label": "Contract/Temp"},
+                    "listedAt": {"dateTimeUtc": "2026-09-08T03:14:15.123Z"},
+                    "expiresAt": {"dateTimeUtc": "2026-10-08T03:14:15.000Z"},
+                    "status": "active",
+                    "isLinkOut": True,
+                    "tracking": {
+                        "classificationInfo": {
+                            "classification": "Information & Communication Technology",
+                            "subClassification": "Business/Systems Analysts",
+                        }
+                    },
+                },
+                "workArrangements": {
+                    "arrangements": [{"label": "Hybrid", "type": "HYBRID"}]
+                },
+            }
+        }
+    }
+    jh_db = tmp_path / "jh.db"
+    _create_jh_db(
+        jh_db,
+        [("u1", "seek:123", "seek", "123", "BA", "Acme", "2026-09-08", "2026-09-10", json.dumps(payload))],
+    )
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+
+    apply_bootstrap(plan_bootstrap(jh_db, jmm_db_path=db.DB_PATH))
+
+    with db.connect() as conn:
+        job = dict(conn.execute("SELECT * FROM jobs").fetchone())
+    assert job["posted_at"] == "2026-09-08T03:14:15.123Z"
+    assert job["employment_type"] == "Contract/Temp"
+    assert job["workplace_type"] == "Hybrid"
+    assert job["location"] == "Sydney NSW"
+    assert job["salary_text"] == "$900 - $1000 p.d."
+    assert job["expires_at"] == "2026-10-08T03:14:15.000Z"
+    assert job["source_status"] == "active"
+    assert job["apply_method"] == "external_apply"
+    assert job["easy_apply"] == 0
+    assert job["classification_text"] == "Information & Communication Technology"
+    assert job["subclassification_text"] == "Business/Systems Analysts"
 
 
 def test_jd_without_neutral_fetch_timestamp_is_not_imported(tmp_path, monkeypatch):
@@ -270,8 +326,8 @@ def test_existing_url_only_identity_is_promoted_without_overwriting_jmm_evidence
     with db.connect() as conn:
         conn.execute(
             """
-            INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,location,first_seen_at,last_seen_at)
-            VALUES('seek',NULL,'https://www.seek.com.au/job/123','Existing JMM title','Existing JMM employer','Sydney NSW','2026-09-01','2026-09-09')
+            INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,location)
+            VALUES('seek',NULL,'https://www.seek.com.au/job/123','Existing JMM title','Existing JMM employer','Sydney NSW')
             """
         )
 

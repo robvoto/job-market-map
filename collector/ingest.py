@@ -132,7 +132,6 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             "salary_text": _clean(obs.salary_text),
             "employment_type": _clean(obs.employment_type),
             "workplace_type": _clean(obs.workplace_type),
-            "posted_text": _clean(obs.posted_text),
             "posted_at": _clean(obs.posted_at),
             "applicant_count": obs.applicant_count,
             "teaser_text": _clean(obs.teaser_text),
@@ -148,16 +147,11 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             job_id = int(existing[0])
             assignments = [
                 "canonical_url = ?",
-                "last_seen_at = ?",
-                "capture_count = capture_count + 1",
-                "archived = 0",
-                "compacted_at = NULL",
                 "reposted = CASE WHEN ? THEN 1 ELSE reposted END",
                 "easy_apply = COALESCE(?, easy_apply)",
             ]
             values: list[object] = [
                 canonical_url,
-                captured_at,
                 int(bool(obs.reposted)),
                 None if obs.easy_apply is None else int(obs.easy_apply),
             ]
@@ -172,8 +166,6 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             created = False
         else:
             historical = dict(tombstone) if tombstone else None
-            first_seen_at = historical["first_seen_at"] if historical else captured_at
-            prior_capture_count = int(historical["capture_count"]) if historical else 0
             identity = (
                 historical["identity_key"]
                 if historical
@@ -183,11 +175,10 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                 """
                 INSERT INTO jobs(
                     source, source_job_id, identity_key, canonical_url, title, employer, location, geography_code,
-                    salary_text, employment_type, workplace_type, posted_text, posted_at,
+                    salary_text, employment_type, workplace_type, posted_at,
                     reposted, applicant_count, easy_apply, teaser_text, raw_card_text,
-                    classification_text, subclassification_text, card_tags_json,
-                    first_seen_at, last_seen_at, capture_count, archived
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0)
+                    classification_text, subclassification_text, card_tags_json
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -201,7 +192,6 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                     fields["salary_text"],
                     fields["employment_type"],
                     fields["workplace_type"],
-                    fields["posted_text"],
                     fields["posted_at"],
                     int(bool(obs.reposted)),
                     fields["applicant_count"],
@@ -211,9 +201,6 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                     fields["classification_text"],
                     fields["subclassification_text"],
                     fields["card_tags_json"],
-                    first_seen_at,
-                    captured_at,
-                    prior_capture_count + 1,
                 ),
             )
             job_id = int(cur.lastrowid)
@@ -223,6 +210,32 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                 conn.execute(
                     "DELETE FROM job_tombstones WHERE id=?", (historical["id"],)
                 )
+
+        if existing:
+            conn.execute(
+                """
+                INSERT INTO job_observation_state(
+                    job_id,first_seen_at,last_seen_at,capture_count,archived,compacted_at
+                ) VALUES(?,?,?,1,0,NULL)
+                ON CONFLICT(job_id) DO UPDATE SET
+                    last_seen_at=excluded.last_seen_at,
+                    capture_count=job_observation_state.capture_count+1,
+                    archived=0,
+                    compacted_at=NULL
+                """,
+                (job_id, captured_at, captured_at),
+            )
+        else:
+            first_seen_at = historical["first_seen_at"] if historical else captured_at
+            prior_capture_count = int(historical["capture_count"]) if historical else 0
+            conn.execute(
+                """
+                INSERT INTO job_observation_state(
+                    job_id,first_seen_at,last_seen_at,capture_count,archived,compacted_at
+                ) VALUES(?,?,?,?,0,NULL)
+                """,
+                (job_id, first_seen_at, captured_at, prior_capture_count + 1),
+            )
 
         stored_row = dict(
             conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
@@ -234,6 +247,9 @@ def ingest_card(obs: CardObservation) -> IngestResult:
         )
 
         query_id = _query_id(conn, obs, captured_at)
+        capture_json = dict(obs.raw_json or {})
+        if _clean(obs.posted_text):
+            capture_json.setdefault("posted_text", _clean(obs.posted_text))
         conn.execute(
             """
             INSERT INTO card_captures(job_id, captured_at, query_id, rank, page_number, raw_card_text, raw_json)
@@ -246,8 +262,8 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                 obs.rank,
                 obs.page_number,
                 obs.raw_card_text,
-                json.dumps(obs.raw_json, ensure_ascii=False, sort_keys=True)
-                if obs.raw_json is not None
+                json.dumps(capture_json, ensure_ascii=False, sort_keys=True)
+                if capture_json
                 else None,
             ),
         )

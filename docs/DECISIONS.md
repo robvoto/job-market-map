@@ -52,3 +52,10 @@
 **Decision:** JMM stores at most one current neutral JD on the canonical `jobs` row using `full_description`, `jd_fetched_at` and `jd_source`. Assume the JD does not change. Do not create JD snapshot/version history, snapshot IDs, historical hashes or historical JD reconstruction.
 
 **Reason:** JMM is the single owner of neutral market evidence. A simple write-once JD avoids duplicate raw JD truth in consumers without introducing history machinery that is not required.
+
+## ADR-011 — Canonical job rows contain source facts, not collector calculations
+**Decision:** Keep source-vacancy truth on `jobs`. Store collector lifecycle (`first_seen_at`, `last_seen_at`, `capture_count`, `archived`, `compacted_at`) separately in `job_observation_state`. Do not keep relative posting labels such as `3h ago` on the master row and do not derive `posted_at` from them. `jobs.posted_at` is populated only from an exact source timestamp when available.
+
+When JMM deliberately opens a source detail page for JD enrichment, that same trusted detail capture may fill other missing neutral source facts such as location, salary, employment/workplace type, source status/expiry, apply method and classification. Missing facts remain missing; existing better JMM evidence is not overwritten.
+
+**Reason:** The canonical row should describe the vacancy, not JMM's observation process or calculations. The detail page is richer source evidence than a result card and should be used when it is already being opened, without turning relative display text into invented market truth.

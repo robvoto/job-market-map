@@ -10,6 +10,7 @@ from collector.browser_broker import (
     click,
     navigate,
     open_tab,
+    select_page,
     snapshot,
 )
 from collector.db import connect, init_db
@@ -27,6 +28,15 @@ TERMINAL_TEXT = (
     "no matching search results",
     "we couldn't find anything that matched your search",
 )
+CHALLENGE_TEXT = (
+    "help us keep seek secure",
+    "confirm you are human",
+    "verify you are human",
+    "captcha",
+    "security check",
+    "enable javascript and cookies to continue",
+)
+HUMAN_CHECK_WAIT_SECONDS = 900.0
 
 
 @dataclass(frozen=True)
@@ -75,28 +85,70 @@ def _page_url(url: str, page: int) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
 
 
-def _wait_snapshot(page_id: int, *, timeout: float | None = None) -> dict:
+def _same_seek_page(actual_url: str, expected_url: str) -> bool:
+    actual = urlsplit(str(actual_url or ""))
+    expected = urlsplit(str(expected_url or ""))
+    if not actual.scheme or not actual.netloc:
+        return True
+    if not (
+        actual.netloc.endswith("seek.com.au")
+        and expected.netloc.endswith("seek.com.au")
+    ):
+        return False
+    if actual.path.rstrip("/") != expected.path.rstrip("/"):
+        return False
+    actual_q = dict(parse_qsl(actual.query, keep_blank_values=True))
+    expected_q = dict(parse_qsl(expected.query, keep_blank_values=True))
+    return all(actual_q.get(key) == value for key, value in expected_q.items())
+
+
+def _wait_snapshot(
+    page_id: int, *, expected_url: str | None = None, timeout: float | None = None
+) -> dict:
     timeout = float(
         timeout
         if timeout is not None
         else get_setting("collection.seek_parse_wait_seconds")
     )
-    deadline = time.monotonic() + timeout
+    normal_deadline = time.monotonic() + timeout
+    human_deadline: float | None = None
+    brought_forward = False
     last = {}
-    while time.monotonic() < deadline:
+    while True:
         last = snapshot(page_id, verbose=True).result or {}
+        actual_url = str(last.get("url") or "")
+        if (
+            expected_url
+            and actual_url
+            and not _same_seek_page(actual_url, expected_url)
+        ):
+            raise BrowserBrokerError(
+                f"SEEK tab ownership lost: expected {expected_url!r}, browser is on {actual_url!r}"
+            )
         text = str(last.get("text") or "")
         low = text.casefold()
-        if "captcha" in low or "verify you are human" in low or "security check" in low:
-            raise BrowserBrokerError("SEEK browser challenge")
+        if any(marker in low for marker in CHALLENGE_TEXT):
+            if not brought_forward:
+                select_page(page_id, bring_to_front=True)
+                print(
+                    "SEEK needs human confirmation; brought JMM tab to front.",
+                    flush=True,
+                )
+                brought_forward = True
+                human_deadline = time.monotonic() + HUMAN_CHECK_WAIT_SECONDS
+            elif human_deadline is not None and time.monotonic() >= human_deadline:
+                raise BrowserBrokerError("SEEK human-check wait expired")
+            time.sleep(1.0)
+            continue
         if seek_result_count(text) is not None or any(
             marker in low for marker in TERMINAL_TEXT
         ):
             return last
+        if time.monotonic() >= normal_deadline:
+            raise SeekParseError(
+                f"SEEK partition page did not reach a result state: {last.get('url')!r}"
+            )
         time.sleep(0.5)
-    raise SeekParseError(
-        f"SEEK partition page did not reach a result state: {last.get('url')!r}"
-    )
 
 
 def _ensure_partition(
@@ -236,9 +288,10 @@ def _collect_leaf(
     page = 1
     safety = int(get_setting("collection.seek_safety_page_limit"))
     while page <= safety:
-        navigate(page_id, _page_url(url, page))
+        target_url = _page_url(url, page)
+        navigate(page_id, target_url)
         time.sleep(float(get_setting("collection.seek_page_load_seconds")))
-        snap = _wait_snapshot(page_id)
+        snap = _wait_snapshot(page_id, expected_url=target_url)
         text = str(snap.get("text") or "")
         if any(marker in text.casefold() for marker in TERMINAL_TEXT):
             break
@@ -258,7 +311,9 @@ def _collect_leaf(
             for card in cards
             if card.source_job_id and card.source_job_id not in seen
         ]
-        source_ids = [str(card.source_job_id) for card in new_cards if card.source_job_id]
+        source_ids = [
+            str(card.source_job_id) for card in new_cards if card.source_job_id
+        ]
         existing_by_source_id: dict[str, int] = {}
         if source_ids:
             placeholders = ",".join("?" for _ in source_ids)
@@ -281,9 +336,18 @@ def _collect_leaf(
                 # Daily scans only need to prove this known identity is still present.
                 # Avoid creating another raw card capture or rerunning duplicate work.
                 with connect() as conn:
+                    now = _now()
                     conn.execute(
-                        "UPDATE jobs SET last_seen_at=?, archived=0, compacted_at=NULL WHERE id=?",
-                        (_now(), job_id),
+                        """
+                        INSERT INTO job_observation_state(
+                            job_id,first_seen_at,last_seen_at,capture_count,archived,compacted_at
+                        ) VALUES(?,?,?,1,0,NULL)
+                        ON CONFLICT(job_id) DO UPDATE SET
+                            last_seen_at=excluded.last_seen_at,
+                            archived=0,
+                            compacted_at=NULL
+                        """,
+                        (job_id, now, now),
                     )
             with connect() as conn:
                 conn.execute(
@@ -436,7 +500,7 @@ def _process_partition(
             return
         navigate(page_id, url)
         time.sleep(float(get_setting("collection.seek_page_load_seconds")))
-        snap = _wait_snapshot(page_id)
+        snap = _wait_snapshot(page_id, expected_url=url)
         text = str(snap.get("text") or "")
         if any(marker in text.casefold() for marker in TERMINAL_TEXT):
             _update_partition(partition_id, status="COMPLETE", reported=0, collected=0)

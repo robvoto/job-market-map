@@ -97,5 +97,19 @@ def snapshot(page_id: int, *, verbose: bool = True) -> BrokerResponse:
     return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
 
 
+def select_page(page_id: int, *, bring_to_front: bool = False) -> BrokerResponse:
+    """Select a specific Chrome tab; normally keep it in the background."""
+    return browser_command(
+        "select_page",
+        {"pageId": page_id, "bringToFront": bring_to_front},
+        page_id=page_id,
+    )
+
+
+def seek_job_detail(page_id: int) -> BrokerResponse:
+    """Read one authenticated SEEK job page as structured neutral evidence."""
+    return browser_command("seek_job_detail", page_id=page_id)
+
+
 def click(page_id: int, uid: str) -> BrokerResponse:
     return browser_command("click", {"uid": uid}, page_id=page_id)

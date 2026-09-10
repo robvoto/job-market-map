@@ -93,6 +93,64 @@ def _backfill_jd_fetch_registry(conn: sqlite3.Connection) -> None:
         _record_successful_jd_fetch(conn, row)
 
 
+CANONICAL_DETAIL_FACT_COLUMNS = (
+    "title",
+    "employer",
+    "location",
+    "salary_text",
+    "employment_type",
+    "workplace_type",
+    "posted_at",
+    "expires_at",
+    "source_status",
+    "apply_method",
+    "classification_text",
+    "subclassification_text",
+    "easy_apply",
+)
+
+
+def update_job_source_facts(job_id: int, **facts: object) -> dict[str, object]:
+    """Fill missing canonical market facts from validated source detail evidence.
+
+    This is deliberately fill-only: a later/poorer extraction cannot overwrite
+    source facts already held by JMM. Collector observation times do not belong
+    in this operation.
+    """
+    unknown = sorted(set(facts) - set(CANONICAL_DETAIL_FACT_COLUMNS))
+    if unknown:
+        raise ValueError(f"unsupported canonical source facts: {', '.join(unknown)}")
+
+    init_db()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        if row is None:
+            raise KeyError(f"job {job_id} not found")
+        assignments: list[str] = []
+        values: list[object] = []
+        row_keys = set(row.keys())
+        for column in CANONICAL_DETAIL_FACT_COLUMNS:
+            incoming = facts.get(column)
+            if incoming is None:
+                continue
+            if isinstance(incoming, str):
+                incoming = incoming.strip()
+                if not incoming:
+                    continue
+            current = row[column] if column in row_keys else None
+            if current not in (None, ""):
+                continue
+            assignments.append(f"{column}=?")
+            values.append(int(incoming) if column == "easy_apply" else incoming)
+        if assignments:
+            conn.execute(
+                f"UPDATE jobs SET {', '.join(assignments)} WHERE id=?",
+                (*values, job_id),
+            )
+        stored = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return dict(stored)
+
+
 def get_job_jd(job_id: int) -> dict[str, object] | None:
     """Return the one canonical neutral JD for a job, if JMM has it."""
     init_db()
@@ -183,6 +241,39 @@ def _columns(conn: sqlite3.Connection, table: str) -> set[str]:
 def _ensure_column(conn: sqlite3.Connection, table: str, column: str, ddl: str) -> None:
     if column not in _columns(conn, table):
         conn.execute(f"ALTER TABLE {table} ADD COLUMN {ddl}")
+
+
+def _migrate_job_observation_state(conn: sqlite3.Connection) -> None:
+    """Move collector lifecycle bookkeeping out of the canonical jobs master row."""
+    columns = _columns(conn, "jobs")
+    if {"first_seen_at", "last_seen_at"}.issubset(columns):
+        capture_expr = "capture_count" if "capture_count" in columns else "1"
+        archived_expr = "archived" if "archived" in columns else "0"
+        compacted_expr = "compacted_at" if "compacted_at" in columns else "NULL"
+        conn.execute(
+            f"""
+            INSERT OR IGNORE INTO job_observation_state(
+                job_id, first_seen_at, last_seen_at, capture_count, archived, compacted_at
+            )
+            SELECT id, first_seen_at, last_seen_at, {capture_expr}, {archived_expr}, {compacted_expr}
+              FROM jobs
+            """
+        )
+
+    conn.execute("DROP INDEX IF EXISTS idx_jobs_first_seen")
+    conn.execute("DROP INDEX IF EXISTS idx_jobs_last_seen")
+    conn.execute("DROP INDEX IF EXISTS idx_jobs_archived_last_seen")
+    for column in (
+        "posted_text",
+        "employment_basis",
+        "first_seen_at",
+        "last_seen_at",
+        "capture_count",
+        "archived",
+        "compacted_at",
+    ):
+        if column in _columns(conn, "jobs"):
+            conn.execute(f"ALTER TABLE jobs DROP COLUMN {column}")
 
 
 def _backfill_identity(conn: sqlite3.Connection, table: str) -> None:
@@ -292,8 +383,6 @@ def init_db() -> None:
     with connect() as conn:
         conn.executescript(SCHEMA_PATH.read_text(encoding="utf-8"))
         # Lightweight forward migrations for databases created by early builds.
-        _ensure_column(conn, "jobs", "archived", "archived INTEGER NOT NULL DEFAULT 0")
-        _ensure_column(conn, "jobs", "compacted_at", "compacted_at TEXT")
         _ensure_column(conn, "jobs", "classification_text", "classification_text TEXT")
         _ensure_column(
             conn, "jobs", "subclassification_text", "subclassification_text TEXT"
@@ -303,6 +392,10 @@ def init_db() -> None:
         _ensure_column(conn, "jobs", "jd_fetched_at", "jd_fetched_at TEXT")
         _ensure_column(conn, "jobs", "jd_source", "jd_source TEXT")
         _ensure_column(conn, "jobs", "geography_code", "geography_code TEXT")
+        _ensure_column(conn, "jobs", "posted_at", "posted_at TEXT")
+        _ensure_column(conn, "jobs", "expires_at", "expires_at TEXT")
+        _ensure_column(conn, "jobs", "source_status", "source_status TEXT")
+        _ensure_column(conn, "jobs", "apply_method", "apply_method TEXT")
         _ensure_column(conn, "jobs", "core_fingerprint", "core_fingerprint TEXT")
         _ensure_column(
             conn, "jobs", "exact_card_fingerprint", "exact_card_fingerprint TEXT"
@@ -333,6 +426,7 @@ def init_db() -> None:
         )
         _ensure_column(conn, "queries", "last_error", "last_error TEXT")
 
+        _migrate_job_observation_state(conn)
         _backfill_identity(conn, "jobs")
         _backfill_identity(conn, "job_tombstones")
         _backfill_jd_fetch_registry(conn)
@@ -344,9 +438,6 @@ def init_db() -> None:
         )
         conn.execute(
             "CREATE UNIQUE INDEX IF NOT EXISTS idx_job_tombstones_identity ON job_tombstones(identity_key)"
-        )
-        conn.execute(
-            "CREATE INDEX IF NOT EXISTS idx_jobs_archived_last_seen ON jobs(archived, last_seen_at)"
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_jobs_core_fingerprint ON jobs(core_fingerprint)"

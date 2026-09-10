@@ -11,8 +11,8 @@ def test_backup_is_consistent_integrity_checked_and_retained(tmp_path, monkeypat
     db.init_db()
     with db.connect() as conn:
         conn.execute(
-            """INSERT INTO jobs(source,source_job_id,canonical_url,title,first_seen_at,last_seen_at)
-               VALUES('seek','42','https://seek.test/42','Important role','2026-09-10','2026-09-10')"""
+            """INSERT INTO jobs(source,source_job_id,canonical_url,title)
+               VALUES('seek','42','https://seek.test/42','Important role')"""
         )
 
     root = tmp_path / "backups"

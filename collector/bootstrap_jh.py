@@ -27,12 +27,15 @@ class BootstrapCandidate:
     salary_text: str | None = None
     employment_type: str | None = None
     workplace_type: str | None = None
-    posted_text: str | None = None
     posted_at: str | None = None
+    expires_at: str | None = None
+    source_status: str | None = None
+    apply_method: str | None = None
+    classification_text: str | None = None
+    subclassification_text: str | None = None
+    easy_apply: bool | None = None
     reposted: bool = False
     teaser_text: str | None = None
-    first_seen_at: str | None = None
-    last_seen_at: str | None = None
     full_description: str | None = None
     jd_fetched_at: str | None = None
     jd_source: str | None = None
@@ -104,6 +107,18 @@ def _normalise_timestamp(value: Any) -> str | None:
     return parsed.astimezone(UTC).isoformat(timespec="seconds")
 
 
+def _validated_source_timestamp(value: Any) -> str | None:
+    """Validate an ISO source timestamp without rewriting the source value."""
+    text = _clean(value)
+    if not text:
+        return None
+    try:
+        datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    return text
+
+
 def _timestamp_key(value: str | None) -> datetime:
     if not value:
         return datetime.min.replace(tzinfo=UTC)
@@ -132,6 +147,83 @@ def _read_only_connect(path: Path) -> sqlite3.Connection:
 def _detail_evidence(payload: dict[str, Any]) -> dict[str, Any]:
     value = payload.get("detail_evidence")
     return value if isinstance(value, dict) else {}
+
+
+def _seek_detail_facts(
+    detail_evidence: dict[str, Any], source_job_id: str
+) -> tuple[dict[str, Any], bool]:
+    """Extract neutral SEEK facts from the source payload captured with the JD.
+
+    Returns (facts, identity_conflict). Relative labels such as postedTime are
+    deliberately ignored; listedAt.dateTimeUtc is the canonical posting time.
+    """
+    raw = detail_evidence.get("raw_source_payload")
+    if not isinstance(raw, dict):
+        return {}, False
+    result = ((raw.get("jobdetails") or {}).get("result") or {})
+    if not isinstance(result, dict):
+        return {}, False
+    job = result.get("job")
+    if not isinstance(job, dict):
+        return {}, False
+    payload_job_id = _clean(job.get("id"))
+    if payload_job_id and payload_job_id != source_job_id:
+        return {}, True
+
+    def label(value: Any) -> str | None:
+        return _clean(value.get("label")) if isinstance(value, dict) else None
+
+    tracking = job.get("tracking") if isinstance(job.get("tracking"), dict) else {}
+    classification = (
+        tracking.get("classificationInfo")
+        if isinstance(tracking.get("classificationInfo"), dict)
+        else {}
+    )
+    arrangements = (
+        result.get("workArrangements")
+        if isinstance(result.get("workArrangements"), dict)
+        else {}
+    )
+    arrangement_labels = [
+        _clean(item.get("label"))
+        for item in (arrangements.get("arrangements") or [])
+        if isinstance(item, dict) and _clean(item.get("label"))
+    ]
+    workplace_type = ", ".join(dict.fromkeys(arrangement_labels)) or label(arrangements)
+
+    is_link_out = job.get("isLinkOut")
+    easy_apply = None if not isinstance(is_link_out, bool) else not is_link_out
+    apply_method = (
+        None
+        if not isinstance(is_link_out, bool)
+        else ("external_apply" if is_link_out else "quick_apply")
+    )
+    advertiser = job.get("advertiser") if isinstance(job.get("advertiser"), dict) else {}
+    work_type = label(job.get("workTypes"))
+
+    return {
+        "title": _clean(job.get("title")),
+        "employer": _clean(advertiser.get("name")),
+        "location": label(job.get("location")),
+        "salary_text": label(job.get("salary")),
+        "employment_type": work_type,
+        "workplace_type": workplace_type,
+        "posted_at": _validated_source_timestamp(
+            (job.get("listedAt") or {}).get("dateTimeUtc")
+            if isinstance(job.get("listedAt"), dict)
+            else None
+        ),
+        "expires_at": _validated_source_timestamp(
+            (job.get("expiresAt") or {}).get("dateTimeUtc")
+            if isinstance(job.get("expiresAt"), dict)
+            else None
+        ),
+        "source_status": _clean(job.get("status")),
+        "apply_method": apply_method,
+        "easy_apply": easy_apply,
+        "classification_text": _clean(classification.get("classification")),
+        "subclassification_text": _clean(classification.get("subClassification")),
+    }, False
 
 
 def _candidate_from_row(row: sqlite3.Row) -> tuple[BootstrapCandidate | None, str | None]:
@@ -182,29 +274,29 @@ def _candidate_from_row(row: sqlite3.Row) -> tuple[BootstrapCandidate | None, st
     if not _is_usable_url(canonical_url):
         return None, "invalid"
 
-    first_seen = _normalise_timestamp(row["first_seen"]) or _normalise_timestamp(
-        payload.get("first_seen_at")
-    )
-    last_seen = _normalise_timestamp(row["last_seen"]) or _normalise_timestamp(
-        payload.get("last_seen_at")
-    )
-
     details_text = _source_text(detail_evidence.get("details_text"))
     jd_fetched_at = _normalise_timestamp(detail_evidence.get("fetched_at"))
     description_source = _clean(detail_evidence.get("description_source"))
     metadata_canonical_url = (
         canonicalise_url(metadata_url) if _is_usable_url(metadata_url) else None
     )
-    jd_is_source_backed = bool(
-        details_text
-        and jd_fetched_at
+    detail_is_source_backed = bool(
+        jd_fetched_at
         and description_source
         and metadata_source
         and metadata_source.casefold() == source
         and metadata_job_id == source_job_id
         and metadata_canonical_url == canonical_url
     )
-    full_description = details_text if jd_is_source_backed else None
+    detail_facts: dict[str, Any] = {}
+    if detail_is_source_backed and source == "seek":
+        detail_facts, raw_identity_conflict = _seek_detail_facts(
+            detail_evidence, source_job_id
+        )
+        if raw_identity_conflict:
+            return None, "conflict"
+
+    full_description = details_text if detail_is_source_backed and details_text else None
     jd_source = (
         f"job_hunter_detail_evidence:{description_source}"
         if full_description
@@ -216,12 +308,21 @@ def _candidate_from_row(row: sqlite3.Row) -> tuple[BootstrapCandidate | None, st
             source=source,
             source_job_id=source_job_id,
             canonical_url=canonical_url,
-            title=_clean(row["title"]) or _clean(payload.get("title")),
-            employer=_clean(row["company"]) or _clean(payload.get("company")),
-            first_seen_at=first_seen,
-            last_seen_at=last_seen,
+            title=_clean(row["title"]) or detail_facts.get("title") or _clean(payload.get("title")),
+            employer=_clean(row["company"]) or detail_facts.get("employer") or _clean(payload.get("company")),
+            location=detail_facts.get("location"),
+            salary_text=detail_facts.get("salary_text"),
+            employment_type=detail_facts.get("employment_type"),
+            workplace_type=detail_facts.get("workplace_type"),
+            posted_at=detail_facts.get("posted_at"),
+            expires_at=detail_facts.get("expires_at"),
+            source_status=detail_facts.get("source_status"),
+            apply_method=detail_facts.get("apply_method"),
+            easy_apply=detail_facts.get("easy_apply"),
+            classification_text=detail_facts.get("classification_text"),
+            subclassification_text=detail_facts.get("subclassification_text"),
             full_description=full_description,
-            jd_fetched_at=jd_fetched_at,
+            jd_fetched_at=jd_fetched_at if full_description else None,
             jd_source=jd_source,
         ),
         None,
@@ -229,34 +330,29 @@ def _candidate_from_row(row: sqlite3.Row) -> tuple[BootstrapCandidate | None, st
 
 
 def _merge_candidates(current: BootstrapCandidate, incoming: BootstrapCandidate) -> BootstrapCandidate:
-    newer, older = (incoming, current)
-    if _timestamp_key(current.last_seen_at) > _timestamp_key(incoming.last_seen_at):
-        newer, older = current, incoming
-
     def value(name: str):
-        return getattr(newer, name) if getattr(newer, name) not in (None, "") else getattr(older, name)
-
-    first_seen_values = [value for value in (current.first_seen_at, incoming.first_seen_at) if value]
-    last_seen_values = [value for value in (current.last_seen_at, incoming.last_seen_at) if value]
-    first_seen = min(first_seen_values, key=_timestamp_key) if first_seen_values else None
-    last_seen = max(last_seen_values, key=_timestamp_key) if last_seen_values else None
+        left = getattr(current, name)
+        return left if left not in (None, "") else getattr(incoming, name)
 
     return BootstrapCandidate(
         source=current.source,
         source_job_id=current.source_job_id,
-        canonical_url=newer.canonical_url,
+        canonical_url=current.canonical_url,
         title=value("title"),
         employer=value("employer"),
         location=value("location"),
         salary_text=value("salary_text"),
         employment_type=value("employment_type"),
         workplace_type=value("workplace_type"),
-        posted_text=value("posted_text"),
         posted_at=value("posted_at"),
+        expires_at=value("expires_at"),
+        source_status=value("source_status"),
+        apply_method=value("apply_method"),
+        classification_text=value("classification_text"),
+        subclassification_text=value("subclassification_text"),
+        easy_apply=value("easy_apply"),
         reposted=bool(current.reposted or incoming.reposted),
         teaser_text=value("teaser_text"),
-        first_seen_at=first_seen,
-        last_seen_at=last_seen,
         full_description=value("full_description"),
         jd_fetched_at=value("jd_fetched_at"),
         jd_source=value("jd_source"),
@@ -283,8 +379,6 @@ def _existing_jmm_rows(path: Path, table: str) -> list[dict[str, Any]]:
                 "source_job_id",
                 "canonical_url",
                 "identity_key",
-                "first_seen_at",
-                "last_seen_at",
                 "full_description",
             )
             if name in columns
@@ -354,7 +448,7 @@ def _find_jmm_conflicts(
             ),
             None,
         )
-        existing_jd = _clean(matching_job.get("full_description")) if matching_job else None
+        existing_jd = _source_text(matching_job.get("full_description")) if matching_job else None
         if existing_jd and candidate.full_description and existing_jd != candidate.full_description:
             jd_conflicts += 1
 
@@ -498,8 +592,13 @@ def _prefer_existing_market_evidence(
         salary_text=existing_value("salary_text", candidate.salary_text),
         employment_type=existing_value("employment_type", candidate.employment_type),
         workplace_type=existing_value("workplace_type", candidate.workplace_type),
-        posted_text=existing_value("posted_text", candidate.posted_text),
         posted_at=existing_value("posted_at", candidate.posted_at),
+        expires_at=existing_value("expires_at", candidate.expires_at),
+        source_status=existing_value("source_status", candidate.source_status),
+        apply_method=existing_value("apply_method", candidate.apply_method),
+        classification_text=existing_value("classification_text", candidate.classification_text),
+        subclassification_text=existing_value("subclassification_text", candidate.subclassification_text),
+        easy_apply=(existing["easy_apply"] if "easy_apply" in keys and existing["easy_apply"] is not None else candidate.easy_apply),
         teaser_text=existing_value("teaser_text", candidate.teaser_text),
     )
 
@@ -515,31 +614,22 @@ def _promote_url_only_identity(candidate: BootstrapCandidate) -> None:
         )
 
 
-def _restore_market_freshness(
-    job_id: int,
-    *,
-    prior_first_seen: str | None,
-    prior_last_seen: str | None,
-    candidate: BootstrapCandidate,
-) -> None:
-    first_values = [
-        value for value in (prior_first_seen, candidate.first_seen_at) if _normalise_timestamp(value)
-    ]
-    last_values = [
-        value for value in (prior_last_seen, candidate.last_seen_at) if _normalise_timestamp(value)
-    ]
-    first_seen = min(first_values, key=lambda value: _timestamp_key(_normalise_timestamp(value))) if first_values else None
-    last_seen = max(last_values, key=lambda value: _timestamp_key(_normalise_timestamp(value))) if last_values else None
-    if first_seen is None and last_seen is None:
-        return
-    with db.connect() as conn:
-        current = conn.execute("SELECT first_seen_at, last_seen_at FROM jobs WHERE id=?", (job_id,)).fetchone()
-        if not current:
-            return
-        conn.execute(
-            "UPDATE jobs SET first_seen_at=?, last_seen_at=? WHERE id=?",
-            (first_seen or current["first_seen_at"], last_seen or current["last_seen_at"], job_id),
-        )
+def _candidate_source_facts(candidate: BootstrapCandidate) -> dict[str, Any]:
+    return {
+        "title": candidate.title,
+        "employer": candidate.employer,
+        "location": candidate.location,
+        "salary_text": candidate.salary_text,
+        "employment_type": candidate.employment_type,
+        "workplace_type": candidate.workplace_type,
+        "posted_at": candidate.posted_at,
+        "expires_at": candidate.expires_at,
+        "source_status": candidate.source_status,
+        "apply_method": candidate.apply_method,
+        "classification_text": candidate.classification_text,
+        "subclassification_text": candidate.subclassification_text,
+        "easy_apply": candidate.easy_apply,
+    }
 
 
 def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
@@ -551,9 +641,9 @@ def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
 
         with db.connect() as conn:
             table, existing = _matching_existing(conn, candidate)
-            prior_first = existing["first_seen_at"] if table == "jobs" and existing else None
-            prior_last = existing["last_seen_at"] if table == "jobs" and existing else None
             if table == "jobs" and existing and _bootstrap_capture_exists(conn, int(existing["id"])):
+                job_id = int(existing["id"])
+                db.update_job_source_facts(job_id, **_candidate_source_facts(candidate))
                 report.jobs_already_imported += 1
                 if candidate.full_description:
                     existing_jd = _clean(existing["full_description"])
@@ -561,7 +651,7 @@ def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
                         report.jds_already_present += 1
                     elif candidate.jd_fetched_at and candidate.jd_source:
                         db.store_job_jd_once(
-                            int(existing["id"]),
+                            job_id,
                             full_description=candidate.full_description,
                             jd_fetched_at=candidate.jd_fetched_at,
                             jd_source=candidate.jd_source,
@@ -571,9 +661,7 @@ def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
 
         candidate = _prefer_existing_market_evidence(candidate, existing)
         _promote_url_only_identity(candidate)
-        captured_at = candidate.last_seen_at or candidate.first_seen_at or datetime.now(UTC).isoformat(
-            timespec="seconds"
-        )
+        captured_at = datetime.now(UTC).isoformat(timespec="seconds")
         result = ingest_card(
             CardObservation(
                 source=candidate.source,
@@ -585,10 +673,12 @@ def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
                 salary_text=candidate.salary_text,
                 employment_type=candidate.employment_type,
                 workplace_type=candidate.workplace_type,
-                posted_text=candidate.posted_text,
                 posted_at=candidate.posted_at,
                 reposted=candidate.reposted,
                 teaser_text=candidate.teaser_text,
+                classification_text=candidate.classification_text,
+                subclassification_text=candidate.subclassification_text,
+                easy_apply=candidate.easy_apply,
                 captured_at=captured_at,
                 raw_json={
                     "origin": BOOTSTRAP_ORIGIN,
@@ -596,6 +686,7 @@ def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
                 },
             )
         )
+        db.update_job_source_facts(result.job_id, **_candidate_source_facts(candidate))
         if result.created:
             report.jobs_created += 1
         elif result.resurrected:
@@ -603,12 +694,6 @@ def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
         else:
             report.jobs_updated += 1
 
-        _restore_market_freshness(
-            result.job_id,
-            prior_first_seen=prior_first,
-            prior_last_seen=prior_last,
-            candidate=candidate,
-        )
         if candidate.full_description and candidate.jd_fetched_at and candidate.jd_source:
             existing_jd = db.get_job_jd(result.job_id)
             if existing_jd is None:

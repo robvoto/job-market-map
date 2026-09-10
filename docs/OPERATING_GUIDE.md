@@ -7,9 +7,13 @@ market/job evidence that exists independently of Job Hunter decisions. It never 
 `last_kept_at` or `last_kept_snapshot`, and does not copy fit scores, recommendations,
 hidden/liked/applied/rejected state, user IDs, or other personal activity. Missing neutral fields
 stay missing rather than being recovered from a KEEP snapshot or arbitrary history payload fields.
-Direct history-record identity/title/company/URL/freshness values are eligible; JD text is eligible only from
-validated `detail_evidence` with matching source/job identity, canonical URL, source provenance and
-fetch timestamp. Existing non-empty JMM market evidence wins over bootstrap values.
+Direct history-record identity/title/company/URL values are eligible. Validated source-backed
+`detail_evidence` may also contribute the exact source JD and structured neutral detail facts when its
+source/job identity, canonical URL, provenance and fetch timestamp all match. For SEEK this includes
+exact `listedAt.dateTimeUtc` as `posted_at`, plus source-exposed location, salary, employment type,
+work arrangement, classification/subclassification, expiry/status and apply method. Relative labels
+such as `3h ago` are never promoted into the canonical job row. Existing non-empty JMM market evidence
+wins over bootstrap values.
 
 First run the mandatory dry-run:
 
@@ -55,10 +59,10 @@ There is no `max_discovery_cards_per_pass` product rule for full mapping. Techni
 ## Daily delta run
 
 1. Re-run the active query registry.
-2. Upsert already-known jobs and refresh `last_seen_at`.
+2. Upsert already-known jobs and refresh operational `job_observation_state.last_seen_at`.
 3. Add genuinely new source identities.
 4. Preserve query-hit counts.
-5. Expose `first_seen_at` so consumers can request only newly discovered jobs.
+5. Expose operational `first_seen_at` through the API so consumers can request newly discovered jobs without storing it on the canonical `jobs` row.
 6. Run retention maintenance after collection.
 
 ## Consumer workflow
@@ -79,7 +83,9 @@ When a source DOM changes:
 - retain diagnostic evidence;
 - fix the source parser;
 - add a regression fixture/test;
-- do not silently fill missing fields by opening JDs or switching to fit inference.
+- do not silently fill missing card fields during bulk mapping by opening JDs or switching to fit inference.
+
+JD enrichment is a separate operation. When a job page is deliberately opened for JD enrichment, capture the full source JD and any additional neutral structured source facts exposed by that same detail page. Never infer missing canonical facts from relative labels or prose when the source does not provide them explicitly.
 
 ## Browser rule
 

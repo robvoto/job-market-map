@@ -10,8 +10,8 @@ def test_jd_is_stored_once_and_reused(tmp_path, monkeypatch):
         conn.execute(
             """
             INSERT INTO jobs(
-                source, source_job_id, canonical_url, title, first_seen_at, last_seen_at
-            ) VALUES('seek', '123', 'https://seek.test/123', 'BA', 'x', 'x')
+                source, source_job_id, canonical_url, title
+            ) VALUES('seek', '123', 'https://seek.test/123', 'BA')
             """
         )
 
@@ -56,8 +56,8 @@ def test_successful_jd_fetch_creates_permanent_registry_marker(tmp_path, monkeyp
     db.init_db()
     with db.connect() as conn:
         conn.execute(
-            """INSERT INTO jobs(source,source_job_id,canonical_url,title,first_seen_at,last_seen_at)
-               VALUES('seek','999','https://seek.test/999','BA','x','x')"""
+            """INSERT INTO jobs(source,source_job_id,canonical_url,title)
+               VALUES('seek','999','https://seek.test/999','BA')"""
         )
 
     db.store_job_jd_once(
@@ -81,8 +81,8 @@ def test_existing_jd_is_backfilled_into_permanent_registry(tmp_path, monkeypatch
     with db.connect() as conn:
         conn.execute(
             """INSERT INTO jobs(
-                source,source_job_id,canonical_url,title,full_description,jd_fetched_at,jd_source,first_seen_at,last_seen_at
-            ) VALUES('seek','888','https://seek.test/888','BA','Existing JD','2026-09-10T11:00:00+00:00','job_hunter_detail_evidence','x','x')"""
+                source,source_job_id,canonical_url,title,full_description,jd_fetched_at,jd_source
+            ) VALUES('seek','888','https://seek.test/888','BA','Existing JD','2026-09-10T11:00:00+00:00','job_hunter_detail_evidence')"""
         )
         conn.execute("DELETE FROM jd_fetch_registry")
 

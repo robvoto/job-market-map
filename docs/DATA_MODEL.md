@@ -2,15 +2,21 @@
 
 ## `jobs`
 
-Current neutral source-vacancy rows. Fields describe the vacancy and collection evidence only: source/source job ID, stable `identity_key`, URL, title, employer, geography/location, salary/work type, source posting metadata, card evidence, classifications, first/last seen, fingerprints and archive state.
+Current neutral source-vacancy rows. Fields describe the source vacancy itself: source/source job ID, stable `identity_key`, URL, title, employer, geography/location, salary, employment/workplace type, exact source `posted_at` when available, source status/expiry/apply method, classifications, card evidence and fingerprints.
+
+Collector-computed lifecycle fields are deliberately **not** stored on this master row. Relative labels such as `3h ago` are capture evidence only and must never be converted into a canonical posting date.
 
 When a full JD has been obtained, the same canonical row may also hold `full_description`, `jd_fetched_at` and `jd_source`. JMM keeps one current JD only and reuses it; there is no JD snapshot/version history.
 
 There are no user or agent activity flags on this table.
 
+## `job_observation_state`
+
+Operational collector state keyed by `job_id`: first/last observed time, capture count, archive flag and compaction time. These values describe JMM's collection activity, not the vacancy itself.
+
 ## `card_captures`
 
-Recent append-only source observations used for evidence, parser diagnostics and source-change analysis.
+Recent append-only source observations used for evidence, parser diagnostics and source-change analysis. Relative display labels such as `Listed three hours ago` may live here as raw evidence.
 
 ## `queries` / `job_query_hits`
 

@@ -14,8 +14,10 @@ CREATE TABLE IF NOT EXISTS jobs (
     salary_text TEXT,
     employment_type TEXT,
     workplace_type TEXT,
-    posted_text TEXT,
     posted_at TEXT,
+    expires_at TEXT,
+    source_status TEXT,
+    apply_method TEXT,
     reposted INTEGER NOT NULL DEFAULT 0,
     applicant_count INTEGER,
     easy_apply INTEGER,
@@ -27,18 +29,29 @@ CREATE TABLE IF NOT EXISTS jobs (
     classification_text TEXT,
     subclassification_text TEXT,
     card_tags_json TEXT,
-    first_seen_at TEXT NOT NULL,
-    last_seen_at TEXT NOT NULL,
-    capture_count INTEGER NOT NULL DEFAULT 1,
     possible_same_job_group TEXT,
     core_fingerprint TEXT,
     exact_card_fingerprint TEXT,
-    archived INTEGER NOT NULL DEFAULT 0,
-    compacted_at TEXT,
     UNIQUE(identity_key),
     UNIQUE(source, source_job_id),
     UNIQUE(source, canonical_url)
 );
+
+CREATE TABLE IF NOT EXISTS job_observation_state (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    first_seen_at TEXT NOT NULL,
+    last_seen_at TEXT NOT NULL,
+    capture_count INTEGER NOT NULL DEFAULT 1,
+    archived INTEGER NOT NULL DEFAULT 0,
+    compacted_at TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_job_observation_first_seen
+    ON job_observation_state(first_seen_at);
+CREATE INDEX IF NOT EXISTS idx_job_observation_last_seen
+    ON job_observation_state(last_seen_at);
+CREATE INDEX IF NOT EXISTS idx_job_observation_archived_last_seen
+    ON job_observation_state(archived, last_seen_at);
 
 CREATE TABLE IF NOT EXISTS jd_fetch_registry (
     identity_key TEXT PRIMARY KEY,
@@ -92,8 +105,6 @@ CREATE TABLE IF NOT EXISTS job_query_hits (
 
 CREATE INDEX IF NOT EXISTS idx_jobs_title ON jobs(title);
 CREATE INDEX IF NOT EXISTS idx_jobs_employer ON jobs(employer);
-CREATE INDEX IF NOT EXISTS idx_jobs_first_seen ON jobs(first_seen_at);
-CREATE INDEX IF NOT EXISTS idx_jobs_last_seen ON jobs(last_seen_at);
 
 
 CREATE TABLE IF NOT EXISTS collection_runs (

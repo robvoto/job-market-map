@@ -15,13 +15,17 @@ def _wire(tmp_path, monkeypatch):
 
 def _insert_job(last_seen: str):
     with db.connect() as conn:
-        return conn.execute(
+        job_id = conn.execute(
             """INSERT INTO jobs(
                 source, source_job_id, canonical_url, title, employer, location,
-                raw_card_text, teaser_text, first_seen_at, last_seen_at, archived, core_fingerprint
-            ) VALUES('seek','old1','https://seek.test/old1','Role','Acme','Sydney','raw','teaser',?,?,0,'core')""",
-            (last_seen, last_seen),
+                raw_card_text, teaser_text, core_fingerprint
+            ) VALUES('seek','old1','https://seek.test/old1','Role','Acme','Sydney','raw','teaser','core')"""
         ).lastrowid
+        conn.execute(
+            "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+            (job_id, last_seen, last_seen),
+        )
+        return job_id
 
 
 def test_archive_then_remove_to_neutral_tombstone(tmp_path, monkeypatch):
@@ -97,8 +101,11 @@ def test_rediscovered_tombstone_is_resurrected_not_new(tmp_path, monkeypatch):
     assert result.resurrected is True
     with db.connect() as conn:
         job = conn.execute("SELECT * FROM jobs WHERE id=?", (result.job_id,)).fetchone()
+        state = conn.execute(
+            "SELECT * FROM job_observation_state WHERE job_id=?", (result.job_id,)
+        ).fetchone()
         tomb_count = conn.execute("SELECT COUNT(*) FROM job_tombstones").fetchone()[0]
-    assert job["first_seen_at"] == old
-    assert job["archived"] == 0
+    assert state["first_seen_at"] == old
+    assert state["archived"] == 0
     assert job["identity_key"] == "seek:id:old1"
     assert tomb_count == 0

@@ -27,7 +27,7 @@ This keeps future cleanup easy to enable without silently imposing it today.
 The three phases are independent policy gates:
 
 1. Raw-capture pruning deletes repeated `card_captures` older than `raw_capture_days`.
-2. Archiving marks stale canonical jobs archived and clears `teaser_text` / `raw_card_text` after `archive_after_days`.
+2. Archiving marks the job as archived in `job_observation_state` and clears `teaser_text` / `raw_card_text` from the detailed canonical row after `archive_after_days`.
 3. Detailed-row removal replaces an already archived job older than `remove_archived_after_days` with a small neutral tombstone so the source identity is still recognised if it reappears.
 
 The removal threshold must remain greater than the archive threshold.

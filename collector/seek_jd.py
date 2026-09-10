@@ -1,32 +1,32 @@
 from __future__ import annotations
 
+import re
 import time
 from dataclasses import dataclass
-from datetime import UTC, datetime
+from datetime import datetime
 from urllib.parse import parse_qs, urlsplit
+from zoneinfo import ZoneInfo
 
-from collector.browser_broker import BrowserBrokerError, navigate, snapshot
-from collector.db import connect, store_job_jd_once
+from collector.browser_broker import (
+    BrowserBrokerError,
+    navigate,
+    seek_job_detail,
+    select_page,
+)
+from collector.db import connect, store_job_jd_once, update_job_source_facts
 
-_CHALLENGE_MARKERS = (
-    "help us keep seek secure",
-    "confirm you are human",
-    "enable javascript and cookies to continue",
-    "security check",
-    "access denied",
-)
-_STOP_MARKERS = (
-    "employer questions",
-    "report this job advert",
-    "report this job ad",
-    "be careful",
-    "job seekers",
-)
-_START_MARKERS = ("save", "quick apply", "apply")
+SYDNEY = ZoneInfo("Australia/Sydney")
+HUMAN_CHECK_WAIT_SECONDS = 900.0
 
 
 class SeekJDFetchError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class SeekFetchedDetail:
+    full_description: str
+    facts: dict[str, object]
 
 
 @dataclass(frozen=True)
@@ -40,58 +40,111 @@ class SeekJDEnrichmentResult:
 
 
 def _now() -> str:
-    return datetime.now(UTC).isoformat(timespec="seconds")
+    return datetime.now(SYDNEY).isoformat(timespec="seconds")
 
 
-def extract_seek_jd_text(page_text: str) -> str:
-    """Extract the actual SEEK ad body from a browser snapshot."""
-    raw = str(page_text or "")
-    low = raw.casefold()
-    if any(marker in low for marker in _CHALLENGE_MARKERS):
-        raise BrowserBrokerError("SEEK browser challenge while fetching JD")
+def _clean(value: object) -> object | None:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        value = value.strip()
+        return value or None
+    return value
 
-    lines = [line.strip() for line in raw.splitlines() if line.strip()]
-    if not lines:
-        raise SeekJDFetchError("SEEK job page has no visible text")
 
-    start = None
-    for index, line in enumerate(lines[:40]):
-        if line.casefold() == "save":
-            start = index + 1
-            break
-    if start is None:
-        for index, line in enumerate(lines[:40]):
-            if line.casefold() in _START_MARKERS:
-                start = index + 1
-    if start is None:
-        raise SeekJDFetchError("SEEK job page did not expose the JD start boundary")
+def _seek_job_id(url: str) -> str:
+    match = re.search(r"/job/(\d+)", str(url or ""))
+    return match.group(1) if match else ""
 
-    stop = len(lines)
-    for index in range(start, len(lines)):
-        if lines[index].casefold() in _STOP_MARKERS:
-            stop = index
-            break
 
-    text = "\n".join(lines[start:stop]).strip()
-    if len(text) < 80:
-        raise SeekJDFetchError("SEEK job page exposed an implausibly short JD")
-    return text
+def _seek_fetch_url(source_job_id: str, fallback_url: str) -> str:
+    return f"https://au.seek.com/job/{source_job_id}" if source_job_id else fallback_url
+
+
+def fetch_seek_detail(
+    page_id: int,
+    url: str,
+    *,
+    expected_source_job_id: str | None = None,
+    timeout_seconds: float = 15.0,
+    human_wait_seconds: float = HUMAN_CHECK_WAIT_SECONDS,
+) -> SeekFetchedDetail:
+    """Read one SEEK JD and explicit structured source facts from the signed-in page."""
+    expected_id = str(expected_source_job_id or _seek_job_id(url)).strip()
+    target_url = _seek_fetch_url(expected_id, url)
+    navigate(page_id, target_url)
+
+    normal_deadline = time.monotonic() + timeout_seconds
+    human_deadline: float | None = None
+    brought_forward = False
+    last_problem = "SEEK job detail did not become readable"
+
+    while True:
+        raw = seek_job_detail(page_id).result
+        if not isinstance(raw, dict):
+            last_problem = "SEEK detail command returned no structured result"
+        else:
+            page_url = str(raw.get("page_url") or "").strip()
+            actual_page_id = _seek_job_id(page_url)
+            if expected_id and actual_page_id and actual_page_id != expected_id:
+                raise BrowserBrokerError(
+                    f"SEEK tab ownership lost: expected job {expected_id}, browser is on {page_url!r}"
+                )
+
+            if bool(raw.get("human_check")):
+                last_problem = f"SEEK needs human attention on job {expected_id or page_url}"
+                if time.monotonic() >= normal_deadline:
+                    if not brought_forward:
+                        select_page(page_id, bring_to_front=True)
+                        print(last_problem + "; brought dedicated JMM tab to front.", flush=True)
+                        brought_forward = True
+                        human_deadline = time.monotonic() + human_wait_seconds
+                    elif human_deadline is not None and time.monotonic() >= human_deadline:
+                        raise BrowserBrokerError(last_problem + "; human-check wait expired")
+                time.sleep(1.0 if brought_forward else 0.35)
+                continue
+
+            actual_id = str(raw.get("source_job_id") or "").strip()
+            if expected_id and actual_id != expected_id:
+                raise SeekJDFetchError(
+                    f"SEEK detail identity mismatch: expected {expected_id!r}, got {actual_id!r}"
+                )
+
+            description = str(raw.get("full_description") or "").strip()
+            if len(description) < 80:
+                last_problem = "SEEK returned an implausibly short JD"
+            else:
+                # Only explicit structured source facts belong here. Relative display
+                # labels and inferred/normalised employment basis are deliberately excluded.
+                facts: dict[str, object] = {}
+                for key in (
+                    "source_job_id",
+                    "title",
+                    "employer",
+                    "location",
+                    "classification_text",
+                    "subclassification_text",
+                    "employment_type",
+                    "workplace_type",
+                    "salary_text",
+                    "posted_at",
+                    "expires_at",
+                    "source_status",
+                    "easy_apply",
+                    "apply_method",
+                ):
+                    cleaned = _clean(raw.get(key))
+                    if cleaned is not None:
+                        facts[key] = cleaned
+                return SeekFetchedDetail(full_description=description, facts=facts)
+
+        if time.monotonic() >= normal_deadline:
+            raise SeekJDFetchError(last_problem)
+        time.sleep(0.35)
 
 
 def fetch_seek_jd(page_id: int, url: str, *, timeout_seconds: float = 15.0) -> str:
-    navigate(page_id, url)
-    deadline = time.monotonic() + timeout_seconds
-    last_error: Exception | None = None
-    while time.monotonic() < deadline:
-        snap = snapshot(page_id, verbose=True).result or {}
-        try:
-            return extract_seek_jd_text(str(snap.get("text") or ""))
-        except BrowserBrokerError:
-            raise
-        except SeekJDFetchError as exc:
-            last_error = exc
-            time.sleep(0.35)
-    raise SeekJDFetchError(str(last_error or "SEEK JD did not become readable"))
+    return fetch_seek_detail(page_id, url, timeout_seconds=timeout_seconds).full_description
 
 
 def _partition_matches_days(url: str, days: int) -> bool:
@@ -100,14 +153,14 @@ def _partition_matches_days(url: str, days: int) -> bool:
 
 
 def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
-    """Return unique SEEK jobs proven present in the current coverage workspace."""
+    """Return unique SEEK jobs proven present in the requested coverage window."""
     if not codes:
         return []
     placeholders = ",".join("?" for _ in codes)
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT DISTINCT j.id,j.identity_key,j.canonical_url,j.full_description,
+            SELECT DISTINCT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,
                             p.url AS partition_url,
                             CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
@@ -127,6 +180,30 @@ def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
     return list(by_id.values())
 
 
+def all_unfetched_seek_jobs() -> list[dict]:
+    """Return SEEK rows that have never had a successful JD fetch."""
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,
+                   CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
+              FROM jobs j
+              LEFT JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
+             WHERE j.source='seek' AND r.identity_key IS NULL
+             ORDER BY j.id
+            """
+        ).fetchall()
+    return [dict(row) for row in rows]
+
+
+def _merge_candidates(coverage: list[dict], *, include_existing_unfetched: bool) -> list[dict]:
+    by_id = {int(row["id"]): row for row in coverage}
+    if include_existing_unfetched:
+        for row in all_unfetched_seek_jobs():
+            by_id.setdefault(int(row["id"]), row)
+    return [by_id[key] for key in sorted(by_id)]
+
+
 def enrich_seek_coverage_jds(
     *,
     page_id: int,
@@ -134,11 +211,18 @@ def enrich_seek_coverage_jds(
     days: int,
     should_stop,
     deadline_reached,
+    include_existing_unfetched: bool = False,
 ) -> SeekJDEnrichmentResult:
-    rows = coverage_seek_jobs(codes=codes, days=days)
-    cached = attempted = stored = failed = 0
-    completed_ids = {int(row["id"]) for row in rows if int(row["jd_fetch_completed"])}
+    rows = _merge_candidates(
+        coverage_seek_jobs(codes=codes, days=days),
+        include_existing_unfetched=include_existing_unfetched,
+    )
+    completed_ids = {
+        int(row["id"]) for row in rows if int(row.get("jd_fetch_completed") or 0)
+    }
     cached = len(completed_ids)
+    attempted = stored = failed = 0
+
     for row in rows:
         job_id = int(row["id"])
         if job_id in completed_ids:
@@ -147,10 +231,24 @@ def enrich_seek_coverage_jds(
             break
         attempted += 1
         try:
-            jd = fetch_seek_jd(page_id, str(row["canonical_url"]))
+            expected_source_id = str(row["source_job_id"] or "").strip()
+            detail = fetch_seek_detail(
+                page_id,
+                str(row["canonical_url"]),
+                expected_source_job_id=expected_source_id,
+            )
+            actual_source_id = str(detail.facts.get("source_job_id") or "").strip()
+            if not expected_source_id or actual_source_id != expected_source_id:
+                raise SeekJDFetchError(
+                    f"SEEK detail identity mismatch: expected {expected_source_id!r}, got {actual_source_id!r}"
+                )
+            source_facts = {
+                key: value for key, value in detail.facts.items() if key != "source_job_id"
+            }
+            update_job_source_facts(job_id, **source_facts)
             store_job_jd_once(
                 job_id,
-                full_description=jd,
+                full_description=detail.full_description,
                 jd_fetched_at=_now(),
                 jd_source="seek_job_page",
             )
@@ -158,8 +256,9 @@ def enrich_seek_coverage_jds(
             stored += 1
         except BrowserBrokerError:
             raise
-        except SeekJDFetchError:
+        except SeekJDFetchError as exc:
             failed += 1
+            print(f"SEEK JD fetch failed for job {job_id}: {exc}", flush=True)
 
     remaining = len(rows) - len(completed_ids)
     return SeekJDEnrichmentResult(

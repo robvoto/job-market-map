@@ -130,7 +130,7 @@ def test_parent_union_deduplicates_same_job_across_child_partitions(
         for i in range(3):
             ids.append(
                 conn.execute(
-                    "INSERT INTO jobs(source,source_job_id,canonical_url,first_seen_at,last_seen_at) VALUES('seek',?,?, 'x','x')",
+                    "INSERT INTO jobs(source,source_job_id,canonical_url) VALUES('seek',?,?)",
                     (str(i), f"https://job/{i}"),
                 ).lastrowid
             )
@@ -167,7 +167,7 @@ def test_parent_remains_incomplete_if_any_child_incomplete(tmp_path, monkeypatch
             (parent,),
         ).lastrowid
         job_id = conn.execute(
-            "INSERT INTO jobs(source,source_job_id,canonical_url,first_seen_at,last_seen_at) VALUES('seek','1','https://job/1','x','x')"
+            "INSERT INTO jobs(source,source_job_id,canonical_url) VALUES('seek','1','https://job/1')"
         ).lastrowid
         conn.execute(
             "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?, 'x')",
@@ -361,7 +361,7 @@ def test_resume_split_parent_processes_child_without_consuming_parent_budget(
     db.init_db()
     with db.connect() as conn:
         conn.execute(
-            "INSERT INTO jobs(id,source,source_job_id,canonical_url,first_seen_at,last_seen_at) VALUES(1,'seek','12345678','https://www.seek.com.au/job/12345678','x','x')"
+            "INSERT INTO jobs(id,source,source_job_id,canonical_url) VALUES(1,'seek','12345678','https://www.seek.com.au/job/12345678')"
         )
     parent = market._ensure_partition(
         geography_code="ACT",
@@ -437,7 +437,7 @@ def test_resume_recovers_fully_persisted_leaf_without_browser(tmp_path, monkeypa
     with db.connect() as conn:
         for i in (1, 2):
             job_id = conn.execute(
-                "INSERT INTO jobs(source,source_job_id,canonical_url,first_seen_at,last_seen_at) VALUES('seek',?,?, 'x','x')",
+                "INSERT INTO jobs(source,source_job_id,canonical_url) VALUES('seek',?,?)",
                 (str(i), f"https://job/{i}"),
             ).lastrowid
             conn.execute(

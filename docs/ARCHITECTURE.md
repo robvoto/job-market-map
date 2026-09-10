@@ -12,7 +12,7 @@ It owns:
 - source-normalised fields;
 - same-source identity;
 - conservative cross-source duplicate hints;
-- first/last-seen lifecycle;
+- separate operational first/last-seen lifecycle;
 - consumer-progress checkpoints for feed processing;
 - API access for multiple agents;
 - retention and compaction.
@@ -82,10 +82,10 @@ Incorrectly collapsing two live vacancies is more damaging than temporarily reta
 
 ## Freshness model
 
-`first_seen_at` = first time this database observed the vacancy.
+`jobs.posted_at` is a source fact: the exact source posting timestamp when the source exposes one.
+Do not derive it from relative UI labels such as `3h ago` or `Listed four hours ago`.
 
-`last_seen_at` = latest time a collector observed the same vacancy.
+Collector lifecycle belongs in `job_observation_state`, not the canonical `jobs` master row:
+`first_seen_at`, `last_seen_at`, `capture_count`, `archived`, and `compacted_at` are operational JMM bookkeeping.
 
-`posted_at` / `posted_text` = source claim about when the employer/board posted it.
-
-These are different facts and must not be conflated.
+Relative source labels such as `3h ago` may be retained only inside raw capture evidence. They are not canonical job fields.

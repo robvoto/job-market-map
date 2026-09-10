@@ -32,7 +32,7 @@ from collector.settings import (
 )
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 5
+SCHEMA_VERSION = 6
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -159,8 +159,9 @@ def stats():
         row = conn.execute(
             """
             SELECT COUNT(*) AS jobs,
-                   SUM(CASE WHEN archived=0 THEN 1 ELSE 0 END) AS active_jobs
-              FROM jobs
+                   SUM(CASE WHEN COALESCE(s.archived,0)=0 THEN 1 ELSE 0 END) AS active_jobs
+              FROM jobs j
+              LEFT JOIN job_observation_state s ON s.job_id=j.id
             """
         ).fetchone()
         result = dict(row)
@@ -202,15 +203,17 @@ def job_feed(
         clauses.append("j.geography_code=?")
         params.append(geography_code.upper())
     if not include_archived:
-        clauses.append("j.archived=0")
+        clauses.append("COALESCE(s.archived,0)=0")
     where = " AND ".join(clauses)
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT j.*,
+            SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count,
+                   s.archived, s.compacted_at,
                    (SELECT COUNT(*) FROM duplicate_links d
                      WHERE d.job_id_a=j.id OR d.job_id_b=j.id) AS duplicate_link_count
               FROM jobs j
+              LEFT JOIN job_observation_state s ON s.job_id=j.id
              WHERE {where}
              ORDER BY j.id ASC
              LIMIT ?
@@ -270,7 +273,13 @@ def new_jobs(days: int = Query(1, ge=0, le=30), limit: int | None = Query(None, 
     cutoff = (datetime.now(UTC) - timedelta(days=days)).isoformat(timespec="seconds")
     with connect() as conn:
         rows = conn.execute(
-            "SELECT * FROM jobs WHERE first_seen_at>=? ORDER BY first_seen_at DESC LIMIT ?",
+            """
+            SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at
+              FROM jobs j
+              JOIN job_observation_state s ON s.job_id=j.id
+             WHERE s.first_seen_at>=?
+             ORDER BY s.first_seen_at DESC LIMIT ?
+            """,
             (cutoff, resolved_limit),
         ).fetchall()
     return [_job_payload(row) for row in rows]
@@ -289,21 +298,27 @@ def search_jobs(
     clauses = []
     params: list[object] = []
     if q:
-        clauses.append("(title LIKE ? OR employer LIKE ? OR raw_card_text LIKE ?)")
+        clauses.append("(j.title LIKE ? OR j.employer LIKE ? OR j.raw_card_text LIKE ?)")
         like = f"%{q}%"
         params.extend([like, like, like])
     if source:
-        clauses.append("source=?")
+        clauses.append("j.source=?")
         params.append(source.casefold())
     if geography_code:
-        clauses.append("geography_code=?")
+        clauses.append("j.geography_code=?")
         params.append(geography_code.upper())
     if not include_archived:
-        clauses.append("archived=0")
+        clauses.append("COALESCE(s.archived,0)=0")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with connect() as conn:
         rows = conn.execute(
-            f"SELECT * FROM jobs {where} ORDER BY first_seen_at DESC LIMIT ?",
+            f"""
+            SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at
+              FROM jobs j
+              LEFT JOIN job_observation_state s ON s.job_id=j.id
+              {where}
+             ORDER BY s.first_seen_at DESC LIMIT ?
+            """,
             (*params, resolved_limit),
         ).fetchall()
     return [_job_payload(row) for row in rows]
@@ -313,7 +328,15 @@ def search_jobs(
 @app.get("/jobs/{job_id}", include_in_schema=False)
 def get_job(job_id: int):
     with connect() as conn:
-        row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        row = conn.execute(
+            """
+            SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at
+              FROM jobs j
+              LEFT JOIN job_observation_state s ON s.job_id=j.id
+             WHERE j.id=?
+            """,
+            (job_id,),
+        ).fetchone()
         if not row:
             raise HTTPException(404, "job not found")
         captures = [

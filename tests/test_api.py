@@ -13,10 +13,16 @@ def client_for_tmp_db(tmp_path, monkeypatch):
 def insert_jobs(count=3):
     with db.connect() as conn:
         for i in range(1, count + 1):
-            conn.execute(
-                """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,first_seen_at,last_seen_at)
-                   VALUES('seek',?,?,?,?,'2026-09-10T00:00:00+00:00','2026-09-10T00:00:00+00:00')""",
+            job_id = conn.execute(
+                """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer)
+                   VALUES('seek',?,?,?,?)""",
                 (str(i), f"https://seek.test/{i}", f"Role {i}", "Acme"),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO job_observation_state(
+                    job_id,first_seen_at,last_seen_at,capture_count,archived
+                ) VALUES(?,?,?,1,0)""",
+                (job_id, "2026-09-10T00:00:00+00:00", "2026-09-10T00:00:00+00:00"),
             )
 
 
@@ -29,7 +35,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 5
+        assert payload["schema_version"] == 6
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
         assert "raw_card_text" not in payload["items"][0]
@@ -109,9 +115,14 @@ def test_feed_can_filter_by_normalized_geography(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         with db.connect() as conn:
             for i, geo in enumerate(("NSW", "ACT", "QLD"), start=1):
-                conn.execute(
-                    """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,geography_code,first_seen_at,last_seen_at) VALUES('seek',?,?,?,?,?,'2026-09-10','2026-09-10')""",
+                job_id = conn.execute(
+                    """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,geography_code)
+                       VALUES('seek',?,?,?,?,?)""",
                     (str(i), f"https://x/{i}", f"Role {i}", "Acme", geo),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at) VALUES(?,?,?)",
+                    (job_id, "2026-09-10", "2026-09-10"),
                 )
         payload = client.get(
             "/v3/feed/jobs", params={"geography_code": "ACT", "limit": 10}
