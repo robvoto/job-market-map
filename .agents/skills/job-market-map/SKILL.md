@@ -12,6 +12,8 @@ Supported consumer API: `/v3`.
 
 For a continuation/new session, read local-only `docs/CURRENT_STATE.md` first **if present** for the latest verified crawl state, blocker and exact resume point. Keep that handoff current locally, but do not commit or push it to Git.
 
+Canonical backlog: `@job_market_map_backlog` (Google Sheet supplied by Rob). Read the live sheet before planning or changing code when backlog state matters. Do not create a competing markdown backlog. If the exact live sheet cannot be accessed, report that failure and use local `docs/CURRENT_STATE.md` only as operational handoff—not as a replacement backlog.
+
 ## Hard ownership boundary
 Job Market Map is neutral/global market infrastructure. It owns collection, source identity, evidence, duplicate links, coverage, retention and consumer checkpoints.
 
