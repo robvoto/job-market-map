@@ -218,6 +218,7 @@ def test_oversize_work_type_is_explicitly_unsplittable_not_complete(
         url="https://x/full-time",
         threshold=450,
         tolerance=0,
+        budget=market.PartitionBudget(max_partitions=1),
     )
     with db.connect() as conn:
         status = conn.execute(
@@ -263,6 +264,7 @@ def test_zero_result_partition_completes_without_card_parser(tmp_path, monkeypat
         url="https://x/empty",
         threshold=450,
         tolerance=0,
+        budget=market.PartitionBudget(max_partitions=1),
     )
     with db.connect() as conn:
         row = conn.execute(
@@ -270,3 +272,198 @@ def test_zero_result_partition_completes_without_card_parser(tmp_path, monkeypat
             (pid,),
         ).fetchone()
     assert tuple(row) == ("COMPLETE", 0)
+
+
+def test_resume_completed_partition_skips_browser_and_budget(tmp_path, monkeypatch):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    monkeypatch.setattr(
+        market,
+        "navigate",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("browser should not be called")
+        ),
+    )
+    db.init_db()
+    pid = market._ensure_partition(
+        geography_code="ACT",
+        parent_id=None,
+        level="classification",
+        label="Done",
+        url="https://x/done",
+        threshold=450,
+    )
+    market._update_partition(pid, status="COMPLETE", reported=10, collected=10)
+    budget = market.PartitionBudget(max_partitions=1)
+    market._process_partition(
+        1,
+        geography={
+            "code": "ACT",
+            "seek_state_slug": "Australian-Capital-Territory-ACT",
+        },
+        partition_id=pid,
+        level="classification",
+        label="Done",
+        url="https://x/done",
+        threshold=450,
+        tolerance=0,
+        budget=budget,
+        resume=True,
+    )
+    assert budget.processed == 0
+
+
+def test_resume_split_parent_processes_child_without_consuming_parent_budget(
+    tmp_path, monkeypatch
+):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    monkeypatch.setattr(market, "navigate", lambda *_a, **_k: None)
+    monkeypatch.setattr(market.time, "sleep", lambda *_: None)
+    monkeypatch.setattr(
+        market,
+        "_wait_snapshot",
+        lambda *_a, **_k: {
+            "text": "1 jobs in Australian Capital Territory",
+            "elements": [
+                {"text": "Role", "href": "https://www.seek.com.au/job/12345678"},
+                {"text": "Role", "href": "https://www.seek.com.au/job/12345678"},
+            ],
+        },
+    )
+    monkeypatch.setattr(
+        market,
+        "parse_seek_snapshot",
+        lambda *_a, **_k: [
+            type(
+                "Card",
+                (),
+                {
+                    "source_job_id": "12345678",
+                    "canonical_url": "https://www.seek.com.au/job/12345678",
+                },
+            )()
+        ],
+    )
+    monkeypatch.setattr(
+        market,
+        "ingest_card",
+        lambda *_a, **_k: type("Result", (), {"job_id": 1})(),
+    )
+    db.init_db()
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO jobs(id,source,source_job_id,canonical_url,first_seen_at,last_seen_at) VALUES(1,'seek','12345678','https://www.seek.com.au/job/12345678','x','x')"
+        )
+    parent = market._ensure_partition(
+        geography_code="ACT",
+        parent_id=None,
+        level="state",
+        label="ACT",
+        url="https://x/act",
+        threshold=450,
+    )
+    market._update_partition(
+        parent, status="INCOMPLETE_CHILD_COVERAGE", reported=1, child_count=1
+    )
+    child = market._ensure_partition(
+        geography_code="ACT",
+        parent_id=parent,
+        level="classification",
+        label="Child",
+        url="https://x/child",
+        threshold=450,
+    )
+    budget = market.PartitionBudget(max_partitions=1)
+    market._process_partition(
+        1,
+        geography={
+            "code": "ACT",
+            "seek_state_slug": "Australian-Capital-Territory-ACT",
+        },
+        partition_id=parent,
+        level="state",
+        label="ACT",
+        url="https://x/act",
+        threshold=450,
+        tolerance=0,
+        budget=budget,
+        resume=True,
+    )
+    assert budget.processed == 1
+    with db.connect() as conn:
+        parent_status = conn.execute(
+            "SELECT status FROM seek_partitions WHERE id=?", (parent,)
+        ).fetchone()[0]
+        child_status = conn.execute(
+            "SELECT status FROM seek_partitions WHERE id=?", (child,)
+        ).fetchone()[0]
+    assert child_status == "COMPLETE"
+    assert parent_status == "COMPLETE_BY_PARTITION"
+
+
+def test_resume_recovers_fully_persisted_leaf_without_browser(tmp_path, monkeypatch):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    monkeypatch.setattr(
+        market,
+        "navigate",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            AssertionError("browser should not be called")
+        ),
+    )
+    db.init_db()
+    pid = market._ensure_partition(
+        geography_code="ACT",
+        parent_id=None,
+        level="classification",
+        label="Government & Defence",
+        url="https://x/gov",
+        threshold=450,
+    )
+    market._update_partition(pid, status="INSPECTED", reported=2, collected=0)
+    with db.connect() as conn:
+        for i in (1, 2):
+            job_id = conn.execute(
+                "INSERT INTO jobs(source,source_job_id,canonical_url,first_seen_at,last_seen_at) VALUES('seek',?,?, 'x','x')",
+                (str(i), f"https://job/{i}"),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?, 'x')",
+                (pid, job_id),
+            )
+    budget = market.PartitionBudget(max_partitions=1)
+    market._process_partition(
+        1,
+        geography={
+            "code": "ACT",
+            "seek_state_slug": "Australian-Capital-Territory-ACT",
+        },
+        partition_id=pid,
+        level="classification",
+        label="Government & Defence",
+        url="https://x/gov",
+        threshold=450,
+        tolerance=0,
+        budget=budget,
+        resume=True,
+    )
+    assert budget.processed == 0
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status,collected_unique_jobs FROM seek_partitions WHERE id=?",
+            (pid,),
+        ).fetchone()
+    assert tuple(row) == ("COMPLETE_RECOVERED", 2)

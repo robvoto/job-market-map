@@ -2,13 +2,27 @@
   "version": 1,
   "settings": [
     {
+      "key": "retention.prune_raw_captures_enabled",
+      "category": "Retention",
+      "type": "boolean",
+      "default": false,
+      "help": "OFF by default. When enabled, delete repeated raw card-capture observations older than retention.raw_capture_days. Keep this off while historical card evidence is useful for audit, scam/phishing investigation, or later market/application analysis."
+    },
+    {
       "key": "retention.raw_capture_days",
       "category": "Retention",
       "type": "integer",
       "default": 30,
       "min": 1,
       "max": 365,
-      "help": "Keep repeated raw card-capture evidence for this many days. Older captures are deleted even when the canonical job identity is retained."
+      "help": "Age threshold used only when retention.prune_raw_captures_enabled is ON. Repeated raw card captures older than this are then deleted; canonical job evidence is controlled separately."
+    },
+    {
+      "key": "retention.archive_jobs_enabled",
+      "category": "Retention",
+      "type": "boolean",
+      "default": false,
+      "help": "OFF by default. When enabled, archive stale jobs after retention.archive_after_days and clear bulky teaser/raw current-card text. Keep this off to preserve canonical card evidence indefinitely."
     },
     {
       "key": "retention.archive_after_days",
@@ -17,7 +31,14 @@
       "default": 30,
       "min": 1,
       "max": 730,
-      "help": "Archive stale neutral jobs after this many days since last seen. Archiving removes bulky current card text while preserving market identity/history."
+      "help": "Age threshold used only when retention.archive_jobs_enabled is ON. Archiving clears bulky teaser/raw current-card text, so it is OFF by default to preserve evidence."
+    },
+    {
+      "key": "retention.remove_archived_jobs_enabled",
+      "category": "Retention",
+      "type": "boolean",
+      "default": false,
+      "help": "OFF by default. When enabled, remove detailed rows for already-archived jobs after retention.remove_archived_after_days, retaining only a neutral tombstone. This is intentionally opt-in because detailed history can support later analysis."
     },
     {
       "key": "retention.remove_archived_after_days",
@@ -26,7 +47,7 @@
       "default": 120,
       "min": 2,
       "max": 3650,
-      "help": "After this many days since last seen, remove an unimportant archived job's detailed row and retain only a small tombstone identity so rediscovery is still recognised as previously seen. Must be greater than archive_after_days."
+      "help": "Age threshold used only when retention.remove_archived_jobs_enabled is ON. Detailed archived rows older than this are then replaced by small neutral tombstones. Must be greater than archive_after_days."
     },
     {
       "key": "collection.default_freshness_days",
@@ -88,6 +109,15 @@
       "min": 50,
       "max": 500,
       "help": "Maximum SEEK-reported results allowed in one leaf partition before it must be split further. Default 450 keeps well below the approximate 500-result paging risk."
+    },
+    {
+      "key": "collection.seek_partition_chunk_size",
+      "category": "Collection",
+      "type": "integer",
+      "default": 1,
+      "min": 1,
+      "max": 50,
+      "help": "Maximum genuinely unfinished SEEK partitions processed per resumable state-crawl invocation. This bounds one agent/tool call; it is not a market coverage limit."
     },
     {
       "key": "collection.linkedin_initial_wait_seconds",

@@ -34,6 +34,9 @@ def test_archive_then_remove_to_neutral_tombstone(tmp_path, monkeypatch):
         raw_capture_days=30,
         archive_after_days=30,
         remove_archived_after_days=120,
+        prune_raw_captures_enabled=True,
+        archive_jobs_enabled=True,
+        remove_archived_jobs_enabled=True,
         now=now,
     )
     assert result.jobs_archived == 1
@@ -73,6 +76,9 @@ def test_rediscovered_tombstone_is_resurrected_not_new(tmp_path, monkeypatch):
         raw_capture_days=30,
         archive_after_days=30,
         remove_archived_after_days=120,
+        prune_raw_captures_enabled=True,
+        archive_jobs_enabled=True,
+        remove_archived_jobs_enabled=True,
         now=now,
     )
     result = ingest.ingest_card(

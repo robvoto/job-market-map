@@ -56,10 +56,16 @@ The canonical Human MCP/browser broker should already be running. Do not launch 
 A collection failure must leave prior successful ingests intact and enough cursor/run state to diagnose/resume. Never convert a parser/browser failure into a successful `COMPLETE` run just to keep the campaign moving.
 
 
-## Run whole-state SEEK map
+## Run/resume whole-state SEEK map
+
+Prefer bounded resumable execution:
 
 ```bash
-uv run python -m scripts.run_seek_market_map
+uv run python -m scripts.run_seek_market_map --state ACT --max-partitions 1
 ```
 
-Current enabled scope is NSW + ACT + QLD. The runner reuses one browser tab across states. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*` or `FAILED` partition means coverage is not proven complete.
+The admin default partition chunk is intentionally small so ChatGPT/Claude tool-call limits cannot invalidate a whole-state run. Completed partitions are skipped; split parents delegate to unfinished children; persisted leaf memberships survive interruption and may be recovered without re-downloading.
+
+Use `--fresh` only when intentionally discarding resume behaviour for a fresh coverage pass.
+
+Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*`, `FAILED`, or `NOT_RUN` state means coverage is not proven complete. For the latest live recovery point, read `docs/CURRENT_STATE.md`.

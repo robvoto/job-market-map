@@ -80,6 +80,8 @@ Measured 10 Sep 2026: one SEEK `technical implementation` search exposed **220 c
 
 ## Read first
 
+New-session handoff: `docs/CURRENT_STATE.md`
+
 Agents: `.agents/skills/job-market-map/SKILL.md`
 
 Consumers: `docs/CONSUMER_CONTRACT.md`

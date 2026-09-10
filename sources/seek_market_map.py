@@ -37,6 +37,24 @@ class MarketMapResult:
     reported_results: int | None
     covered_unique_jobs: int
     incomplete_partitions: int
+    partitions_processed: int = 0
+    budget_exhausted: bool = False
+
+
+@dataclass
+class PartitionBudget:
+    max_partitions: int | None = None
+    processed: int = 0
+
+    @property
+    def exhausted(self) -> bool:
+        return self.max_partitions is not None and self.processed >= self.max_partitions
+
+    def consume(self) -> bool:
+        if self.exhausted:
+            return False
+        self.processed += 1
+        return True
 
 
 def _now() -> str:
@@ -178,6 +196,32 @@ def _discover_children(
     )
 
 
+def _partition_source_ids(partition_id: int) -> set[str]:
+    with connect() as conn:
+        return {
+            str(row[0])
+            for row in conn.execute(
+                """
+                SELECT j.source_job_id
+                  FROM seek_partition_jobs spj
+                  JOIN jobs j ON j.id=spj.job_id
+                 WHERE spj.partition_id=? AND j.source_job_id IS NOT NULL
+                """,
+                (partition_id,),
+            )
+        }
+
+
+def _partition_membership_count(partition_id: int) -> int:
+    with connect() as conn:
+        return int(
+            conn.execute(
+                "SELECT COUNT(*) FROM seek_partition_jobs WHERE partition_id=?",
+                (partition_id,),
+            ).fetchone()[0]
+        )
+
+
 def _collect_leaf(
     page_id: int,
     *,
@@ -187,7 +231,8 @@ def _collect_leaf(
     reported: int,
     tolerance: int,
 ) -> tuple[str, int]:
-    seen: set[str] = set()
+    seen = _partition_source_ids(partition_id)
+    previous_page_ids: set[str] | None = None
     page = 1
     safety = int(get_setting("collection.seek_safety_page_limit"))
     while page <= safety:
@@ -204,13 +249,15 @@ def _collect_leaf(
             page_number=page,
             geography_code=geography_code,
         )
+        page_ids = {card.source_job_id for card in cards if card.source_job_id}
+        if previous_page_ids is not None and page_ids == previous_page_ids:
+            return "INCOMPLETE_REPEATED_PAGE", len(seen)
+        previous_page_ids = page_ids
         new_cards = [
             card
             for card in cards
             if card.source_job_id and card.source_job_id not in seen
         ]
-        if not new_cards:
-            break
         for card in new_cards:
             seen.add(card.source_job_id or card.canonical_url)
             result = ingest_card(card)
@@ -219,6 +266,8 @@ def _collect_leaf(
                     "INSERT OR IGNORE INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
                     (partition_id, result.job_id, _now()),
                 )
+        if len(seen) + tolerance >= reported:
+            return "COMPLETE", len(seen)
         page += 1
     else:
         return "INCOMPLETE_PAGE_LIMIT", len(seen)
@@ -261,6 +310,60 @@ def _aggregate_parent(
     return status, len(ids), len(children)
 
 
+def _partition_state(partition_id: int) -> tuple[dict, list[dict]]:
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM seek_partitions WHERE id=?", (partition_id,)
+        ).fetchone()
+        if not row:
+            raise KeyError(partition_id)
+        children = [
+            dict(child)
+            for child in conn.execute(
+                "SELECT * FROM seek_partitions WHERE parent_id=? ORDER BY id",
+                (partition_id,),
+            )
+        ]
+    return dict(row), children
+
+
+def _resume_existing_children(
+    page_id: int,
+    *,
+    geography: dict,
+    partition_id: int,
+    reported: int,
+    threshold: int,
+    tolerance: int,
+    budget: PartitionBudget,
+    resume: bool,
+    children: list[dict],
+) -> None:
+    for child in children:
+        _process_partition(
+            page_id,
+            geography=geography,
+            partition_id=int(child["id"]),
+            level=str(child["level"]),
+            label=str(child["label"]),
+            url=str(child["url"]),
+            threshold=threshold,
+            tolerance=tolerance,
+            budget=budget,
+            resume=resume,
+        )
+    status, collected, child_count = _aggregate_parent(
+        partition_id, reported, tolerance
+    )
+    _update_partition(
+        partition_id,
+        status=status,
+        reported=reported,
+        collected=collected,
+        child_count=child_count,
+    )
+
+
 def _process_partition(
     page_id: int,
     *,
@@ -271,8 +374,42 @@ def _process_partition(
     url: str,
     threshold: int,
     tolerance: int,
+    budget: PartitionBudget,
+    resume: bool = True,
 ) -> None:
     try:
+        current, existing_children = _partition_state(partition_id)
+        current_status = str(current["status"])
+        if resume and current_status.startswith("COMPLETE"):
+            return
+        if resume and current_status == "INCOMPLETE_OVERSIZE_UNSPLITTABLE":
+            return
+        if resume and not existing_children and current["reported_results"] is not None:
+            persisted = _partition_membership_count(partition_id)
+            reported = int(current["reported_results"])
+            if persisted + tolerance >= reported:
+                _update_partition(
+                    partition_id,
+                    status="COMPLETE_RECOVERED",
+                    reported=reported,
+                    collected=persisted,
+                )
+                return
+        if resume and existing_children and current["reported_results"] is not None:
+            _resume_existing_children(
+                page_id,
+                geography=geography,
+                partition_id=partition_id,
+                reported=int(current["reported_results"]),
+                threshold=threshold,
+                tolerance=tolerance,
+                budget=budget,
+                resume=resume,
+                children=existing_children,
+            )
+            return
+        if not budget.consume():
+            return
         navigate(page_id, url)
         time.sleep(float(get_setting("collection.seek_page_load_seconds")))
         snap = _wait_snapshot(page_id)
@@ -332,6 +469,8 @@ def _process_partition(
                 url=child["url"],
                 threshold=threshold,
                 tolerance=tolerance,
+                budget=budget,
+                resume=resume,
             )
         status, collected, child_count = _aggregate_parent(
             partition_id, reported, tolerance
@@ -349,7 +488,12 @@ def _process_partition(
 
 
 def collect_seek_state(
-    geography_code: str, *, page_id: int | None = None, days: int | None = None
+    geography_code: str,
+    *,
+    page_id: int | None = None,
+    days: int | None = None,
+    max_partitions: int | None = None,
+    resume: bool = True,
 ) -> MarketMapResult:
     geography = get_geography(geography_code)
     days = int(
@@ -357,6 +501,11 @@ def collect_seek_state(
     )
     threshold = int(get_setting("collection.seek_partition_max_results"))
     tolerance = int(get_setting("collection.seek_completion_count_tolerance"))
+    if max_partitions is None:
+        max_partitions = int(get_setting("collection.seek_partition_chunk_size"))
+    if max_partitions < 1:
+        raise ValueError("max_partitions must be >= 1")
+    budget = PartitionBudget(max_partitions=max_partitions)
     root_url = state_url(geography, days)
     root_id = _ensure_partition(
         geography_code=geography["code"],
@@ -377,6 +526,8 @@ def collect_seek_state(
         url=root_url,
         threshold=threshold,
         tolerance=tolerance,
+        budget=budget,
+        resume=resume,
     )
     with connect() as conn:
         root = conn.execute(
@@ -393,19 +544,42 @@ def collect_seek_state(
         reported_results=root["reported_results"],
         covered_unique_jobs=root["collected_unique_jobs"],
         incomplete_partitions=int(incomplete),
+        partitions_processed=budget.processed,
+        budget_exhausted=budget.exhausted,
     )
 
 
 def collect_states(
-    codes: list[str], *, days: int | None = None
+    codes: list[str],
+    *,
+    days: int | None = None,
+    max_partitions: int | None = None,
+    resume: bool = True,
 ) -> list[MarketMapResult]:
     if not codes:
         return []
     page_id = int(open_tab("about:blank", active=False).result["pageId"])
-    return [collect_seek_state(code, page_id=page_id, days=days) for code in codes]
+    return [
+        collect_seek_state(
+            code,
+            page_id=page_id,
+            days=days,
+            max_partitions=max_partitions,
+            resume=resume,
+        )
+        for code in codes
+    ]
 
 
-def collect_enabled_states(*, days: int | None = None) -> list[MarketMapResult]:
+def collect_enabled_states(
+    *,
+    days: int | None = None,
+    max_partitions: int | None = None,
+    resume: bool = True,
+) -> list[MarketMapResult]:
     return collect_states(
-        [g["code"] for g in list_geographies(enabled_only=True)], days=days
+        [g["code"] for g in list_geographies(enabled_only=True)],
+        days=days,
+        max_partitions=max_partitions,
+        resume=resume,
     )

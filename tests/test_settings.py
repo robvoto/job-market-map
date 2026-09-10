@@ -23,6 +23,10 @@ def test_settings_seed_with_helper_text_and_can_change_without_code(
     )
     assert retention["value"] == 30
     assert retention["help_text"]
+    # Guardrail: age thresholds alone must never authorize destructive cleanup.
+    assert settings.get_setting("retention.prune_raw_captures_enabled") is False
+    assert settings.get_setting("retention.archive_jobs_enabled") is False
+    assert settings.get_setting("retention.remove_archived_jobs_enabled") is False
     changed = settings.set_setting("retention.archive_after_days", 45, actor="rob")
     assert changed["value"] == 45
     assert changed["updated_by"] == "rob"

@@ -13,21 +13,15 @@ The page exposes runtime settings with helper text and discovery-query enable/di
 ## What is configurable without code
 
 ### Retention
-- raw card capture days;
-- archive-after days;
-- remove-detailed-row-after days;
-- whether jobs with meaningful Rob status are preserved indefinitely.
+Destructive retention is **OFF by default**. Admin exposes an explicit switch for each destructive phase plus its age threshold:
 
-Default lifecycle:
+- `retention.prune_raw_captures_enabled` + `retention.raw_capture_days`;
+- `retention.archive_jobs_enabled` + `retention.archive_after_days`;
+- `retention.remove_archived_jobs_enabled` + `retention.remove_archived_after_days`.
 
-```text
-0–30 days             rich/current
->30 days stale         archived + bulky card text compacted
->120 days stale        detailed unimportant row removed -> tiny tombstone retained
-shown/reviewed/etc.    preserved by default
-```
+Default behaviour is to preserve canonical job/card evidence indefinitely. The numeric defaults (`30`, `30`, `120`) are future cleanup thresholds only; they do nothing until the matching switch is turned on. This is deliberate because historical card evidence may later support audit, scam/phishing investigation, repost analysis and learning from application outcomes.
 
-The exact `30` and `120` values are defaults, not hard-coded policy. Change them in Admin.
+Personal applied/rejected/presented state is not a retention exception here because it is not owned by Job Market Map; Job Hunter/JH-305 owns personal activity.
 
 ### Collection
 - default freshness horizon;

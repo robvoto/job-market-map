@@ -21,9 +21,9 @@
 **Reason:** Capturing title, employer, location, employment/workplace type, salary, classification and teaser makes duplicates highly detectable, while keeping both rows prevents false merges from hiding real vacancies.
 
 ## ADR-005 — Archive then tombstone removal
-**Decision:** Retention has two stale phases: archive/compact, then remove the detailed unimportant row while preserving a tiny tombstone identity.
+**Decision:** Destructive retention is opt-in. By default Job Market Map preserves canonical job evidence and raw captures indefinitely. Separate Admin switches can later enable raw-capture pruning, archive/compaction, and archived-row removal; their age thresholds are inert while the switches are off.
 
-**Reason:** Old raw observations are low-value bulk, but identity memory prevents stale jobs being rediscovered as falsely new.
+**Reason:** Historical card evidence is cheap to keep and may later support audit, scam/phishing investigation, repost analysis, dedupe improvements, and learning from application outcomes. Evidence can be pruned later if measured storage/performance warrants it, but discarded source evidence cannot be reconstructed. If detailed-row removal is deliberately enabled, a tiny neutral tombstone still preserves source identity so rediscovery is not falsely treated as new.
 
 ## ADR-006 — Versioned API is the consumer boundary
 **Decision:** Job Hunter and other agents consume `/v3`; they do not write SQLite directly.

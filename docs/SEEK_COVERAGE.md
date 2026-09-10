@@ -15,7 +15,7 @@ Rob can enable/disable these in `/admin`. The live SEEK URLs were verified on 10
 A raw whole-state SEEK search can exceed the board's safely pageable result space. On 10 September 2026, last-7-days headline counts were approximately:
 
 - NSW: 12,048
-- ACT: 914
+- ACT: 917
 - QLD: 11,032
 
 Therefore **a successful page request is not evidence of complete market coverage**.
@@ -70,14 +70,20 @@ SEEK source identity uses SEEK job ID. The same job found through multiple class
 
 Cross-board duplicates (for example SEEK + LinkedIn) remain separate source rows connected by rich duplicate evidence links; they are not destructively merged.
 
-## Running
+## Running / resumability
+
+Use bounded resumable chunks. The admin default is one genuinely unfinished partition per state per invocation:
 
 ```bash
 cd /home/robvoto/projects/job-market-map
-uv run python -m scripts.run_seek_market_map
+uv run python -m scripts.run_seek_market_map --state ACT --max-partitions 1
 ```
 
-This runs all enabled states using **one workflow-owned tab inside Rob's existing Chrome**.
+Completed partitions are skipped without consuming the budget. Already-split parents delegate directly to unfinished children. If an interrupted leaf already persisted enough memberships to satisfy its reported count, the next run can finalize it as `COMPLETE_RECOVERED` without re-downloading it.
+
+`--max-partitions` limits one execution window; it is **not** a coverage limit. Use `--fresh` only for an intentional re-crawl, not normal continuation.
+
+The runner uses one workflow-owned tab inside Rob's existing Chrome for the invocation.
 
 Selected states:
 
@@ -97,3 +103,14 @@ Consumers should not assume SEEK is complete when a state status is `NOT_RUN`, `
 ## Keyword searches are supplemental
 
 The whole-state partitioner is the primary SEEK coverage mechanism. The 109-role query registry is retained for cross-source discovery and optional SEEK provenance, but `collection.seek_keyword_queries_enabled=false` by default prevents hundreds of redundant SEEK searches after the whole-state crawl exists. Rob can enable it in Admin if there is a specific reason to compare keyword-query behaviour.
+
+## Live proof status — 10 September 2026
+
+ACT is the first whole-state proof run. Current persisted state after a browser-extension disconnect:
+- SEEK root count: **917**;
+- **29/30** classifications complete;
+- direct-child union: **859** distinct jobs;
+- only unfinished classification: Trades & Services, **89** reported / **32** memberships persisted;
+- ACT root remains `FAILED` until that classification and parent aggregation finish.
+
+Do not call ACT exhaustive/complete yet. See `docs/CURRENT_STATE.md` for the exact recovery point.
