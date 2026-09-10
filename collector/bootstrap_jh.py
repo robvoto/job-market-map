@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import asdict, dataclass, replace
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -51,7 +51,10 @@ class BootstrapReport:
     valid_importable_jobs: int = 0
     skipped_invalid_records: int = 0
     unmapped_records: int = 0
+    existing_jmm_jobs: int = 0
+    new_jmm_jobs: int = 0
     jobs_with_jds: int = 0
+    jobs_without_jds: int = 0
     identity_conflicts: int = 0
     jd_conflicts: int = 0
     conflicts: int = 0
@@ -62,7 +65,6 @@ class BootstrapReport:
     jds_stored: int = 0
     jds_already_present: int = 0
     backup_path: str | None = None
-    collection_status: str | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -80,6 +82,13 @@ def _clean(value: Any) -> str | None:
         return None
     text = " ".join(str(value).split()).strip()
     return text or None
+
+
+def _source_text(value: Any) -> str | None:
+    if value is None:
+        return None
+    text = str(value)
+    return text if text.strip() else None
 
 
 def _normalise_timestamp(value: Any) -> str | None:
@@ -120,12 +129,9 @@ def _read_only_connect(path: Path) -> sqlite3.Connection:
     return conn
 
 
-def _source_metadata(payload: dict[str, Any], snapshot: dict[str, Any]) -> dict[str, Any]:
-    for container in (payload, snapshot):
-        value = container.get("source_metadata")
-        if isinstance(value, dict):
-            return value
-    return {}
+def _detail_evidence(payload: dict[str, Any]) -> dict[str, Any]:
+    value = payload.get("detail_evidence")
+    return value if isinstance(value, dict) else {}
 
 
 def _candidate_from_row(row: sqlite3.Row) -> tuple[BootstrapCandidate | None, str | None]:
@@ -153,80 +159,65 @@ def _candidate_from_row(row: sqlite3.Row) -> tuple[BootstrapCandidate | None, st
     if payload_job_key and payload_job_key != row_job_key:
         return None, "conflict"
 
-    snapshot_raw = payload.get("last_kept_snapshot")
-    snapshot = snapshot_raw if isinstance(snapshot_raw, dict) else {}
+    claimed_source = _clean(payload.get("source"))
+    if claimed_source and claimed_source.casefold() != source:
+        return None, "conflict"
 
-    for claimed_source in (_clean(payload.get("source")), _clean(snapshot.get("source"))):
-        if claimed_source and claimed_source.casefold() != source:
-            return None, "conflict"
-
-    metadata = _source_metadata(payload, snapshot)
+    detail_evidence = _detail_evidence(payload)
+    metadata_raw = detail_evidence.get("source_metadata")
+    metadata = metadata_raw if isinstance(metadata_raw, dict) else {}
+    metadata_source = _clean(metadata.get("platform"))
+    if metadata_source and metadata_source.casefold() != source:
+        return None, "conflict"
     metadata_job_id = _clean(metadata.get("platform_job_id"))
     if metadata_job_id and metadata_job_id != source_job_id:
         return None, "conflict"
 
-    url_candidates = (
-        _clean(metadata.get("canonical_url")),
-        _clean(payload.get("url")),
-        _clean(snapshot.get("url")),
-    )
-    selected_url = next((url for url in url_candidates if _is_usable_url(url)), None)
-    if not selected_url:
+    metadata_url = _clean(metadata.get("canonical_url"))
+    payload_url = _clean(payload.get("url"))
+    selected_url = metadata_url if _is_usable_url(metadata_url) else payload_url
+    if not _is_usable_url(selected_url):
         return None, "invalid"
     canonical_url = canonicalise_url(selected_url)
     if not _is_usable_url(canonical_url):
         return None, "invalid"
 
-    first_seen = _normalise_timestamp(payload.get("first_seen_at")) or _normalise_timestamp(
-        row["first_seen"]
+    first_seen = _normalise_timestamp(row["first_seen"]) or _normalise_timestamp(
+        payload.get("first_seen_at")
     )
-    last_seen = _normalise_timestamp(payload.get("last_seen_at")) or _normalise_timestamp(
-        row["last_seen"]
+    last_seen = _normalise_timestamp(row["last_seen"]) or _normalise_timestamp(
+        payload.get("last_seen_at")
     )
 
-    posted_at = None
-    if _clean(snapshot.get("original_posted_date_status")) == "verified":
-        posted_at = _clean(snapshot.get("original_posted_date"))
-
-    full_description = _clean(payload.get("full_description")) or _clean(
-        snapshot.get("full_description")
+    details_text = _source_text(detail_evidence.get("details_text"))
+    jd_fetched_at = _normalise_timestamp(detail_evidence.get("fetched_at"))
+    description_source = _clean(detail_evidence.get("description_source"))
+    metadata_canonical_url = (
+        canonicalise_url(metadata_url) if _is_usable_url(metadata_url) else None
     )
-    jd_fetched_at = None
-    if full_description:
-        detail_evidence = payload.get("detail_evidence")
-        if isinstance(detail_evidence, dict):
-            details_text = _clean(detail_evidence.get("details_text"))
-            if details_text == full_description:
-                jd_fetched_at = _normalise_timestamp(detail_evidence.get("fetched_at"))
-        jd_fetched_at = (
-            jd_fetched_at
-            or _normalise_timestamp(payload.get("last_kept_at"))
-            or last_seen
-            or first_seen
-        )
-
-    description_source = _clean(snapshot.get("description_source")) or _clean(
-        payload.get("description_source")
+    jd_is_source_backed = bool(
+        details_text
+        and jd_fetched_at
+        and description_source
+        and metadata_source
+        and metadata_source.casefold() == source
+        and metadata_job_id == source_job_id
+        and metadata_canonical_url == canonical_url
     )
-    jd_source = f"job_hunter_bootstrap:{description_source or source}" if full_description else None
+    full_description = details_text if jd_is_source_backed else None
+    jd_source = (
+        f"job_hunter_detail_evidence:{description_source}"
+        if full_description
+        else None
+    )
 
     return (
         BootstrapCandidate(
             source=source,
             source_job_id=source_job_id,
             canonical_url=canonical_url,
-            title=_clean(payload.get("title")) or _clean(row["title"]) or _clean(snapshot.get("title")),
-            employer=_clean(payload.get("company"))
-            or _clean(row["company"])
-            or _clean(snapshot.get("company")),
-            location=_clean(snapshot.get("location")) or _clean(payload.get("location")),
-            salary_text=_clean(snapshot.get("salary")) or _clean(payload.get("salary")),
-            employment_type=_clean(snapshot.get("work_type")) or _clean(payload.get("work_type")),
-            workplace_type=_clean(snapshot.get("work_mode")) or _clean(payload.get("work_mode")),
-            posted_text=_clean(snapshot.get("posted")) or _clean(payload.get("posted")),
-            posted_at=posted_at,
-            reposted=bool(snapshot.get("is_reposted", payload.get("is_reposted", False))),
-            teaser_text=_clean(snapshot.get("teaser")) or _clean(payload.get("teaser")),
+            title=_clean(row["title"]) or _clean(payload.get("title")),
+            employer=_clean(row["company"]) or _clean(payload.get("company")),
             first_seen_at=first_seen,
             last_seen_at=last_seen,
             full_description=full_description,
@@ -370,6 +361,19 @@ def _find_jmm_conflicts(
     return blocked, jd_conflicts
 
 
+def _candidate_exists_in_rows(
+    candidate: BootstrapCandidate, rows: list[dict[str, Any]]
+) -> bool:
+    return any(
+        (_clean(row.get("source")) or "").casefold() == candidate.source
+        and (
+            _clean(row.get("source_job_id")) == candidate.source_job_id
+            or _clean(row.get("canonical_url")) == candidate.canonical_url
+        )
+        for row in rows
+    )
+
+
 def plan_bootstrap(job_hunter_db: Path, *, jmm_db_path: Path | None = None) -> BootstrapPlan:
     target_db = (jmm_db_path or db.DB_PATH).expanduser().resolve()
     report = BootstrapReport(mode="dry-run", source_db=str(job_hunter_db.expanduser().resolve()))
@@ -415,6 +419,17 @@ def plan_bootstrap(job_hunter_db: Path, *, jmm_db_path: Path | None = None) -> B
         for candidate in candidates
         if candidate.identity_key not in blocked and candidate.full_description
     )
+    report.jobs_without_jds = report.valid_importable_jobs - report.jobs_with_jds
+    existing_rows = _existing_jmm_rows(target_db, "jobs") + _existing_jmm_rows(
+        target_db, "job_tombstones"
+    )
+    report.existing_jmm_jobs = sum(
+        1
+        for candidate in candidates
+        if candidate.identity_key not in blocked
+        and _candidate_exists_in_rows(candidate, existing_rows)
+    )
+    report.new_jmm_jobs = report.valid_importable_jobs - report.existing_jmm_jobs
     return BootstrapPlan(report=report, candidates=candidates, blocked_identities=blocked)
 
 
@@ -458,6 +473,35 @@ def _matching_existing(conn: sqlite3.Connection, candidate: BootstrapCandidate):
     if tombstone:
         return "job_tombstones", tombstone
     return None, None
+
+
+def _prefer_existing_market_evidence(
+    candidate: BootstrapCandidate, existing: sqlite3.Row | None
+) -> BootstrapCandidate:
+    if existing is None:
+        return candidate
+
+    keys = set(existing.keys())
+
+    def existing_value(column: str, fallback: str | None) -> str | None:
+        if column not in keys:
+            return fallback
+        return _clean(existing[column]) or fallback
+
+    return replace(
+        candidate,
+        canonical_url=existing_value("canonical_url", candidate.canonical_url)
+        or candidate.canonical_url,
+        title=existing_value("title", candidate.title),
+        employer=existing_value("employer", candidate.employer),
+        location=existing_value("location", candidate.location),
+        salary_text=existing_value("salary_text", candidate.salary_text),
+        employment_type=existing_value("employment_type", candidate.employment_type),
+        workplace_type=existing_value("workplace_type", candidate.workplace_type),
+        posted_text=existing_value("posted_text", candidate.posted_text),
+        posted_at=existing_value("posted_at", candidate.posted_at),
+        teaser_text=existing_value("teaser_text", candidate.teaser_text),
+    )
 
 
 def _promote_url_only_identity(candidate: BootstrapCandidate) -> None:
@@ -525,6 +569,7 @@ def apply_bootstrap(plan: BootstrapPlan) -> BootstrapReport:
                         report.jds_stored += 1
                 continue
 
+        candidate = _prefer_existing_market_evidence(candidate, existing)
         _promote_url_only_identity(candidate)
         captured_at = candidate.last_seen_at or candidate.first_seen_at or datetime.now(UTC).isoformat(
             timespec="seconds"

@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import subprocess
 import sys
 from pathlib import Path
 
@@ -25,15 +24,6 @@ APPLY_REPORT = ROOT / "exports" / "jmm006_job_hunter_bootstrap_apply.json"
 
 def _print(report) -> None:
     print(json.dumps(report.as_dict(), indent=2, sort_keys=True))
-
-
-def _run_normal_collection() -> int:
-    completed = subprocess.run(
-        [sys.executable, "-m", "scripts.run_collection_cycle", "--trigger", "manual"],
-        cwd=ROOT,
-        check=False,
-    )
-    return int(completed.returncode)
 
 
 def main() -> int:
@@ -69,17 +59,6 @@ def main() -> int:
     _print(report)
     print(f"Verified pre-import backup: {backup.path}")
     print(f"Apply report: {APPLY_REPORT}")
-
-    collection_rc = _run_normal_collection()
-    report.collection_status = "COMPLETE" if collection_rc == 0 else f"FAILED_RC_{collection_rc}"
-    write_report(APPLY_REPORT, report)
-    if collection_rc != 0:
-        print(
-            "JMM-006 import completed, but the required normal JMM collection cycle failed "
-            f"with return code {collection_rc}."
-        )
-        return collection_rc
-    print("Normal JMM collection cycle completed after the bootstrap.")
     return 0
 
 

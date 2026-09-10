@@ -3,8 +3,13 @@
 ## One-off Job Hunter bootstrap (JMM-006)
 
 The bootstrap reads Job Hunter's `job_history` database **read-only** and whitelists only neutral
-market/job evidence. It does not copy fit scores, recommendations, hidden/liked/applied/rejected
-state, user IDs, or other personal activity.
+market/job evidence that exists independently of Job Hunter decisions. It never reads
+`last_kept_at` or `last_kept_snapshot`, and does not copy fit scores, recommendations,
+hidden/liked/applied/rejected state, user IDs, or other personal activity. Missing neutral fields
+stay missing rather than being recovered from a KEEP snapshot or arbitrary history payload fields.
+Direct history-record identity/title/company/URL/freshness values are eligible; JD text is eligible only from
+validated `detail_evidence` with matching source/job identity, canonical URL, source provenance and
+fetch timestamp. Existing non-empty JMM market evidence wins over bootstrap values.
 
 First run the mandatory dry-run:
 
@@ -14,7 +19,8 @@ uv run python scripts/bootstrap_from_job_hunter.py \
 ```
 
 Review `exports/jmm006_job_hunter_bootstrap_dry_run.json`. The report includes records checked,
-valid/importable jobs, skipped/invalid records, JDs, identity/JD conflicts and unmapped records.
+valid/importable jobs, skipped/invalid records, existing/new JMM jobs, jobs with/without JDs,
+identity/JD conflicts and unmapped records.
 
 Only then apply it:
 
@@ -25,8 +31,7 @@ uv run python scripts/bootstrap_from_job_hunter.py \
 ```
 
 Apply creates a verified JMM SQLite backup first, imports idempotently using JMM identity rules,
-never changes the legacy Job Hunter database, and then runs the normal JMM collection cycle so
-migrated jobs are refreshed and genuinely new jobs are added.
+and never changes the Job Hunter database. Normal JMM collection remains a separate operation.
 
 ## Goal
 
