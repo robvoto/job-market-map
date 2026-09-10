@@ -104,3 +104,25 @@ A consumer must not set `shown_to_rob` merely because it fetched a feed page. Se
 If Job Market Map is unavailable, a consumer must report that feed failure explicitly. It must not silently switch to direct SQLite access because that bypasses lifecycle, duplicate and admin rules.
 
 If the consumer has its own legacy scraper fallback, that is a consumer-owned product decision and must be explicit; it is not part of the Job Market Map API contract.
+
+
+## Named consumer checkpoints
+
+Job Hunter, Reset / Edge and Plan Z can avoid maintaining separate cursor files by using named API consumers:
+
+```text
+GET  /v1/consumers/job-hunter/feed
+POST /v1/consumers/job-hunter/checkpoint
+GET  /v1/consumers/plan-z/feed
+POST /v1/consumers/plan-z/checkpoint
+GET  /v1/consumers/reset-edge/feed
+POST /v1/consumers/reset-edge/checkpoint
+```
+
+Fetching does **not** advance the checkpoint. A consumer advances only after it safely processes a page. Each consumer has an independent cursor.
+
+The feed also accepts `geography_code=NSW|ACT|QLD` and `source=seek|linkedin|...` filters. Consumers therefore do not need to understand SEEK partition URLs or SQLite tables.
+
+## Coverage is separate from feed availability
+
+A consumer may receive useful jobs before a state crawl is complete. For workflows that require proof of exhaustive SEEK coverage, also inspect `GET /v1/coverage/seek`. Do not equate “feed returned jobs” with “state market map is complete.”

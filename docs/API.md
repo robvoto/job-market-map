@@ -90,3 +90,25 @@ The same `actor + idempotency_key` can be retried without duplicating the event.
 - `POST /v1/admin/retention/run`
 
 Admin helper text and validation are driven by `config/settings_catalog.json` plus the operational SQLite settings table.
+
+
+## Named consumer feeds
+
+Consumers can let Job Market Map store their independent cursor:
+
+```text
+GET  /v1/consumers/{consumer_key}/state
+GET  /v1/consumers/{consumer_key}/feed
+POST /v1/consumers/{consumer_key}/checkpoint
+```
+
+Fetching never advances the checkpoint. Consumers advance only after successful processing.
+
+## Geography and coverage
+
+- Feed/search endpoints accept `geography_code=NSW|ACT|QLD`.
+- `GET /v1/coverage/seek` reports whole-state partition completeness.
+- `GET /v1/admin/geographies` lists configured states.
+- `PATCH /v1/admin/geographies/{code}` enables/disables a state.
+
+A non-empty feed is not proof that SEEK coverage is complete; use the coverage endpoint when completeness matters.

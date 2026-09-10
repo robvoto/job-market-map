@@ -12,6 +12,7 @@ class CardObservation:
     title: str | None = None
     employer: str | None = None
     location: str | None = None
+    geography_code: str | None = None
     salary_text: str | None = None
     employment_type: str | None = None
     workplace_type: str | None = None

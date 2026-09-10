@@ -71,11 +71,12 @@ def _query_id(conn, obs: CardObservation, captured_at: str) -> int | None:
     source = _clean(obs.source)
     conn.execute(
         """
-        INSERT INTO queries(source, query_text, location, active, created_at)
-        VALUES (?, ?, ?, 1, ?)
-        ON CONFLICT(source, query_text, location) DO NOTHING
+        INSERT INTO queries(source, query_text, location, geography_code, active, created_at)
+        VALUES (?, ?, ?, ?, 1, ?)
+        ON CONFLICT(source, query_text, location) DO UPDATE SET
+            geography_code=COALESCE(excluded.geography_code, queries.geography_code)
         """,
-        (source, query_text, location, captured_at),
+        (source, query_text, location, _clean(obs.geography_code), captured_at),
     )
     row = conn.execute(
         "SELECT id FROM queries WHERE source = ? AND query_text = ? AND location = ?",
@@ -126,6 +127,7 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             "title": _clean(obs.title),
             "employer": _clean(obs.employer),
             "location": _clean(obs.location),
+            "geography_code": _clean(obs.geography_code),
             "salary_text": _clean(obs.salary_text),
             "employment_type": _clean(obs.employment_type),
             "workplace_type": _clean(obs.workplace_type),
@@ -174,13 +176,13 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             cur = conn.execute(
                 """
                 INSERT INTO jobs(
-                    source, source_job_id, canonical_url, title, employer, location,
+                    source, source_job_id, canonical_url, title, employer, location, geography_code,
                     salary_text, employment_type, workplace_type, posted_text, posted_at,
                     reposted, applicant_count, easy_apply, teaser_text, raw_card_text,
                     classification_text, subclassification_text, card_tags_json,
                     first_seen_at, last_seen_at, capture_count, archived,
                     shown_to_rob, reviewed, applied, rejected, dismissed
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -189,6 +191,7 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                     fields["title"],
                     fields["employer"],
                     fields["location"],
+                    fields["geography_code"],
                     fields["salary_text"],
                     fields["employment_type"],
                     fields["workplace_type"],

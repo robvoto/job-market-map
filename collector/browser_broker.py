@@ -95,3 +95,7 @@ def navigate(page_id: int, url: str) -> BrokerResponse:
 
 def snapshot(page_id: int, *, verbose: bool = True) -> BrokerResponse:
     return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
+
+
+def click(page_id: int, uid: str) -> BrokerResponse:
+    return browser_command("click", {"uid": uid}, page_id=page_id)

@@ -47,6 +47,7 @@ def _wait_for_cards(
     location: str,
     offset: int,
     timeout_seconds: float | None = None,
+    geography_code: str | None = None,
 ):
     timeout_seconds = float(
         timeout_seconds
@@ -89,6 +90,7 @@ def collect_linkedin_chunk(
     initial_wait_seconds: float | None = None,
     reset: bool = False,
     page_id: int | None = None,
+    geography_code: str | None = None,
 ) -> LinkedInChunkResult:
     days = int(
         days if days is not None else get_setting("collection.default_freshness_days")
@@ -145,7 +147,11 @@ def collect_linkedin_chunk(
         if initial_wait_seconds > 0:
             time.sleep(initial_wait_seconds)
         cards, hint = _wait_for_cards(
-            page_id, query_text=query_text, location=location, offset=offset
+            page_id,
+            query_text=query_text,
+            location=location,
+            offset=offset,
+            geography_code=geography_code,
         )
         if hint is not None:
             total_hint = hint

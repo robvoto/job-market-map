@@ -47,3 +47,8 @@ New sources should be added when they materially increase coverage or reach role
 - parser fixture/regression tests;
 - source behaviour documented here;
 - no policy filtering in the collector.
+
+
+## SEEK state-wide coverage
+
+SEEK now has a separate whole-state coverage path for NSW, ACT and QLD. Oversized state/classification partitions are recursively split via SEEK's own classification, subclassification and work-type refinements. See `docs/SEEK_COVERAGE.md`.

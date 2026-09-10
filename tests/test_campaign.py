@@ -17,7 +17,7 @@ def _seed_isolated_registry(tmp_path, monkeypatch):
 def test_campaign_uses_registry_without_fit_filtering(tmp_path, monkeypatch):
     campaign, _ = _seed_isolated_registry(tmp_path, monkeypatch)
     runs = campaign.registry_runs(sources={"seek"})
-    assert len(runs) == 109
+    assert len(runs) == 327
     assert any(run["registry_key"] == "normal-business-analyst" for run in runs)
     assert any(run["registry_key"] == "edge-technical-customer-success" for run in runs)
     assert any(run["registry_key"] == "z-cleaning" for run in runs)

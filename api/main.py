@@ -8,7 +8,13 @@ from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from pydantic import BaseModel, Field
 
+from collector.consumers import advance_checkpoint, get_checkpoint
 from collector.db import ROOT, connect, init_db
+from collector.geographies import (
+    list_geographies,
+    seed_geographies,
+    set_geography_enabled,
+)
 from collector.query_admin import add_query, set_query_active
 from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
@@ -32,6 +38,7 @@ ADMIN_HTML = ROOT / "api" / "admin.html"
 async def lifespan(_: FastAPI):
     init_db()
     seed_settings()
+    seed_geographies()
     sync_registry()
     yield
 
@@ -61,10 +68,21 @@ class QueryToggle(BaseModel):
     active: bool
 
 
+class GeographyToggle(BaseModel):
+    enabled: bool
+    actor: str = Field(default="rob", max_length=100)
+
+
+class CheckpointUpdate(BaseModel):
+    last_job_id: int = Field(ge=0)
+    note: str | None = Field(default=None, max_length=500)
+
+
 class QueryCreate(BaseModel):
     source: str = Field(min_length=1, max_length=40)
     query_text: str = Field(min_length=1, max_length=300)
-    location: str = Field(default="Sydney NSW", max_length=200)
+    location: str = Field(default="New South Wales NSW", max_length=200)
+    geography_code: str | None = Field(default=None, max_length=10)
     registry_key: str | None = Field(default=None, max_length=200)
     origins: list[str] = Field(default_factory=lambda: ["admin"])
     active: bool = True
@@ -181,6 +199,7 @@ def job_feed(
     ),
     limit: int | None = Query(None, ge=1),
     source: str | None = None,
+    geography_code: str | None = None,
     include_archived: bool = False,
     include_raw: bool = True,
 ):
@@ -190,6 +209,9 @@ def job_feed(
     if source:
         clauses.append("j.source=?")
         params.append(source.casefold())
+    if geography_code:
+        clauses.append("j.geography_code=?")
+        params.append(geography_code.upper())
     if not include_archived:
         clauses.append("j.archived=0")
     where = " AND ".join(clauses)
@@ -220,6 +242,38 @@ def job_feed(
     }
 
 
+@app.get(f"/{API_VERSION}/consumers/{{consumer_key}}/state")
+def consumer_state(consumer_key: str):
+    return get_checkpoint(consumer_key)
+
+
+@app.get(f"/{API_VERSION}/consumers/{{consumer_key}}/feed")
+def consumer_feed(
+    consumer_key: str,
+    limit: int | None = Query(None, ge=1),
+    geography_code: str | None = None,
+    source: str | None = None,
+    include_raw: bool = True,
+):
+    checkpoint = get_checkpoint(consumer_key)
+    return job_feed(
+        after_id=int(checkpoint["last_job_id"]),
+        limit=limit,
+        source=source,
+        geography_code=geography_code,
+        include_archived=False,
+        include_raw=include_raw,
+    )
+
+
+@app.post(f"/{API_VERSION}/consumers/{{consumer_key}}/checkpoint")
+def consumer_checkpoint(consumer_key: str, update: CheckpointUpdate):
+    try:
+        return advance_checkpoint(consumer_key, update.last_job_id, note=update.note)
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
+
+
 @app.get(f"/{API_VERSION}/jobs/new")
 @app.get("/jobs/new", include_in_schema=False)
 def new_jobs(days: int = Query(1, ge=0, le=30), limit: int | None = Query(None, ge=1)):
@@ -238,6 +292,7 @@ def new_jobs(days: int = Query(1, ge=0, le=30), limit: int | None = Query(None, 
 def search_jobs(
     q: str | None = None,
     source: str | None = None,
+    geography_code: str | None = None,
     unseen_only: bool = False,
     include_archived: bool = False,
     limit: int | None = Query(None, ge=1),
@@ -252,6 +307,9 @@ def search_jobs(
     if source:
         clauses.append("source=?")
         params.append(source.casefold())
+    if geography_code:
+        clauses.append("geography_code=?")
+        params.append(geography_code.upper())
     if unseen_only:
         clauses.append("shown_to_rob=0")
     if not include_archived:
@@ -401,6 +459,51 @@ def admin_toggle_query(query_id: int, update: QueryToggle):
         return set_query_active(query_id, update.active)
     except KeyError:
         raise HTTPException(404, "query not found") from None
+
+
+@app.get(f"/{API_VERSION}/coverage/seek")
+def seek_coverage():
+    geographies = list_geographies()
+    with connect() as conn:
+        coverage = []
+        for geography in geographies:
+            root = conn.execute(
+                "SELECT * FROM seek_partitions WHERE geography_code=? AND parent_id IS NULL ORDER BY updated_at DESC LIMIT 1",
+                (geography["code"],),
+            ).fetchone()
+            incomplete = conn.execute(
+                "SELECT COUNT(*) FROM seek_partitions WHERE geography_code=? AND status NOT LIKE 'COMPLETE%'",
+                (geography["code"],),
+            ).fetchone()[0]
+            coverage.append(
+                {
+                    "geography_code": geography["code"],
+                    "label": geography["label"],
+                    "enabled": bool(geography["enabled"]),
+                    "status": root["status"] if root else "NOT_RUN",
+                    "reported_results": root["reported_results"] if root else None,
+                    "covered_unique_jobs": root["collected_unique_jobs"] if root else 0,
+                    "incomplete_partitions": int(incomplete),
+                }
+            )
+    return {
+        "source": "seek",
+        "partition_threshold": get_setting("collection.seek_partition_max_results"),
+        "geographies": coverage,
+    }
+
+
+@app.get(f"/{API_VERSION}/admin/geographies")
+def admin_geographies():
+    return {"geographies": list_geographies()}
+
+
+@app.patch(f"/{API_VERSION}/admin/geographies/{{code}}")
+def admin_toggle_geography(code: str, update: GeographyToggle):
+    try:
+        return set_geography_enabled(code, update.enabled, actor=update.actor)
+    except KeyError:
+        raise HTTPException(404, "geography not found") from None
 
 
 @app.post(f"/{API_VERSION}/admin/retention/run")

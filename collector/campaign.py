@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 
+from collector.geographies import list_geographies
 from collector.query_admin import list_queries
 from collector.settings import get_setting
 from sources.linkedin_collector import collect_linkedin_chunk
@@ -21,9 +22,15 @@ class CampaignStep:
 
 
 def registry_runs(*, sources: set[str] | None = None) -> list[dict]:
+    enabled_geographies = {row["code"] for row in list_geographies(enabled_only=True)}
     runs = []
     for row in list_queries(active_only=True):
         if sources and row["source"] not in sources:
+            continue
+        if (
+            row.get("geography_code")
+            and row["geography_code"] not in enabled_geographies
+        ):
             continue
         runs.append(
             {

@@ -12,16 +12,19 @@ body{font-family:system-ui,sans-serif;max-width:1100px;margin:32px auto;padding:
 <h1>Job Market Map Admin</h1>
 <p class="muted">Runtime controls. Changes are stored in SQLite and do not require Python edits. Helper text explains what each setting changes.</p>
 <div id="status" class="status"></div>
+<h2>Market scope</h2><p class="muted">Enabled whole-state geographies used by collection consumers. Current intended scope: NSW + ACT + QLD.</p><div id="geographies"></div><div id="coverage"></div>
 <div class="row"><button id="run-retention">Run retention now</button><span class="muted">Uses the current Retention settings below.</span></div>
 <h2>Settings</h2><div id="settings"></div>
 <details><summary><strong>Discovery queries</strong></summary>
 <p class="muted">Add or disable searches without changing Python. Disabling preserves existing history.</p>
-<div class="row"><select id="new-source"><option>seek</option><option>linkedin</option><option>apsjobs</option></select><input id="new-query" placeholder="New discovery query"><input id="new-location" value="Sydney NSW" placeholder="Location"><button id="add-query">Add query</button></div>
+<div class="row"><select id="new-source"><option>seek</option><option>linkedin</option><option>apsjobs</option></select><select id="new-geo"><option>NSW</option><option>ACT</option><option>QLD</option></select><input id="new-query" placeholder="New discovery query"><input id="new-location" value="New South Wales NSW" placeholder="Source location"><button id="add-query">Add query</button></div>
 <div id="queries"></div></details>
 <script>
 const api='/v1';
 const status=(m,e=false)=>{const el=document.getElementById('status');el.textContent=m;el.className='status'+(e?' error':'')};
 async function j(url,opt){const r=await fetch(url,opt);const x=await r.json();if(!r.ok)throw new Error(x.detail||r.statusText);return x}
+async function loadGeographies(){const {geographies}=await j(api+'/admin/geographies');const root=document.getElementById('geographies');root.innerHTML='';for(const g of geographies){const d=document.createElement('div');d.className='setting';d.innerHTML=`<div class="row"><input data-geo="${g.code}" type="checkbox" ${g.enabled?'checked':''}><strong>${g.code} — ${g.label}</strong></div><div class="help">${g.help_text}</div>`;root.appendChild(d)}root.onchange=async e=>{if(!e.target.dataset.geo)return;try{await j(`${api}/admin/geographies/${e.target.dataset.geo}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({enabled:e.target.checked,actor:'rob-admin'})});status('Geography updated');await loadCoverage()}catch(err){status(err.message,true)}}}
+async function loadCoverage(){const x=await j(api+'/coverage/seek');const root=document.getElementById('coverage');root.innerHTML='<h3>SEEK coverage</h3>';for(const g of x.geographies){const d=document.createElement('div');d.className='setting';d.innerHTML=`<strong>${g.geography_code}: ${g.status}</strong> · reported ${g.reported_results??'—'} · covered ${g.covered_unique_jobs} · incomplete partitions ${g.incomplete_partitions}`;root.appendChild(d)}}
 async function loadSettings(){
  const {settings}=await j(api+'/admin/settings'); const root=document.getElementById('settings'); root.innerHTML='';
  for(const s of settings){const d=document.createElement('div');d.className='setting';
@@ -32,7 +35,7 @@ async function loadSettings(){
 }
 async function loadQueries(){const {queries}=await j(api+'/admin/queries');const root=document.getElementById('queries');root.innerHTML='';for(const q of queries){const d=document.createElement('div');d.className='query';d.innerHTML=`<input data-qid="${q.id}" type="checkbox" ${q.active?'checked':''}><div><strong>${q.query_text}</strong> <span class="muted">${q.source} · ${q.location||'anywhere'}</span></div><small>${q.registry_key||'admin query'}</small>`;root.appendChild(d)}root.onchange=async e=>{if(!e.target.dataset.qid)return;try{await j(`${api}/admin/queries/${e.target.dataset.qid}`,{method:'PATCH',headers:{'Content-Type':'application/json'},body:JSON.stringify({active:e.target.checked})});status('Query updated')}catch(err){status(err.message,true)}}}
 document.getElementById('run-retention').onclick=async()=>{try{const x=await j(api+'/admin/retention/run',{method:'POST'});status(`Retention complete: archived ${x.jobs_archived}, removed ${x.jobs_removed}, raw captures deleted ${x.captures_deleted}`)}catch(err){status(err.message,true)}};
-document.getElementById('add-query').onclick=async()=>{try{const query_text=document.getElementById('new-query').value.trim();if(!query_text)throw new Error('Enter a query');await j(api+'/admin/queries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:document.getElementById('new-source').value,query_text,location:document.getElementById('new-location').value,origins:['rob-admin'],active:true})});document.getElementById('new-query').value='';status('Query added');await loadQueries()}catch(err){status(err.message,true)}};
-loadSettings();loadQueries().catch(err=>status(err.message,true));
+document.getElementById('add-query').onclick=async()=>{try{const query_text=document.getElementById('new-query').value.trim();if(!query_text)throw new Error('Enter a query');await j(api+'/admin/queries',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({source:document.getElementById('new-source').value,geography_code:document.getElementById('new-geo').value,query_text,location:document.getElementById('new-location').value,origins:['rob-admin'],active:true})});document.getElementById('new-query').value='';status('Query added');await loadQueries()}catch(err){status(err.message,true)}};
+loadGeographies().catch(err=>status(err.message,true));loadCoverage().catch(err=>status(err.message,true));loadSettings();loadQueries().catch(err=>status(err.message,true));
 </script>
 </body></html>

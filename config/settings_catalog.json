@@ -72,6 +72,24 @@
       "help": "Runaway-loop protection only. Hitting this limit is a FAILED/incomplete run, never successful exhaustion."
     },
     {
+      "key": "collection.seek_completion_count_tolerance",
+      "category": "Collection",
+      "type": "integer",
+      "default": 5,
+      "min": 0,
+      "max": 50,
+      "help": "Allowed shortfall between SEEK's first reported count and collected unique IDs before a leaf is marked incomplete. Small tolerance handles jobs appearing/disappearing during a live crawl."
+    },
+    {
+      "key": "collection.seek_partition_max_results",
+      "category": "Collection",
+      "type": "integer",
+      "default": 450,
+      "min": 50,
+      "max": 500,
+      "help": "Maximum SEEK-reported results allowed in one leaf partition before it must be split further. Default 450 keeps well below the approximate 500-result paging risk."
+    },
+    {
       "key": "collection.linkedin_initial_wait_seconds",
       "category": "Collection",
       "type": "number",

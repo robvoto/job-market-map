@@ -126,10 +126,11 @@ def _parse_block(block: str) -> dict[str, Any]:
 def parse_seek_snapshot(
     snapshot: dict[str, Any],
     *,
-    query_text: str,
-    query_location: str,
+    query_text: str | None,
+    query_location: str | None,
     page_number: int = 1,
     captured_at: str | None = None,
+    geography_code: str | None = None,
 ) -> list[CardObservation]:
     text = str(snapshot.get("text") or "")
     elements = list(snapshot.get("elements") or [])
@@ -162,6 +163,7 @@ def parse_seek_snapshot(
                 title=parsed["title"],
                 employer=parsed["employer"],
                 location=parsed["location"],
+                geography_code=geography_code,
                 salary_text=parsed["salary_text"],
                 employment_type=parsed["employment_type"],
                 workplace_type=parsed["workplace_type"],
@@ -186,3 +188,69 @@ def parse_seek_snapshot(
             )
         )
     return observations
+
+
+RESULT_COUNT_RE = re.compile(r"(?im)^([\d,]+)\s+.+?jobs?(?:\s+in\s+[^\n]+)?$")
+
+
+def seek_result_count(text: str) -> int | None:
+    """Return SEEK's headline result count from a result page."""
+    for line in (text or "").splitlines()[:20]:
+        match = re.search(
+            r"^([\d,]+)\s+(?:.+?\s+)?jobs?(?:\s+in\s+.+)?$", line.strip(), re.IGNORECASE
+        )
+        if match:
+            return int(match.group(1).replace(",", ""))
+    return None
+
+
+def seek_refinement_links(
+    snapshot: dict[str, Any], *, state_slug: str, level: str, current_url: str
+) -> list[dict[str, str]]:
+    """Extract disjoint SEEK child partitions from an expanded refinement snapshot."""
+    from urllib.parse import urlsplit
+
+    current_path = urlsplit(current_url).path.rstrip("/")
+    rows: list[dict[str, str]] = []
+    seen: set[str] = set()
+    for element in snapshot.get("elements") or []:
+        href = str(element.get("href") or "")
+        label = " ".join(
+            str(element.get("text") or element.get("ariaLabel") or "").split()
+        ).strip()
+        if not href or not label or href in seen:
+            continue
+        path = urlsplit(href).path.rstrip("/")
+        child_level = None
+        if level == "state":
+            if re.fullmatch(
+                rf"/jobs-in-[^/]+/in-{re.escape(state_slug)}", path, re.IGNORECASE
+            ):
+                child_level = "classification"
+        elif level == "classification":
+            m = re.fullmatch(
+                rf"(/jobs-in-[^/]+)/([^/]+)/in-{re.escape(state_slug)}",
+                path,
+                re.IGNORECASE,
+            )
+            if m and not current_path.endswith("/" + m.group(2)):
+                # The first path segment must match the selected classification.
+                selected_prefix = current_path.split(f"/in-{state_slug}")[0]
+                if m.group(1).casefold() == selected_prefix.casefold():
+                    child_level = "subclassification"
+        elif (
+            level == "subclassification"
+            and path.startswith(current_path + "/")
+            and path.rsplit("/", 1)[-1].casefold()
+            in {
+                "full-time",
+                "part-time",
+                "contract-temp",
+                "casual-vacation",
+            }
+        ):
+            child_level = "work_type"
+        if child_level:
+            seen.add(href)
+            rows.append({"level": child_level, "label": label, "url": href})
+    return rows

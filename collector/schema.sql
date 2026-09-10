@@ -9,6 +9,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     title TEXT,
     employer TEXT,
     location TEXT,
+    geography_code TEXT,
     salary_text TEXT,
     employment_type TEXT,
     workplace_type TEXT,
@@ -55,6 +56,7 @@ CREATE TABLE IF NOT EXISTS queries (
     source TEXT NOT NULL,
     query_text TEXT NOT NULL,
     location TEXT,
+    geography_code TEXT,
     active INTEGER NOT NULL DEFAULT 1,
     created_at TEXT NOT NULL,
     registry_key TEXT,
@@ -177,3 +179,51 @@ CREATE TABLE IF NOT EXISTS job_tombstones (
 
 CREATE INDEX IF NOT EXISTS idx_job_tombstones_core ON job_tombstones(core_fingerprint);
 CREATE INDEX IF NOT EXISTS idx_job_tombstones_last_seen ON job_tombstones(last_seen_at);
+
+CREATE TABLE IF NOT EXISTS geographies (
+    code TEXT PRIMARY KEY,
+    country TEXT NOT NULL,
+    label TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    seek_location TEXT NOT NULL,
+    seek_state_slug TEXT NOT NULL,
+    linkedin_location TEXT NOT NULL,
+    help_text TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    updated_by TEXT
+);
+
+CREATE TABLE IF NOT EXISTS seek_partitions (
+    id INTEGER PRIMARY KEY,
+    geography_code TEXT NOT NULL,
+    parent_id INTEGER REFERENCES seek_partitions(id) ON DELETE CASCADE,
+    level TEXT NOT NULL,
+    label TEXT NOT NULL,
+    url TEXT NOT NULL UNIQUE,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    reported_results INTEGER,
+    collected_unique_jobs INTEGER NOT NULL DEFAULT 0,
+    child_count INTEGER NOT NULL DEFAULT 0,
+    max_results_threshold INTEGER NOT NULL,
+    first_seen_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT,
+    last_error TEXT
+);
+
+CREATE TABLE IF NOT EXISTS seek_partition_jobs (
+    partition_id INTEGER NOT NULL REFERENCES seek_partitions(id) ON DELETE CASCADE,
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    first_seen_at TEXT NOT NULL,
+    PRIMARY KEY(partition_id, job_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_seek_partitions_geo_status ON seek_partitions(geography_code, status);
+CREATE INDEX IF NOT EXISTS idx_seek_partition_jobs_job ON seek_partition_jobs(job_id);
+
+CREATE TABLE IF NOT EXISTS consumer_checkpoints (
+    consumer_key TEXT PRIMARY KEY,
+    last_job_id INTEGER NOT NULL DEFAULT 0,
+    updated_at TEXT NOT NULL,
+    note TEXT
+);

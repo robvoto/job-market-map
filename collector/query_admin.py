@@ -37,7 +37,8 @@ def add_query(
     *,
     source: str,
     query_text: str,
-    location: str = "Sydney NSW",
+    location: str = "New South Wales NSW",
+    geography_code: str | None = None,
     registry_key: str | None = None,
     origins: list[str] | None = None,
     active: bool = True,
@@ -51,8 +52,8 @@ def add_query(
     with connect() as conn:
         conn.execute(
             """
-            INSERT INTO queries(source, query_text, location, active, created_at, registry_key, origins_json)
-            VALUES (?, ?, ?, ?, ?, ?, ?)
+            INSERT INTO queries(source, query_text, location, geography_code, active, created_at, registry_key, origins_json)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source, query_text, location) DO UPDATE SET
                 active=excluded.active,
                 registry_key=COALESCE(excluded.registry_key, queries.registry_key),
@@ -62,6 +63,7 @@ def add_query(
                 source,
                 query_text,
                 location,
+                geography_code.upper() if geography_code else None,
                 int(active),
                 _now(),
                 registry_key,

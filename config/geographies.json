@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "geographies": [
+    {
+      "code": "NSW",
+      "country": "AU",
+      "label": "New South Wales",
+      "enabled": true,
+      "seek_location": "New South Wales NSW",
+      "seek_state_slug": "New-South-Wales-NSW",
+      "linkedin_location": "New South Wales, Australia",
+      "help": "Whole state of New South Wales."
+    },
+    {
+      "code": "ACT",
+      "country": "AU",
+      "label": "Australian Capital Territory",
+      "enabled": true,
+      "seek_location": "Australian Capital Territory ACT",
+      "seek_state_slug": "Australian-Capital-Territory-ACT",
+      "linkedin_location": "Australian Capital Territory, Australia",
+      "help": "Whole Australian Capital Territory."
+    },
+    {
+      "code": "QLD",
+      "country": "AU",
+      "label": "Queensland",
+      "enabled": true,
+      "seek_location": "Queensland QLD",
+      "seek_state_slug": "Queensland-QLD",
+      "linkedin_location": "Queensland, Australia",
+      "help": "Whole state of Queensland."
+    }
+  ]
+}

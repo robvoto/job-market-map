@@ -9,3 +9,10 @@ def test_admin_page_exposes_helper_driven_settings_query_and_retention_controls(
     assert "/admin/queries/" in html
     assert "run-retention" in html
     assert "add-query" in html
+
+
+def test_admin_page_exposes_geography_and_seek_coverage_controls():
+    html = Path("api/admin.html").read_text(encoding="utf-8")
+    assert "/admin/geographies" in html
+    assert "/coverage/seek" in html
+    assert "Market scope" in html

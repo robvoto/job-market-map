@@ -70,8 +70,8 @@ The port itself is an admin setting and takes effect on the next API start.
 - status history + idempotent writes: implemented
 - duplicate fingerprints/evidence links: implemented
 - configurable archive -> removal -> tombstone lifecycle: implemented
-- 109 neutral query specs / 228 seeded source-location searches
-- SEEK card-only parser + exhaustive pagination: implemented
+- 109 neutral query specs expanded across NSW/ACT/QLD (684 seeded source-geography searches)
+- SEEK card-only parser + recursive whole-state NSW/ACT/QLD partition coverage: implemented
 - LinkedIn card-only parser + resumable arbitrary-offset traversal: implemented
 - APSJobs neutral collector: pending
 - individual JD collection: deliberately outside the neutral mapping stage
@@ -85,3 +85,8 @@ Agents: `.agents/skills/job-market-map/SKILL.md`
 Consumers: `docs/CONSUMER_CONTRACT.md`
 
 Rob/admin: `docs/ADMIN.md`
+
+
+## Geography and SEEK completeness
+
+Current whole-state scope is **NSW + ACT + QLD**. SEEK coverage is independent of role-keyword discovery and recursively partitions oversized result sets: state -> classification -> subclassification -> work type. Default maximum is 450 reported results per leaf. Parent completeness is based on the deduplicated union of child SEEK job IDs and fails closed when coverage is short. See `docs/SEEK_COVERAGE.md`.

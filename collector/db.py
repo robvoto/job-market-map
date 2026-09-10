@@ -32,10 +32,12 @@ def init_db() -> None:
             conn, "jobs", "subclassification_text", "subclassification_text TEXT"
         )
         _ensure_column(conn, "jobs", "card_tags_json", "card_tags_json TEXT")
+        _ensure_column(conn, "jobs", "geography_code", "geography_code TEXT")
         _ensure_column(conn, "jobs", "core_fingerprint", "core_fingerprint TEXT")
         _ensure_column(
             conn, "jobs", "exact_card_fingerprint", "exact_card_fingerprint TEXT"
         )
+        _ensure_column(conn, "queries", "geography_code", "geography_code TEXT")
         _ensure_column(conn, "queries", "registry_key", "registry_key TEXT")
         _ensure_column(conn, "queries", "origins_json", "origins_json TEXT")
         _ensure_column(conn, "queries", "last_run_at", "last_run_at TEXT")

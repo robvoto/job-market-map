@@ -43,6 +43,24 @@ For incremental consumption use `/v1/feed/jobs` and persist `next_cursor` only a
 
 Breaking API semantics require versioning. See `docs/CONSUMER_CONTRACT.md`.
 
+
+## Geography and SEEK completeness
+Current configured whole-state scope is NSW + ACT + QLD. SEEK whole-state coverage is separate from role-keyword discovery.
+
+For SEEK, a result partition above `collection.seek_partition_max_results` (default 450) is **incomplete by definition** until split. Split order is state -> SEEK classification -> SEEK subclassification -> work type. Use SEEK's own live refinement links; do not invent classification IDs.
+
+A parent is complete only when all children are complete and their deduplicated union of SEEK job IDs covers the parent's reported count within the configured tolerance. Final oversized leaves remain `INCOMPLETE_OVERSIZE_UNSPLITTABLE`; never relabel them complete to finish a run.
+
+Use `GET /v1/coverage/seek` when a consumer needs proof of coverage. A non-empty feed does not prove the state crawl is complete.
+
+## Named consumers
+Job Hunter, Plan Z and Reset / Edge should use independent named API checkpoints rather than creating new local seen/cursor files:
+- `/v1/consumers/job-hunter/feed`
+- `/v1/consumers/plan-z/feed`
+- `/v1/consumers/reset-edge/feed`
+
+Fetching never advances a checkpoint. Advance only after the consumer safely processes the returned page.
+
 ## Multi-agent/browser rule
 Many agents may read/query concurrently. Keep writes short/idempotent; SQLite WAL is enabled.
 

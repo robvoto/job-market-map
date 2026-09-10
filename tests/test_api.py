@@ -96,3 +96,49 @@ def test_feed_status_fields_are_json_booleans(tmp_path, monkeypatch):
         item = client.get("/v1/feed/jobs", params={"limit": 1}).json()["items"][0]
         assert item["shown_to_rob"] is False
         assert item["archived"] is False
+
+
+def test_geography_admin_and_seek_coverage_api(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        geos = client.get("/v1/admin/geographies").json()["geographies"]
+        assert {g["code"] for g in geos} == {"NSW", "ACT", "QLD"}
+        disabled = client.patch(
+            "/v1/admin/geographies/QLD", json={"enabled": False, "actor": "rob-test"}
+        )
+        assert disabled.status_code == 200
+        assert disabled.json()["enabled"] == 0
+        coverage = client.get("/v1/coverage/seek").json()
+        assert coverage["partition_threshold"] == 450
+        by_code = {g["geography_code"]: g for g in coverage["geographies"]}
+        assert by_code["QLD"]["enabled"] is False
+        assert by_code["NSW"]["status"] == "NOT_RUN"
+
+
+def test_feed_can_filter_by_normalized_geography(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            for i, geo in enumerate(("NSW", "ACT", "QLD"), start=1):
+                conn.execute(
+                    """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,geography_code,first_seen_at,last_seen_at) VALUES('seek',?,?,?,?,?,'2026-09-10','2026-09-10')""",
+                    (str(i), f"https://x/{i}", f"Role {i}", "Acme", geo),
+                )
+        payload = client.get(
+            "/v1/feed/jobs", params={"geography_code": "ACT", "limit": 10}
+        ).json()
+        assert [item["geography_code"] for item in payload["items"]] == ["ACT"]
+
+
+def test_named_consumer_feed_uses_independent_api_checkpoint(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(3)
+        first = client.get("/v1/consumers/job-hunter/feed", params={"limit": 2}).json()
+        assert [x["id"] for x in first["items"]] == [1, 2]
+        saved = client.post(
+            "/v1/consumers/job-hunter/checkpoint",
+            json={"last_job_id": first["next_cursor"]},
+        )
+        assert saved.status_code == 200
+        second = client.get("/v1/consumers/job-hunter/feed", params={"limit": 2}).json()
+        assert [x["id"] for x in second["items"]] == [3]
+        planz = client.get("/v1/consumers/plan-z/feed", params={"limit": 2}).json()
+        assert [x["id"] for x in planz["items"]] == [1, 2]

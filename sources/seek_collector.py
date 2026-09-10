@@ -45,6 +45,7 @@ def _wait_for_seek_cards(
     location: str,
     page_number: int,
     timeout_seconds: float | None = None,
+    geography_code: str | None = None,
 ) -> list:
     timeout_seconds = float(
         timeout_seconds
@@ -78,6 +79,7 @@ def _wait_for_seek_cards(
                 query_text=query_text,
                 query_location=location,
                 page_number=page_number,
+                geography_code=geography_code,
             )
         except SeekParseError as exc:
             last_error = exc
@@ -97,6 +99,7 @@ def collect_seek_query(
     page_load_seconds: float | None = None,
     safety_page_limit: int | None = None,
     page_id: int | None = None,
+    geography_code: str | None = None,
 ) -> SeekRunResult:
     days = int(
         days if days is not None else get_setting("collection.default_freshness_days")
@@ -140,6 +143,7 @@ def collect_seek_query(
                 query_text=query_text,
                 location=location,
                 page_number=page_number,
+                geography_code=geography_code,
             )
 
             if not cards:

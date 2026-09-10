@@ -40,3 +40,19 @@ def test_registry_sync_preserves_admin_disabled_query(tmp_path, monkeypatch):
             "SELECT active FROM queries WHERE registry_key='normal-business-analyst' AND source='seek'"
         ).fetchone()[0]
     assert active == 0
+
+
+def test_registry_expands_each_seed_query_across_nsw_act_qld():
+    runs = expanded_runs()
+    seek_ba = [
+        r
+        for r in runs
+        if r["source"] == "seek" and r["registry_key"] == "normal-business-analyst"
+    ]
+    assert {r["geography_code"] for r in seek_ba} == {"NSW", "ACT", "QLD"}
+    locations = {r["geography_code"]: r["location"] for r in seek_ba}
+    assert locations == {
+        "NSW": "New South Wales NSW",
+        "ACT": "Australian Capital Territory ACT",
+        "QLD": "Queensland QLD",
+    }

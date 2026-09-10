@@ -51,3 +51,17 @@ Queries are operational DB data. Admin can enable/disable them; API clients can 
 A safety limit is not a market-coverage limit. If SEEK reaches its safety page limit before an explicit terminal state, the run is failed/incomplete.
 
 Disabling a query stops future collection but does not delete jobs or query history already gathered through it.
+
+
+## Geography scope
+
+Whole-state collection scope is stored as admin data. Current enabled geographies are NSW, ACT and QLD. The Admin page can enable/disable a configured geography without changing Python.
+
+`GET /v1/admin/geographies` and `PATCH /v1/admin/geographies/{code}` provide the same control for agents/admin tooling.
+
+## SEEK completeness controls
+
+- `collection.seek_partition_max_results` — default 450; oversized partitions must split and cannot be reported complete.
+- `collection.seek_completion_count_tolerance` — default 5; small live-market count drift tolerated when reconciling a leaf or parent union.
+
+These settings affect completeness semantics, so helper text is displayed in Admin. See `docs/SEEK_COVERAGE.md` before changing them.

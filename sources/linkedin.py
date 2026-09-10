@@ -85,6 +85,7 @@ def parse_linkedin_snapshot(
     query_location: str,
     offset: int = 0,
     captured_at: str | None = None,
+    geography_code: str | None = None,
 ) -> tuple[list[CardObservation], int | None]:
     text = str(snapshot.get("text") or "")
     elements = list(snapshot.get("elements") or [])
