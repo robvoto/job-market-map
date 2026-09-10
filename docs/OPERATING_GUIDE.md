@@ -1,5 +1,33 @@
 # Operating Guide
 
+## One-off Job Hunter bootstrap (JMM-006)
+
+The bootstrap reads Job Hunter's `job_history` database **read-only** and whitelists only neutral
+market/job evidence. It does not copy fit scores, recommendations, hidden/liked/applied/rejected
+state, user IDs, or other personal activity.
+
+First run the mandatory dry-run:
+
+```bash
+uv run python scripts/bootstrap_from_job_hunter.py \
+  --job-hunter-db /home/robvoto/projects/job-hunter-agent/data/app.db
+```
+
+Review `exports/jmm006_job_hunter_bootstrap_dry_run.json`. The report includes records checked,
+valid/importable jobs, skipped/invalid records, JDs, identity/JD conflicts and unmapped records.
+
+Only then apply it:
+
+```bash
+uv run python scripts/bootstrap_from_job_hunter.py \
+  --job-hunter-db /home/robvoto/projects/job-hunter-agent/data/app.db \
+  --apply
+```
+
+Apply creates a verified JMM SQLite backup first, imports idempotently using JMM identity rules,
+never changes the legacy Job Hunter database, and then runs the normal JMM collection cycle so
+migrated jobs are refreshed and genuinely new jobs are added.
+
 ## Goal
 
 Build the broadest useful **neutral** local map of jobs discoverable through the sources and query combinations we choose, then incrementally add new cards each day.

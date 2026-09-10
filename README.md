@@ -69,6 +69,7 @@ The port itself is an admin setting and takes effect on the next API start.
 - Rob admin settings/query controls: implemented
 - status history + idempotent writes: implemented
 - duplicate fingerprints/evidence links: implemented
+- one-off JMM-006 bootstrap from trustworthy existing Job Hunter neutral job/JD evidence: implemented
 - opt-in retention controls with preserve-evidence defaults: implemented
 - 109 neutral query specs expanded across NSW/ACT/QLD (684 seeded source-geography searches)
 - SEEK card-only parser + recursive whole-state NSW/ACT/QLD partition coverage: implemented
