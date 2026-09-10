@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import atexit
 import itertools
+import os
+import subprocess
 import time
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
 
+from playwright.sync_api import (
+    Error as PlaywrightError,
+)
 from playwright.sync_api import (
     Page,
     sync_playwright,
@@ -37,9 +42,13 @@ _BROWSER_ARGS = ["--disable-blink-features=AutomationControlled"]
 _WEBDRIVER_INIT = (
     "Object.defineProperty(navigator, 'webdriver', {get: () => undefined})"
 )
+JMM_BROWSER_CDP_PORT = int(os.environ.get("JMM_BROWSER_CDP_PORT", "9223"))
+JMM_BROWSER_CDP_URL = f"http://127.0.0.1:{JMM_BROWSER_CDP_PORT}"
+_BROWSER_START_SCRIPT = ROOT / "scripts" / "start_browser_service.sh"
 
 _pw_manager = None
 _pw = None
+_browser = None
 _context = None
 _pages: dict[int, Page] = {}
 _page_ids = itertools.count(1)
@@ -254,35 +263,58 @@ _SEEK_CARDS_JS = r"""
 """
 
 
+def _ensure_browser_service() -> None:
+    try:
+        subprocess.run(
+            [str(_BROWSER_START_SCRIPT)],
+            cwd=ROOT,
+            check=True,
+            text=True,
+            capture_output=True,
+            timeout=20,
+            env={**os.environ, "JMM_BROWSER_CDP_PORT": str(JMM_BROWSER_CDP_PORT)},
+        )
+    except (OSError, subprocess.SubprocessError) as exc:
+        detail = (
+            getattr(exc, "stderr", None) or getattr(exc, "stdout", None) or str(exc)
+        )
+        raise BrowserBrokerError(
+            f"failed to ensure persistent JMM browser service: {detail}"
+        ) from exc
+
+
 def start_browser() -> None:
-    """Start JMM's own visible persistent Chromium session once per process."""
-    global _pw_manager, _pw, _context
+    """Attach to the long-lived JMM Chrome; do not create a new browser per run."""
+    global _pw_manager, _pw, _browser, _context
     if _context is not None:
         return
     SEEK_PLAYWRIGHT_USER_DATA_DIR.mkdir(parents=True, exist_ok=True)
+    _ensure_browser_service()
     try:
         _pw_manager = sync_playwright()
         _pw = _pw_manager.start()
-        _context = _pw.chromium.launch_persistent_context(
-            user_data_dir=str(SEEK_PLAYWRIGHT_USER_DATA_DIR),
-            headless=False,
-            viewport={"width": 1440, "height": 1000},
-            args=_BROWSER_ARGS,
-        )
+        _browser = _pw.chromium.connect_over_cdp(JMM_BROWSER_CDP_URL, timeout=10000)
+        if not _browser.contexts:
+            raise BrowserBrokerError(
+                "persistent JMM browser exposed no default context"
+            )
+        _context = _browser.contexts[0]
         _context.add_init_script(_WEBDRIVER_INIT)
     except Exception as exc:
         close_browser()
-        raise BrowserBrokerError(f"failed to start JMM browser: {exc}") from exc
+        if isinstance(exc, BrowserBrokerError):
+            raise
+        raise BrowserBrokerError(
+            f"failed to attach to persistent JMM browser: {exc}"
+        ) from exc
 
 
 def close_browser() -> None:
-    """Close only the JMM-owned browser; never touches Rob's normal Chrome."""
-    global _pw_manager, _pw, _context
+    """Detach this client only; the JMM Chrome service intentionally stays open."""
+    global _pw_manager, _pw, _browser, _context
     _pages.clear()
-    if _context is not None:
-        with suppress(Exception):
-            _context.close()
     _context = None
+    _browser = None
     _pw = None
     if _pw_manager is not None:
         with suppress(Exception):
@@ -402,6 +434,8 @@ def browser_command(
         ) from exc
     except BrowserBrokerError:
         raise
+    except PlaywrightError as exc:
+        raise BrowserBrokerError(f"JMM browser {command!r} failed: {exc}") from exc
     except Exception as exc:
         raise BrowserBrokerError(f"JMM browser {command!r} failed: {exc}") from exc
     return BrokerResponse(result=result, elapsed_seconds=time.perf_counter() - started)
@@ -419,12 +453,32 @@ def navigate(page_id: int, url: str) -> BrokerResponse:
     return browser_command("navigate", {"url": url}, page_id=page_id)
 
 
+def _navigation_race(exc: Exception) -> bool:
+    text = str(exc).casefold()
+    return any(
+        marker in text
+        for marker in (
+            "execution context was destroyed",
+            "cannot find context with specified id",
+            "most likely because of a navigation",
+        )
+    )
+
+
 def snapshot(page_id: int, *, verbose: bool = True) -> BrokerResponse:
-    try:
-        return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
-    except BrowserBrokerTimeout:
-        time.sleep(0.5)
-        return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
+    last: Exception | None = None
+    for attempt in range(12):
+        try:
+            return browser_command("snapshot", {"verbose": verbose}, page_id=page_id)
+        except BrowserBrokerTimeout as exc:
+            last = exc
+        except BrowserBrokerError as exc:
+            if not _navigation_race(exc):
+                raise
+            last = exc
+        time.sleep(0.25 if attempt < 4 else 0.5)
+    assert last is not None
+    raise last
 
 
 def select_page(page_id: int, *, bring_to_front: bool = False) -> BrokerResponse:

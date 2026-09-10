@@ -68,7 +68,7 @@ The database is the shared canonical state. Collectors and agents must:
 - record observations rather than overwriting history destructively;
 - never infer that another agent's presence is an error.
 
-Browser ownership is local to JMM collection. JMM uses one visible persistent Playwright Chromium context with its own user-data directory; it does not share Rob's ordinary Chrome tabs or Job Hunter's SEEK profile. Collection remains single-writer/run-locked and reuses workflow pages inside that context.
+Browser ownership is local to JMM. JMM keeps one visible long-lived Chromium service with its own user-data directory and localhost-only CDP endpoint; it does not share Rob's ordinary Chrome tabs or Job Hunter's SEEK profile. Collection runs attach to and detach from that same browser instead of relaunching it, preserving SEEK/Cloudflare session state across retries and runs. Collection remains single-writer/run-locked.
 
 ## Identity strategy
 

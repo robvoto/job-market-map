@@ -98,7 +98,7 @@ Primary SEEK coverage is state-wide partitioning, not keyword searches. A partit
 A parent is complete only when all children are complete and their deduplicated union covers the parent reported count within configured tolerance. `/v3/coverage/seek` is the coverage proof; a non-empty feed is not proof.
 
 ## Multi-agent/browser rule
-Many agents may consume concurrently. SQLite WAL is enabled and normal consumers use HTTP. Collection uses one JMM-owned visible persistent Playwright Chromium profile (`data/playwright_jmm_seek_user_data`), isolated from Rob's normal Chrome and Job Hunter's SEEK profile; one collection run owns/reuses that browser context.
+Many agents may consume concurrently. SQLite WAL is enabled and normal consumers use HTTP. Collection uses one JMM-owned visible long-lived Chromium service/profile (`data/playwright_jmm_seek_user_data`), isolated from Rob's normal Chrome and Job Hunter's SEEK profile. Runs attach/detach over localhost CDP and must not close/relaunch the browser between retries.
 
 ## Admin/settings
 Operational knobs belong in settings/admin with helper text and validation, not scattered constants. Retention, collection timing, partition thresholds, API page sizes, geography enablement and query enablement are admin-manageable where practical.

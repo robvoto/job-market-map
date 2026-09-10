@@ -19,6 +19,8 @@ DISPLAY_VALUE="${DISPLAY:-:0}"
 WAYLAND_VALUE="${WAYLAND_DISPLAY:-wayland-0}"
 RUNTIME_VALUE="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
+"$ROOT/scripts/start_browser_service.sh"
+
 systemd-run \
   --user \
   --unit="$UNIT" \
