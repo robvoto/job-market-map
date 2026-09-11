@@ -9,6 +9,7 @@ from zoneinfo import ZoneInfo
 
 from collector.browser_broker import (
     BrowserBrokerError,
+    BrowserBrokerTimeout,
     navigate,
     seek_job_detail,
     select_page,
@@ -430,6 +431,7 @@ def enrich_seek_coverage_jds(
     deadline_reached,
     include_existing_unfetched: bool = False,
     max_attempts: int | None = None,
+    on_progress=None,
 ) -> SeekJDEnrichmentResult:
     rows = _merge_candidates(
         coverage_seek_jobs(codes=codes, days=days),
@@ -451,13 +453,30 @@ def enrich_seek_coverage_jds(
         if max_attempts is not None and attempted >= max_attempts:
             break
         attempted += 1
+        if on_progress is not None:
+            on_progress("attempted")
         try:
             expected_source_id = str(row["source_job_id"] or "").strip()
-            detail = fetch_seek_detail(
-                page_id,
-                str(row["canonical_url"]),
-                expected_source_job_id=expected_source_id,
-            )
+            detail = None
+            for navigation_attempt in range(2):
+                try:
+                    detail = fetch_seek_detail(
+                        page_id,
+                        str(row["canonical_url"]),
+                        expected_source_job_id=expected_source_id,
+                    )
+                    break
+                except BrowserBrokerTimeout as exc:
+                    if navigation_attempt == 0:
+                        collection_logger().info(
+                            "SEEK JD navigation timeout; retrying once job_id=%s source_job_id=%s error=%s",
+                            job_id,
+                            expected_source_id,
+                            exc,
+                        )
+                        continue
+                    raise
+            assert detail is not None
             actual_source_id = str(detail.facts.get("source_job_id") or "").strip()
             if not expected_source_id or actual_source_id != expected_source_id:
                 raise SeekJDFetchError(
@@ -479,6 +498,8 @@ def enrich_seek_coverage_jds(
             )
             completed_ids.add(job_id)
             stored += 1
+            if on_progress is not None:
+                on_progress("stored")
             if stored == 1 or stored % 25 == 0:
                 collection_logger().info(
                     "JD progress stored=%s attempted=%s failed=%s job_id=%s source_job_id=%s jd_chars=%s",
@@ -489,12 +510,24 @@ def enrich_seek_coverage_jds(
                     expected_source_id,
                     len(detail.full_description),
                 )
+        except BrowserBrokerTimeout as exc:
+            failed += 1
+            if on_progress is not None:
+                on_progress("failed")
+            collection_logger().warning(
+                "SEEK JD navigation timed out after retry; leaving retryable job_id=%s source_job_id=%s error=%s",
+                job_id,
+                str(row["source_job_id"] or "").strip(),
+                exc,
+            )
         except BrowserBrokerError:
             raise
         except SeekJDUnavailableError:
             update_job_source_facts(job_id, source_status="no_longer_advertised")
             unavailable += 1
             unavailable_ids.add(job_id)
+            if on_progress is not None:
+                on_progress("unavailable")
             collection_logger().info(
                 "SEEK JD unavailable job_id=%s source_job_id=%s status=no_longer_advertised",
                 job_id,
@@ -502,6 +535,8 @@ def enrich_seek_coverage_jds(
             )
         except SeekJDFetchError as exc:
             failed += 1
+            if on_progress is not None:
+                on_progress("failed")
             collection_logger().warning(
                 "SEEK JD fetch failed job_id=%s error=%s", job_id, exc
             )

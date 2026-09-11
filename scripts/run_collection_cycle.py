@@ -142,6 +142,10 @@ def main(argv: list[str] | None = None) -> int:
             )
             jd_result = None
 
+            def record_jd_progress(event: str) -> None:
+                if event in jd_totals:
+                    jd_totals[event] += 1
+
             def sweep_required_jds(*, include_existing_unfetched: bool = False) -> None:
                 nonlocal jd_result
                 if stop_event.is_set() or deadline_reached():
@@ -157,11 +161,8 @@ def main(argv: list[str] | None = None) -> int:
                     should_stop=stop_event.is_set,
                     deadline_reached=deadline_reached,
                     include_existing_unfetched=include_existing_unfetched,
+                    on_progress=record_jd_progress,
                 )
-                jd_totals["attempted"] += jd_result.attempted
-                jd_totals["stored"] += jd_result.stored
-                jd_totals["failed"] += jd_result.failed
-                jd_totals["unavailable"] += jd_result.unavailable
                 log.info(
                     "JD sweep finished candidates=%s cached=%s attempted=%s stored=%s failed=%s unavailable=%s remaining=%s",
                     jd_result.candidates,

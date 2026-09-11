@@ -419,3 +419,70 @@ def test_no_longer_advertised_is_terminal_not_failed(tmp_path, monkeypatch):
         ).fetchone()
         assert row["source_status"] == "no_longer_advertised"
     assert seek_jd.coverage_seek_jobs(codes=["ACT"], days=3) == []
+
+
+def test_navigation_timeout_retries_once_then_continues(tmp_path, monkeypatch):
+    seek_jd = _wire(tmp_path, monkeypatch)
+    from collector.browser_broker import BrowserBrokerTimeout
+
+    for source_id in ("91000001", "91000002"):
+        obs = CardObservation(
+            source="seek",
+            source_job_id=source_id,
+            canonical_url=f"https://au.seek.com/job/{source_id}",
+            title=f"Role {source_id}",
+            geography_code="ACT",
+            captured_at="2026-09-11T00:00:00+00:00",
+        )
+        job_id = ingest_card(obs).job_id
+        with db.connect() as conn:
+            partition = conn.execute(
+                "SELECT id FROM seek_partitions WHERE geography_code='ACT' LIMIT 1"
+            ).fetchone()
+            if partition is None:
+                partition_id = conn.execute(
+                    """INSERT INTO seek_partitions(
+                        geography_code,parent_id,level,label,url,status,reported_results,
+                        collected_unique_jobs,max_results_threshold,first_seen_at,updated_at,completed_at
+                    ) VALUES('ACT',NULL,'state','ACT',
+                        'https://au.seek.com/jobs/in-Australian-Capital-Territory-ACT?daterange=3',
+                        'COMPLETE',2,2,450,'x','x','x')"""
+                ).lastrowid
+            else:
+                partition_id = partition[0]
+            conn.execute(
+                "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+                (partition_id, job_id, "x"),
+            )
+
+    calls = {"91000001": 0, "91000002": 0}
+
+    def fake_fetch(_page_id, url, **_kwargs):
+        source_id = url.rstrip("/").split("/")[-1]
+        calls[source_id] += 1
+        if source_id == "91000001":
+            raise BrowserBrokerTimeout("navigate timed out")
+        return seek_jd.SeekFetchedDetail(
+            full_description="A valid source-backed job description that is comfortably longer than eighty characters for this test case.",
+            facts={"source_job_id": source_id},
+        )
+
+    monkeypatch.setattr(seek_jd, "fetch_seek_detail", fake_fetch)
+    events = []
+    result = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+        on_progress=events.append,
+    )
+
+    assert calls["91000001"] == 2
+    assert calls["91000002"] == 1
+    assert result.attempted == 2
+    assert result.failed == 1
+    assert result.stored == 1
+    assert events.count("attempted") == 2
+    assert events.count("failed") == 1
+    assert events.count("stored") == 1
