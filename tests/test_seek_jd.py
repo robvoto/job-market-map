@@ -336,7 +336,10 @@ Employer questions
 def test_unreadable_detail_is_not_treated_as_human_verification(monkeypatch):
     from collector import seek_jd
 
-    monkeypatch.setattr(seek_jd, "navigate", lambda *_a, **_k: None)
+    navigations = []
+    monkeypatch.setattr(
+        seek_jd, "navigate", lambda *_a, **_k: navigations.append((_a, _k))
+    )
     monkeypatch.setattr(
         seek_jd,
         "seek_job_detail",
@@ -368,6 +371,57 @@ def test_unreadable_detail_is_not_treated_as_human_verification(monkeypatch):
             timeout_seconds=1.0,
             human_wait_seconds=900.0,
         )
+    assert len(navigations) == 2
+
+
+def test_short_seek_jd_reloads_once_and_recovers(monkeypatch):
+    from collector import seek_jd
+
+    navigations = []
+    monkeypatch.setattr(
+        seek_jd, "navigate", lambda *_a, **_k: navigations.append((_a, _k))
+    )
+    calls = {"detail": 0}
+
+    def fake_detail(_page_id):
+        calls["detail"] += 1
+        description = ""
+        if len(navigations) == 2:
+            description = (
+                "A complete source-backed job description that becomes available after "
+                "the one bounded re-navigation of an incomplete SEEK render."
+            )
+        return type(
+            "Response",
+            (),
+            {
+                "result": {
+                    "page_url": "https://au.seek.com/job/94511500",
+                    "source_job_id": "94511500",
+                    "full_description": description,
+                    "human_check": False,
+                }
+            },
+        )()
+
+    monkeypatch.setattr(seek_jd, "seek_job_detail", fake_detail)
+    now = [0.0]
+    monkeypatch.setattr(seek_jd.time, "monotonic", lambda: now[0])
+    monkeypatch.setattr(
+        seek_jd.time, "sleep", lambda seconds: now.__setitem__(0, now[0] + seconds)
+    )
+
+    detail = seek_jd.fetch_seek_detail(
+        1,
+        "https://au.seek.com/job/94511500",
+        expected_source_job_id="94511500",
+        timeout_seconds=1.0,
+        human_wait_seconds=900.0,
+    )
+
+    assert len(navigations) == 2
+    assert calls["detail"] > 1
+    assert detail.full_description.startswith("A complete source-backed job description")
 
 
 def test_no_longer_advertised_is_terminal_not_failed(tmp_path, monkeypatch):

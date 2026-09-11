@@ -266,6 +266,7 @@ def fetch_seek_detail(
 ) -> SeekFetchedDetail:
     """Read one SEEK JD + structured facts from JMM's dedicated Playwright tab."""
     expected_id = str(expected_source_job_id or _seek_job_id(url)).strip()
+    fetch_url = _seek_fetch_url(expected_id, url)
     timeout_seconds = float(
         timeout_seconds
         if timeout_seconds is not None
@@ -276,10 +277,11 @@ def fetch_seek_detail(
         if human_wait_seconds is not None
         else get_setting("collection.seek_human_check_wait_seconds")
     )
-    navigate(page_id, _seek_fetch_url(expected_id, url))
+    navigate(page_id, fetch_url)
     normal_deadline = time.monotonic() + timeout_seconds
     human_deadline: float | None = None
     human_mode = False
+    incomplete_render_retries = 0
     last_problem = "SEEK job detail did not become readable"
 
     while True:
@@ -359,6 +361,19 @@ def fetch_seek_detail(
                 return SeekFetchedDetail(full_description=description, facts=facts)
 
         if not human_mode and time.monotonic() >= normal_deadline:
+            if (
+                last_problem == "SEEK returned an implausibly short JD"
+                and incomplete_render_retries == 0
+            ):
+                incomplete_render_retries += 1
+                collection_logger().info(
+                    "SEEK JD incomplete render; re-navigating once source_job_id=%s",
+                    expected_id,
+                )
+                navigate(page_id, fetch_url)
+                normal_deadline = time.monotonic() + timeout_seconds
+                last_problem = "SEEK job detail did not become readable after re-navigation"
+                continue
             raise SeekJDFetchError(last_problem)
         time.sleep(0.35)
 
