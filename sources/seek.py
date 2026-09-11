@@ -287,6 +287,7 @@ def parse_seek_dom_cards(
                 employment_type=str(card.get("employment_type") or "").strip() or None,
                 workplace_type=str(card.get("workplace_type") or "").strip() or None,
                 posted_text=str(card.get("posted_text") or "").strip() or None,
+                posted_at=str(card.get("posted_at") or "").strip() or None,
                 teaser_text=str(card.get("teaser_text") or "").strip() or None,
                 raw_card_text=str(card.get("raw_card_text") or "").strip() or None,
                 classification_text=str(card.get("classification_text") or "").strip()

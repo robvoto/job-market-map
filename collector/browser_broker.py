@@ -239,6 +239,48 @@ _SEEK_CARDS_JS = r"""
 () => {
   const selector = 'article[data-automation="normalJob"], article[data-automation="premiumJob"]';
   const cards = [...document.querySelectorAll(selector)];
+  const listingDates = new Map();
+  const marker = 'window.SEEK_REDUX_DATA =';
+  for (const script of [...document.scripts]) {
+    const source = script.textContent || '';
+    let start = source.indexOf(marker);
+    if (start < 0) continue;
+    start += marker.length;
+    while ([9, 10, 13, 32].includes(source.charCodeAt(start))) start += 1;
+    if (source.charCodeAt(start) !== 123) continue;
+    let depth = 0;
+    let inString = false;
+    let escaped = false;
+    let end = -1;
+    for (let i = start; i < source.length; i += 1) {
+      const code = source.charCodeAt(i);
+      if (inString) {
+        if (escaped) escaped = false;
+        else if (code === 92) escaped = true;
+        else if (code === 34) inString = false;
+        continue;
+      }
+      if (code === 34) { inString = true; continue; }
+      if (code === 123) depth += 1;
+      else if (code === 125) {
+        depth -= 1;
+        if (depth === 0) { end = i + 1; break; }
+      }
+    }
+    if (end < 0) continue;
+    try {
+      const data = JSON.parse(source.slice(start, end));
+      const jobs = data?.results?.results?.jobs;
+      if (Array.isArray(jobs)) {
+        for (const job of jobs) {
+          if (job?.id && job?.listingDate) listingDates.set(String(job.id), String(job.listingDate));
+        }
+      }
+    } catch (_) {
+      // Fail closed: missing exact dates disables incremental cut-off later.
+    }
+    break;
+  }
   return cards.map(card => {
     const text = (card.innerText || card.textContent || '').trim();
     const textOf = selector => {
@@ -276,6 +318,7 @@ _SEEK_CARDS_JS = r"""
       title: textOf('[data-automation="jobTitle"]'),
       employer: textOf('[data-automation="jobCompany"]'),
       posted_text: postedText,
+      posted_at: listingDates.get(sourceJobId) || '',
       employment_type: employmentType,
       location,
       workplace_type: workplaceType,

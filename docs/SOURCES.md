@@ -13,9 +13,11 @@ Mechanics:
 - explicit terminal state `No matching search results` ends the query cleanly;
 - transient empty renders are polled until a valid card structure or a bounded failure.
 
-Captured card data currently includes title, employer, source ID, URL, posted text, employment type, location, work arrangement, visible salary, teaser, classification/subclassification, selected card tags and raw card evidence.
+Captured card data currently includes title, employer, source ID, URL, relative posted text, exact UTC `listingDate`, employment type, location, work arrangement, visible salary, teaser, classification/subclassification, selected card tags and raw card evidence. The exact timestamp is read from SEEK's embedded `SEEK_REDUX_DATA.results.results.jobs[]` search state and matched to the visible card by source job ID.
 
-Known SEEK IDs are linked to current coverage without full re-ingest. If a canonical SEEK identity has no successful JD-fetch marker, its job page is opened once. JMM stores the full neutral JD and fills missing neutral detail facts exposed by the source page, including the exact SEEK `listedAt.dateTimeUtc` posting timestamp when present. Relative card labels such as `3h ago` remain raw capture evidence only. The permanent marker prevents normal future refetches after a successful detail capture. During JMM-007, this happens progressively inside the same pass: resumed/discovered jobs are JD-caught-up before coverage is allowed to run far ahead, and pass completion requires both coverage completion and zero required JD remainder.
+Known SEEK IDs are linked to current coverage without full re-ingest. Exact card `listingDate` is stored as canonical `posted_at`; relative labels such as `3h ago` remain raw evidence. If a canonical SEEK identity has no successful JD-fetch marker, its job page is opened once. JMM stores the full neutral JD and fills missing neutral detail facts exposed by the source page; the detail page's `listedAt.dateTimeUtc` remains a second source for the same posting timestamp when present. The permanent marker prevents normal future refetches after a successful detail capture. During JMM-007, this happens progressively inside the same pass: resumed/discovered jobs are JD-caught-up before coverage is allowed to run far ahead, and pass completion requires both coverage completion and zero required JD remainder.
+
+Extra fresh runs inside 24 hours use the exact ordered card timestamps to stop after crossing a conservative prior-run cutoff. This optimization is fail-closed and does not replace the normal full 1-day daily reconciliation.
 
 ## LinkedIn
 

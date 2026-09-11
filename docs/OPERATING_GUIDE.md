@@ -103,6 +103,8 @@ Normal ongoing SEEK collection uses the latest **1 day** only. Known SEEK source
 
 Successful JD fetches remain permanently cached in `jd_fetch_registry`, so a repeated card does not cause the vacancy detail page to be fetched again.
 
+Extra fresh SEEK runs inside the normal 1-day window are incremental. SEEK's embedded search state supplies an exact UTC `listingDate` for each result card; when a previous **fresh** SEEK cycle completed recently, JMM scans newest-first back to two hours before that prior run started and stops once an exact, correctly ordered result page crosses that cutoff. If exact timestamps are missing/out of order, the cutoff is disabled and the collector continues as a full pass. A normal run roughly 24 hours after the previous run remains a full 1-day reconciliation, so incremental runs do not replace the daily safety net.
+
 The one-off first full-evidence load is explicitly wider and does not change the normal default:
 
 ```bash

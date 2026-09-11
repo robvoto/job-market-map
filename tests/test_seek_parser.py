@@ -51,6 +51,7 @@ def test_seek_dom_card_preserves_quick_apply_flag():
                 "employer": "Example",
                 "easy_apply": True,
                 "apply_method": "quick_apply",
+                "posted_at": "2026-09-11T09:37:10.000Z",
             }
         ],
         query_text=None,
@@ -58,3 +59,4 @@ def test_seek_dom_card_preserves_quick_apply_flag():
     )
     assert cards[0].easy_apply is True
     assert cards[0].apply_method == "quick_apply"
+    assert cards[0].posted_at == "2026-09-11T09:37:10.000Z"

@@ -60,9 +60,11 @@ After children finish, their job IDs are **unioned and deduplicated**. A parent 
 - every direct child is complete; and
 - the union of child job IDs covers the parent's reported count within tolerance.
 
+For an incremental extra run, a leaf that safely crosses the exact timestamp cutoff becomes `COMPLETE_INCREMENTAL`. That status propagates upward once every child is complete; the parent's full 24-hour reported count is intentionally not used as the target for that shorter window.
+
 Otherwise the parent is `INCOMPLETE_CHILD_COVERAGE`.
 
-This makes completeness fail closed.
+This makes completeness fail closed: if exact card timestamps are missing or not newest-to-oldest, incremental stopping is disabled and normal full-count rules continue.
 
 ## Dedupe
 

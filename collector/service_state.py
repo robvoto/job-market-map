@@ -119,6 +119,41 @@ def bootstrap_market_run() -> dict | None:
     return _decode_market_run(row)
 
 
+def latest_complete_fresh_seek_started_at(codes: list[str]) -> str | None:
+    """Return the start of the latest trustworthy fresh SEEK cycle.
+
+    Partial/stopped runs and cycles that only completed after a resume are not
+    watermarks. Falling back to a full scan is cheaper than missing vacancies.
+    """
+    if not codes:
+        return None
+    init_db()
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT * FROM market_collection_runs
+             WHERE run_kind='normal'
+               AND mode='fresh'
+               AND source_scope LIKE 'seek%'
+               AND stats_json IS NOT NULL
+             ORDER BY id DESC
+            """
+        ).fetchall()
+    for row in rows:
+        run = _decode_market_run(row)
+        if str(run.get("status") or "") != "COMPLETE":
+            continue
+        stats = dict(run.get("stats") or {})
+        coverage = dict(stats.get("coverage") or {})
+        if all(
+            code in coverage
+            and str((coverage.get(code) or {}).get("status") or "").startswith("COMPLETE")
+            for code in codes
+        ):
+            return str(run.get("started_at") or "") or None
+    return None
+
+
 def scheduler_state() -> dict:
     init_db()
     with connect() as conn:

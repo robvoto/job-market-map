@@ -81,6 +81,49 @@ def _known_seek_card_changed(existing: dict, card) -> bool:
     return False
 
 
+def _parse_exact_posted_at(value: object) -> datetime | None:
+    text = str(value or "").strip()
+    if not text:
+        return None
+    try:
+        parsed = datetime.fromisoformat(text)
+    except ValueError:
+        return None
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.astimezone(UTC)
+
+
+def _incremental_page_cards(
+    cards: list,
+    cutoff_at: datetime | None,
+    previous_oldest_at: datetime | None = None,
+) -> tuple[list, bool, datetime | None]:
+    """Filter one exact, newest-first SEEK page against an incremental cutoff.
+
+    The third return value is the page's oldest exact timestamp. ``None`` while a
+    cutoff is active means the page is unsafe for incremental stopping, so the
+    caller must fall back to full paging for the rest of that leaf.
+    """
+    if cutoff_at is None or not cards:
+        return cards, False, None
+    cutoff = cutoff_at.astimezone(UTC)
+    timestamps = [
+        _parse_exact_posted_at(getattr(card, "posted_at", None)) for card in cards
+    ]
+    if any(value is None for value in timestamps):
+        return cards, False, None
+    exact = [value for value in timestamps if value is not None]
+    if any(exact[index] < exact[index + 1] for index in range(len(exact) - 1)):
+        return cards, False, None
+    if previous_oldest_at is not None and exact[0] > previous_oldest_at:
+        return cards, False, None
+    kept = [
+        card for card, posted_at in zip(cards, exact, strict=True) if posted_at >= cutoff
+    ]
+    return kept, exact[-1] < cutoff, exact[-1]
+
+
 def _navigate_seek(page_id: int, url: str) -> None:
     """Navigate once, retrying only SEEK's transient net::ERR_ABORTED race."""
     for attempt in range(2):
@@ -358,9 +401,12 @@ def _collect_leaf(
     geography_code: str,
     reported: int,
     tolerance: int,
+    cutoff_at: datetime | None = None,
 ) -> tuple[str, int]:
     seen = _partition_source_ids(partition_id)
     previous_page_ids: set[str] | None = None
+    active_cutoff = cutoff_at
+    previous_oldest_at: datetime | None = None
     page = 1
     safety = int(get_setting("collection.seek_safety_page_limit"))
     while page <= safety:
@@ -378,13 +424,29 @@ def _collect_leaf(
             page_number=page,
             geography_code=geography_code,
         )
+        page_cards, cutoff_reached, page_oldest_at = _incremental_page_cards(
+            cards, active_cutoff, previous_oldest_at
+        )
+        if active_cutoff is not None and cards and page_oldest_at is None:
+            collection_logger().warning(
+                "SEEK incremental cutoff disabled for leaf; exact listing timestamps "
+                "were missing or not newest-first url=%s page=%s",
+                url,
+                page,
+            )
+            active_cutoff = None
+            previous_oldest_at = None
+            page_cards = cards
+            cutoff_reached = False
+        elif page_oldest_at is not None:
+            previous_oldest_at = page_oldest_at
         page_ids = {card.source_job_id for card in cards if card.source_job_id}
         if previous_page_ids is not None and page_ids == previous_page_ids:
             return "INCOMPLETE_REPEATED_PAGE", len(seen)
         previous_page_ids = page_ids
         new_cards = [
             card
-            for card in cards
+            for card in page_cards
             if card.source_job_id and card.source_job_id not in seen
         ]
         source_ids = [
@@ -426,6 +488,11 @@ def _collect_leaf(
                         """,
                         (job_id, now, now),
                     )
+                    if getattr(card, "posted_at", None):
+                        conn.execute(
+                            "UPDATE jobs SET posted_at=COALESCE(posted_at, ?) WHERE id=?",
+                            (card.posted_at, job_id),
+                        )
             with connect() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
@@ -433,6 +500,8 @@ def _collect_leaf(
                 )
         if len(seen) + tolerance >= reported:
             return "COMPLETE", len(seen)
+        if cutoff_reached:
+            return "COMPLETE_INCREMENTAL", len(seen)
         page += 1
     else:
         return "INCOMPLETE_PAGE_LIMIT", len(seen)
@@ -463,15 +532,18 @@ def _aggregate_parent(
                 "INSERT OR IGNORE INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
                 (partition_id, job_id, _now()),
             )
+    child_statuses = [str(child["status"]) for child in children]
     children_ok = bool(children) and all(
-        str(c["status"]).startswith("COMPLETE") for c in children
+        status.startswith("COMPLETE") for status in child_statuses
     )
+    incremental = any(status == "COMPLETE_INCREMENTAL" for status in child_statuses)
     count_ok = len(ids) + tolerance >= reported
-    status = (
-        "COMPLETE_BY_PARTITION"
-        if children_ok and count_ok
-        else "INCOMPLETE_CHILD_COVERAGE"
-    )
+    if children_ok and incremental:
+        status = "COMPLETE_INCREMENTAL"
+    elif children_ok and count_ok:
+        status = "COMPLETE_BY_PARTITION"
+    else:
+        status = "INCOMPLETE_CHILD_COVERAGE"
     return status, len(ids), len(children)
 
 
@@ -503,6 +575,7 @@ def _resume_existing_children(
     budget: PartitionBudget,
     resume: bool,
     children: list[dict],
+    cutoff_at: datetime | None = None,
 ) -> None:
     for child in children:
         _process_partition(
@@ -516,6 +589,7 @@ def _resume_existing_children(
             tolerance=tolerance,
             budget=budget,
             resume=resume,
+            cutoff_at=cutoff_at,
         )
     status, collected, child_count = _aggregate_parent(
         partition_id, reported, tolerance
@@ -541,6 +615,7 @@ def _process_partition(
     tolerance: int,
     budget: PartitionBudget,
     resume: bool = True,
+    cutoff_at: datetime | None = None,
 ) -> None:
     try:
         current, existing_children = _partition_state(partition_id)
@@ -571,6 +646,7 @@ def _process_partition(
                 budget=budget,
                 resume=resume,
                 children=existing_children,
+                cutoff_at=cutoff_at,
             )
             return
         if not budget.consume():
@@ -599,6 +675,7 @@ def _process_partition(
                 geography_code=geography["code"],
                 reported=reported,
                 tolerance=tolerance,
+                cutoff_at=cutoff_at,
             )
             _update_partition(
                 partition_id, status=status, reported=reported, collected=collected
@@ -636,6 +713,7 @@ def _process_partition(
                 tolerance=tolerance,
                 budget=budget,
                 resume=resume,
+                cutoff_at=cutoff_at,
             )
         status, collected, child_count = _aggregate_parent(
             partition_id, reported, tolerance
@@ -662,6 +740,7 @@ def collect_seek_state(
     days: int | None = None,
     max_partitions: int | None = None,
     resume: bool = True,
+    cutoff_at: datetime | None = None,
 ) -> MarketMapResult:
     geography = get_geography(geography_code)
     days = int(
@@ -696,6 +775,7 @@ def collect_seek_state(
         tolerance=tolerance,
         budget=budget,
         resume=resume,
+        cutoff_at=cutoff_at,
     )
     with connect() as conn:
         root = conn.execute(

@@ -3,6 +3,50 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
+def test_extra_fresh_run_gets_incremental_cutoff_but_daily_run_does_not(monkeypatch):
+    from scripts import run_collection_cycle as runner
+
+    monkeypatch.setattr(
+        runner,
+        "latest_complete_fresh_seek_started_at",
+        lambda _codes: "2026-09-11T00:00:00+00:00",
+    )
+    monkeypatch.setattr(
+        runner,
+        "get_setting",
+        lambda key: 120 if key == "collection.seek_incremental_overlap_minutes" else 1,
+    )
+    tz = ZoneInfo("UTC")
+
+    extra = runner._seek_incremental_cutoff(
+        mode="fresh",
+        days=1,
+        default_days=1,
+        codes=["NSW"],
+        started_at=datetime(2026, 9, 11, 10, 0, tzinfo=tz),
+    )
+    assert extra == datetime(2026, 9, 10, 22, 0, tzinfo=tz)
+
+    daily = runner._seek_incremental_cutoff(
+        mode="fresh",
+        days=1,
+        default_days=1,
+        codes=["NSW"],
+        started_at=datetime(2026, 9, 12, 0, 0, tzinfo=tz),
+    )
+    assert daily is None
+    assert (
+        runner._seek_incremental_cutoff(
+            mode="resume",
+            days=1,
+            default_days=1,
+            codes=["NSW"],
+            started_at=datetime(2026, 9, 11, 10, 0, tzinfo=tz),
+        )
+        is None
+    )
+
+
 def test_successful_manual_default_run_marks_only_overlapping_schedule_slot(monkeypatch):
     from scripts import run_collection_cycle as runner
 

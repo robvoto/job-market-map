@@ -59,6 +59,7 @@ Personal applied/rejected/presented state is not a retention exception here beca
 ### Collection
 - default freshness horizon;
 - SEEK page settling, parser wait and safety-page guard;
+- `collection.seek_incremental_overlap_minutes` (default 120) for safe overlap on extra fresh runs inside the 1-day window; normal ~24-hour daily runs remain full reconciliation passes;
 - LinkedIn enable/disable, JobSpy results per query, no-progress timeout, direct-detail HTTP timeout and consecutive-query failure circuit breaker.
 
 The right-side stats panel shows current source totals (including APSJobs), the accepted 3-day bootstrap separately, the current LinkedIn cycle (queries complete/remaining), and after a normal run its duration, jobs/JDs added, SEEK work and LinkedIn cards/new/detail-fetched/failure counts.

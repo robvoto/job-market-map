@@ -126,6 +126,7 @@ def run_seek_cycle(
     should_stop: Callable[[], bool],
     deadline_reached: Callable[[], bool],
     after_progress: Callable[[MarketMapResult], None] | None = None,
+    cutoff_at: datetime | None = None,
 ) -> SeekCycleResult:
     latest: dict[str, MarketMapResult] = {}
     total_processed = 0
@@ -154,6 +155,7 @@ def run_seek_cycle(
                     days=days,
                     max_partitions=1,
                     resume=True,
+                    cutoff_at=cutoff_at,
                 )
             except SeekHumanCheckRequired as exc:
                 collection_logger().warning(

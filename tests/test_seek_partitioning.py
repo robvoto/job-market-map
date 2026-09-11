@@ -1,5 +1,58 @@
+from datetime import UTC, datetime
+
+from collector.models import CardObservation
 from sources.seek import seek_refinement_links, seek_result_count
 from sources.seek_market_map import _page_url, state_url
+
+
+def test_incremental_page_cutoff_requires_exact_ordered_seek_dates():
+    from sources.seek_market_map import _incremental_page_cards
+
+    cards = [
+        CardObservation(
+            source="seek",
+            source_job_id=str(index),
+            canonical_url=f"https://au.seek.com/job/{index}",
+            posted_at=posted_at,
+        )
+        for index, posted_at in [
+            (1, "2026-09-11T10:00:00Z"),
+            (2, "2026-09-11T09:00:00Z"),
+            (3, "2026-09-11T08:00:00Z"),
+        ]
+    ]
+    cutoff = datetime(2026, 9, 11, 8, 30, tzinfo=UTC)
+    kept, reached, oldest = _incremental_page_cards(cards, cutoff)
+    assert [card.source_job_id for card in kept] == ["1", "2"]
+    assert reached is True
+    assert oldest == datetime(2026, 9, 11, 8, 0, tzinfo=UTC)
+
+    missing = [
+        cards[0],
+        CardObservation(
+            source="seek",
+            source_job_id="x",
+            canonical_url="https://au.seek.com/job/9",
+        ),
+    ]
+    assert _incremental_page_cards(missing, cutoff) == (missing, False, None)
+
+    out_of_order = [cards[0], cards[2], cards[1]]
+    assert _incremental_page_cards(out_of_order, cutoff) == (out_of_order, False, None)
+
+    next_page_newer_than_prior_oldest = [
+        CardObservation(
+            source="seek",
+            source_job_id="4",
+            canonical_url="https://au.seek.com/job/4",
+            posted_at="2026-09-11T08:30:00Z",
+        )
+    ]
+    assert _incremental_page_cards(
+        next_page_newer_than_prior_oldest,
+        cutoff,
+        previous_oldest_at=datetime(2026, 9, 11, 8, 0, tzinfo=UTC),
+    ) == (next_page_newer_than_prior_oldest, False, None)
 
 
 def test_seek_result_count_parses_whole_state_and_classification():
@@ -553,3 +606,119 @@ def test_seek_navigation_retries_err_aborted_once(monkeypatch):
         (42, "https://au.seek.com/jobs"),
         (42, "https://au.seek.com/jobs"),
     ]
+
+
+def test_incremental_leaf_stops_after_exact_cutoff_without_ingesting_older_card(
+    tmp_path, monkeypatch
+):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    monkeypatch.setattr(market, "navigate", lambda *_a, **_k: None)
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        market,
+        "get_setting",
+        lambda key: 0 if key == "collection.seek_page_load_seconds" else 10,
+    )
+    monkeypatch.setattr(
+        market,
+        "_wait_snapshot",
+        lambda *_a, **_k: {"text": "100 jobs in New South Wales"},
+    )
+    monkeypatch.setattr(
+        market,
+        "seek_cards",
+        lambda *_a, **_k: type("Response", (), {"result": [{}, {}]})(),
+    )
+    monkeypatch.setattr(
+        market,
+        "parse_seek_dom_cards",
+        lambda *_a, **_k: [
+            CardObservation(
+                source="seek",
+                source_job_id="94580001",
+                canonical_url="https://au.seek.com/job/94580001",
+                title="New role",
+                employer="Example",
+                posted_at="2026-09-11T10:00:00Z",
+            ),
+            CardObservation(
+                source="seek",
+                source_job_id="94570001",
+                canonical_url="https://au.seek.com/job/94570001",
+                title="Old role",
+                employer="Example",
+                posted_at="2026-09-11T08:00:00Z",
+            ),
+        ],
+    )
+    db.init_db()
+    partition_id = market._ensure_partition(
+        geography_code="NSW",
+        parent_id=None,
+        level="work_type",
+        label="All",
+        url="https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1&sortmode=ListedDate",
+        threshold=450,
+    )
+
+    status, count = market._collect_leaf(
+        1,
+        partition_id=partition_id,
+        url="https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1&sortmode=ListedDate",
+        geography_code="NSW",
+        reported=100,
+        tolerance=0,
+        cutoff_at=datetime(2026, 9, 11, 9, 0, tzinfo=UTC),
+    )
+    assert (status, count) == ("COMPLETE_INCREMENTAL", 1)
+    with db.connect() as conn:
+        ids = [
+            row[0]
+            for row in conn.execute(
+                "SELECT source_job_id FROM jobs WHERE source='seek' ORDER BY source_job_id"
+            )
+        ]
+    assert ids == ["94580001"]
+
+
+def test_incremental_child_completion_propagates_to_parent(tmp_path, monkeypatch):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    db.init_db()
+    parent = market._ensure_partition(
+        geography_code="NSW",
+        parent_id=None,
+        level="state",
+        label="NSW",
+        url="https://x/nsw",
+        threshold=450,
+    )
+    child = market._ensure_partition(
+        geography_code="NSW",
+        parent_id=parent,
+        level="classification",
+        label="ICT",
+        url="https://x/nsw/ict",
+        threshold=450,
+    )
+    market._update_partition(child, status="COMPLETE_INCREMENTAL", reported=100, collected=1)
+    with db.connect() as conn:
+        job_id = conn.execute(
+            "INSERT INTO jobs(source,source_job_id,canonical_url) VALUES('seek','1','https://au.seek.com/job/1')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+            (child, job_id, "x"),
+        )
+
+    status, collected, children = market._aggregate_parent(parent, reported=1000, tolerance=0)
+    assert (status, collected, children) == ("COMPLETE_INCREMENTAL", 1, 1)

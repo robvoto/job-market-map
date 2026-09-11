@@ -65,6 +65,8 @@ def test_admin_page_exposes_side_stats_for_bootstrap_and_latest_run():
     assert "queries done" in html
     assert "await r.text()" in html
     assert "Stats unavailable" in html
+    assert "Incremental SEEK window" in html
+    assert "Incremental extra run" in html
 
 
 def test_admin_daily_status_does_not_present_accepted_bootstrap_as_current_failure():

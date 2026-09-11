@@ -122,6 +122,15 @@
       "help": "Maximum genuinely unfinished SEEK partitions processed per resumable state-crawl invocation. This bounds one agent/tool call; it is not a market coverage limit."
     },
     {
+      "key": "collection.seek_incremental_overlap_minutes",
+      "category": "Collection",
+      "type": "integer",
+      "default": 120,
+      "min": 0,
+      "max": 360,
+      "help": "Safety overlap for extra SEEK runs inside the normal freshness window. If a previous fresh run completed recently, JMM scans back this many minutes before that run started, then stops only on exact ordered SEEK listing timestamps. Normal ~24-hour daily runs remain full passes."
+    },
+    {
       "key": "collection.linkedin_enabled",
       "category": "Collection",
       "type": "boolean",

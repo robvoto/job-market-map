@@ -4,7 +4,7 @@ import argparse
 import signal
 import time
 from dataclasses import asdict
-from datetime import datetime
+from datetime import UTC, datetime, timedelta
 from threading import Event
 
 from collector.backup import create_backup
@@ -24,12 +24,39 @@ from collector.seek_cycle import (
 from collector.seek_jd import enrich_seek_coverage_jds
 from collector.service_state import (
     finish_market_run,
+    latest_complete_fresh_seek_started_at,
     set_market_run_backup,
     start_market_run,
     update_scheduler_state,
     utc_now,
 )
 from collector.settings import get_setting
+
+
+def _seek_incremental_cutoff(
+    *,
+    mode: str,
+    days: int,
+    default_days: int,
+    codes: list[str],
+    started_at: datetime,
+) -> datetime | None:
+    """Return a conservative cut-off for an extra fresh run inside one day."""
+    if mode != "fresh" or days != default_days:
+        return None
+    previous_started = latest_complete_fresh_seek_started_at(codes)
+    if not previous_started:
+        return None
+    try:
+        previous = datetime.fromisoformat(previous_started)
+    except ValueError:
+        return None
+    if previous.tzinfo is None:
+        previous = previous.replace(tzinfo=UTC)
+    overlap = int(get_setting("collection.seek_incremental_overlap_minutes"))
+    candidate = previous.astimezone(UTC) - timedelta(minutes=overlap)
+    horizon_start = started_at.astimezone(UTC) - timedelta(days=days)
+    return candidate if candidate > horizon_start else None
 
 
 def _satisfy_manual_schedule_slot(
@@ -123,6 +150,13 @@ def main(argv: list[str] | None = None) -> int:
                 if not has_coverage_workspace or all_states_complete(codes)
                 else "resume"
             )
+            seek_cutoff_at = _seek_incremental_cutoff(
+                mode=mode,
+                days=days,
+                default_days=default_days,
+                codes=codes,
+                started_at=run_started_local,
+            )
             run_id = start_market_run(
                 trigger=args.trigger,
                 mode=mode,
@@ -131,13 +165,15 @@ def main(argv: list[str] | None = None) -> int:
                 source_scope="seek_whole_state+linkedin",
             )
             log.info(
-                "run started run_id=%s mode=%s days=%s states=%s backfill_existing_jds=%s max_runtime_minutes=%s",
+                "run started run_id=%s mode=%s days=%s states=%s backfill_existing_jds=%s max_runtime_minutes=%s seek_window=%s cutoff_at=%s",
                 run_id,
                 mode,
                 days,
                 ",".join(codes),
                 args.backfill_existing_jds,
                 args.max_runtime_minutes,
+                "incremental" if seek_cutoff_at else "full",
+                seek_cutoff_at.isoformat() if seek_cutoff_at else None,
             )
 
             if bool(get_setting("backup.before_collection_enabled")):
@@ -233,6 +269,7 @@ def main(argv: list[str] | None = None) -> int:
                 should_stop=stop_event.is_set,
                 deadline_reached=deadline_reached,
                 after_progress=after_coverage_progress,
+                cutoff_at=seek_cutoff_at,
             )
 
             run_partitions_processed = result.partitions_processed
@@ -319,6 +356,13 @@ def main(argv: list[str] | None = None) -> int:
                 partitions_processed=run_partitions_processed,
                 jd_totals=jd_totals,
             )
+            run_stats["seek_window"] = {
+                "mode": "incremental" if seek_cutoff_at else "full",
+                "cutoff_at": seek_cutoff_at.isoformat() if seek_cutoff_at else None,
+                "overlap_minutes": int(
+                    get_setting("collection.seek_incremental_overlap_minutes")
+                ),
+            }
             if linkedin_result is not None:
                 run_stats["linkedin"] = asdict(linkedin_result)
             finish_market_run(

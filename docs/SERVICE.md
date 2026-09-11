@@ -73,6 +73,8 @@ The scheduler does not blindly restart collection every night:
 
 A successful manual run using the normal freshness horizon may satisfy the scheduled slot **only when the manual run overlaps that slot's configured run window**. This avoids duplicate collection inside the same operating window without creating a coverage gap. A manual run hours before the next slot does not cancel that future slot.
 
+Fresh extra runs within the same 24-hour freshness period use exact SEEK `listingDate` timestamps as a conservative incremental cutoff with `collection.seek_incremental_overlap_minutes` (default 120 minutes). Only a prior completed **fresh** cycle is trusted as a watermark. Resumed/stopped/partial cycles never advance it. If the previous completed fresh run is old enough that the cutoff falls outside the current 1-day horizon, the run is a normal full 1-day reconciliation. Missing or non-monotonic exact timestamps also force full paging.
+
 A daily refresh therefore cannot inherit yesterday's partition memberships and falsely claim current completeness.
 
 The scheduler only starts when the API was launched in service mode (`start-api.sh` / `service.sh`). Direct test imports do not create background collection.
