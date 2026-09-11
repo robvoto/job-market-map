@@ -43,8 +43,20 @@ def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypa
     monkeypatch.setattr(runner, "enrich_seek_coverage_jds", fake_enrich)
 
     def fake_cycle(**kwargs):
+        from sources.seek_market_map import MarketMapResult
+
         events.append(("coverage", False))
-        kwargs["after_progress"](object())
+        kwargs["after_progress"](
+            MarketMapResult(
+                geography_code="ACT",
+                status="COMPLETE",
+                root_partition_id=1,
+                reported_results=1,
+                covered_unique_jobs=1,
+                incomplete_partitions=0,
+                partitions_processed=1,
+            )
+        )
         return SeekCycleResult("COMPLETE", ["ACT"], 1, [])
 
     monkeypatch.setattr(runner, "run_seek_cycle", fake_cycle)

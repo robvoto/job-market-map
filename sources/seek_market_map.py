@@ -17,6 +17,7 @@ from collector.browser_broker import (
 from collector.db import connect, init_db
 from collector.geographies import get_geography, list_geographies
 from collector.ingest import ingest_card
+from collector.run_logging import collection_logger
 from collector.settings import get_setting
 from sources.seek import (
     SeekParseError,
@@ -134,9 +135,9 @@ def _wait_snapshot(
         if any(marker in low for marker in CHALLENGE_TEXT):
             if not brought_forward:
                 select_page(page_id, bring_to_front=True)
-                print(
-                    "SEEK needs human confirmation; brought JMM tab to front.",
-                    flush=True,
+                collection_logger().warning(
+                    "SEEK needs human confirmation; brought JMM tab to front expected_url=%s",
+                    expected_url,
                 )
                 brought_forward = True
                 human_deadline = time.monotonic() + float(

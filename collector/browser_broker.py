@@ -21,6 +21,8 @@ from playwright.sync_api import (
     TimeoutError as PlaywrightTimeoutError,
 )
 
+from collector.run_logging import collection_logger
+
 
 class BrowserBrokerError(RuntimeError):
     pass
@@ -203,7 +205,7 @@ _SEEK_DETAIL_JS = r"""
     apply_method: applyMethod,
     full_description: fullDescription,
     page_url: pageUrl,
-    human_check: !sourceJobId || !fullDescription || fullDescription.length < 80
+    human_check: false
   };
 }
 """
@@ -518,7 +520,15 @@ def browser_command(
         ) from exc
     except BrowserBrokerError as exc:
         if _allow_recovery and _browser_lost(exc):
+            collection_logger().warning(
+                "browser lost during command=%s page_id=%s; recovering persistent browser",
+                command,
+                page_id,
+            )
             _recover_browser_pages()
+            collection_logger().info(
+                "browser recovery completed command=%s page_id=%s", command, page_id
+            )
             return browser_command(
                 command,
                 payload,
@@ -530,7 +540,15 @@ def browser_command(
     except PlaywrightError as exc:
         wrapped = BrowserBrokerError(f"JMM browser {command!r} failed: {exc}")
         if _allow_recovery and _browser_lost(wrapped):
+            collection_logger().warning(
+                "browser lost during command=%s page_id=%s; recovering persistent browser",
+                command,
+                page_id,
+            )
             _recover_browser_pages()
+            collection_logger().info(
+                "browser recovery completed command=%s page_id=%s", command, page_id
+            )
             return browser_command(
                 command,
                 payload,

@@ -9,6 +9,7 @@ from threading import Event
 from collector.backup import create_backup
 from collector.browser_broker import close_browser, open_tab
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
+from collector.run_logging import LOG_PATH, configure_collection_logging
 from collector.seek_cycle import (
     all_states_complete,
     enabled_state_codes,
@@ -49,6 +50,10 @@ def main(argv: list[str] | None = None) -> int:
         help="Override the runtime limit for this run only; 0 means no time limit.",
     )
     args = parser.parse_args(argv)
+    log = configure_collection_logging()
+    log.info(
+        "runner invoked trigger=%s argv=%s log=%s", args.trigger, argv or [], LOG_PATH
+    )
     if args.days is not None and args.days < 1:
         parser.error("--days must be >= 1")
     if args.max_runtime_minutes is not None and args.max_runtime_minutes < 0:
@@ -66,7 +71,7 @@ def main(argv: list[str] | None = None) -> int:
         with collection_run_lock(args.trigger):
             codes = enabled_state_codes()
             if not codes:
-                print("No enabled SEEK geographies.")
+                log.error("no enabled SEEK geographies")
                 return 2
 
             days = int(
@@ -81,11 +86,20 @@ def main(argv: list[str] | None = None) -> int:
                 states=codes,
                 backup_path=None,
             )
+            log.info(
+                "run started run_id=%s mode=%s days=%s states=%s backfill_existing_jds=%s max_runtime_minutes=%s",
+                run_id,
+                mode,
+                days,
+                ",".join(codes),
+                args.backfill_existing_jds,
+                args.max_runtime_minutes,
+            )
 
             if bool(get_setting("backup.before_collection_enabled")):
                 backup = create_backup()
                 set_market_run_backup(run_id, backup.path)
-                print(f"Backup verified: {backup.path}", flush=True)
+                log.info("backup verified path=%s", backup.path)
 
             if mode == "fresh":
                 snapshot_and_reset_coverage(codes)
@@ -112,12 +126,21 @@ def main(argv: list[str] | None = None) -> int:
 
             list_page_id = int(open_tab("about:blank", active=False).result["pageId"])
             detail_page_id = int(open_tab("about:blank", active=False).result["pageId"])
+            log.info(
+                "browser pages ready list_page_id=%s detail_page_id=%s",
+                list_page_id,
+                detail_page_id,
+            )
             jd_result = None
 
             def sweep_required_jds(*, include_existing_unfetched: bool = False) -> None:
                 nonlocal jd_result
                 if stop_event.is_set() or deadline_reached():
                     return
+                log.info(
+                    "JD sweep started include_existing_unfetched=%s",
+                    include_existing_unfetched,
+                )
                 jd_result = enrich_seek_coverage_jds(
                     page_id=detail_page_id,
                     codes=codes,
@@ -126,19 +149,30 @@ def main(argv: list[str] | None = None) -> int:
                     deadline_reached=deadline_reached,
                     include_existing_unfetched=include_existing_unfetched,
                 )
-                print(
-                    "JD sweep: "
-                    f"candidates={jd_result.candidates}, cached={jd_result.cached}, "
-                    f"stored={jd_result.stored}, failed={jd_result.failed}, "
-                    f"remaining={jd_result.remaining}",
-                    flush=True,
+                log.info(
+                    "JD sweep finished candidates=%s cached=%s attempted=%s stored=%s failed=%s remaining=%s",
+                    jd_result.candidates,
+                    jd_result.cached,
+                    jd_result.attempted,
+                    jd_result.stored,
+                    jd_result.failed,
+                    jd_result.remaining,
                 )
 
             # A JMM-007 pass is full-evidence, not card-only. Catch up any jobs
             # already discovered by an interrupted/resumed pass before collecting more.
             sweep_required_jds()
 
-            def after_coverage_progress(_result) -> None:
+            def after_coverage_progress(progress) -> None:
+                log.info(
+                    "coverage progress geography=%s status=%s reported=%s covered=%s incomplete=%s partitions_processed=%s",
+                    progress.geography_code,
+                    progress.status,
+                    progress.reported_results,
+                    progress.covered_unique_jobs,
+                    progress.incomplete_partitions,
+                    progress.partitions_processed,
+                )
                 # Do not let coverage run thousands of jobs ahead of JD acquisition.
                 # Every completed partition is followed by a write-once JD catch-up.
                 sweep_required_jds()
@@ -187,14 +221,13 @@ def main(argv: list[str] | None = None) -> int:
                     last_status=final_status,
                     last_message=message,
                 )
-            print(
-                {
-                    "coverage": asdict(result),
-                    "jd": asdict(jd_result) if jd_result is not None else None,
-                    "status": final_status,
-                    "days": days,
-                },
-                flush=True,
+            log.info(
+                "run finished run_id=%s status=%s coverage=%s jd=%s days=%s",
+                run_id,
+                final_status,
+                asdict(result),
+                asdict(jd_result) if jd_result is not None else None,
+                days,
             )
             return (
                 0
@@ -202,7 +235,7 @@ def main(argv: list[str] | None = None) -> int:
                 else 1
             )
     except CollectionAlreadyRunning as exc:
-        print(str(exc), flush=True)
+        log.error("collection already running: %s", exc)
         return 3
     except Exception as exc:  # noqa: BLE001 - CLI boundary persists unexpected run failures.
         try:
@@ -220,7 +253,7 @@ def main(argv: list[str] | None = None) -> int:
                     last_message=f"Scheduled collection failed: {exc}",
                 )
         finally:
-            print(f"Collection failed: {exc}", flush=True)
+            log.exception("collection failed")
         return 1
     finally:
         close_browser()

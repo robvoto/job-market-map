@@ -93,3 +93,15 @@ The admin default partition chunk is intentionally small so ChatGPT/Claude tool-
 Use `--fresh` only when intentionally discarding resume behaviour for a fresh coverage pass.
 
 Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*`, `FAILED`, or `NOT_RUN` state means coverage is not proven complete. For the latest live recovery point, read local-only `docs/CURRENT_STATE.md` if present. That handoff is intentionally not tracked in Git.
+
+### Collection logging
+
+Every collection runner writes timestamped progress to `logs/collection.log` and to stdout. The file rotates at 10 MB and keeps five previous files. Important events include run configuration/start/end, backup path, browser page setup, JD sweep start/end, JD progress every 25 successful stores, failed JD attempts, coverage progress, genuine human-verification waits, browser loss/recovery, and full exception tracebacks.
+
+For a Windows/WSL terminal that should stay open and show the daily run live, use the foreground launcher:
+
+```bash
+scripts/run_collection_terminal.sh --trigger manual
+```
+
+The systemd launcher still writes the same stdout stream to the journal, while `logs/collection.log` remains the durable source regardless of how the run was launched.

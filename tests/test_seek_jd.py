@@ -1,3 +1,5 @@
+import pytest
+
 from collector import db
 from collector.ingest import ingest_card
 from collector.models import CardObservation
@@ -329,3 +331,40 @@ Employer questions
     }
     detail = parse_seek_detail_snapshot(snap, expected_source_job_id="94535996")
     assert "security checks" in detail.full_description
+
+
+def test_unreadable_detail_is_not_treated_as_human_verification(monkeypatch):
+    from collector import seek_jd
+
+    monkeypatch.setattr(seek_jd, "navigate", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        seek_jd,
+        "seek_job_detail",
+        lambda *_a, **_k: type(
+            "Response",
+            (),
+            {
+                "result": {
+                    "page_url": "https://au.seek.com/job/94511500",
+                    "source_job_id": "94511500",
+                    "full_description": "",
+                    "human_check": False,
+                }
+            },
+        )(),
+    )
+
+    start = [0.0]
+    monkeypatch.setattr(seek_jd.time, "monotonic", lambda: start[0])
+    monkeypatch.setattr(
+        seek_jd.time, "sleep", lambda seconds: start.__setitem__(0, start[0] + seconds)
+    )
+
+    with pytest.raises(seek_jd.SeekJDFetchError, match="implausibly short JD"):
+        seek_jd.fetch_seek_detail(
+            1,
+            "https://au.seek.com/job/94511500",
+            expected_source_job_id="94511500",
+            timeout_seconds=1.0,
+            human_wait_seconds=900.0,
+        )

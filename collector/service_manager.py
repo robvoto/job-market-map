@@ -9,9 +9,8 @@ from pathlib import Path
 
 from collector.db import ROOT
 from collector.run_lock import lock_status
+from collector.run_logging import LOG_PATH
 from collector.service_state import latest_market_run
-
-LOG_PATH = ROOT / "logs" / "collection.log"
 
 
 class CollectionProcessError(RuntimeError):
@@ -34,7 +33,9 @@ class CollectionProcessManager:
             pid = (
                 self._process.pid
                 if self._process is not None
-                else (lock.get("metadata") or {}).get("pid") if lock["active"] else None
+                else (lock.get("metadata") or {}).get("pid")
+                if lock["active"]
+                else None
             )
             return {
                 "active": bool(lock["active"] or self._process is not None),
@@ -52,18 +53,20 @@ class CollectionProcessManager:
             current_lock = lock_status()
             if self._process is not None or current_lock["active"]:
                 raise CollectionProcessError("A collection process is already running.")
-            LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-            log = LOG_PATH.open("a", encoding="utf-8")
-            try:
-                process = subprocess.Popen(
-                    [sys.executable, "-m", "scripts.run_collection_cycle", "--trigger", trigger],
-                    cwd=ROOT,
-                    stdout=log,
-                    stderr=subprocess.STDOUT,
-                    start_new_session=True,
-                )
-            finally:
-                log.close()
+            # The runner itself writes structured output to logs/collection.log and
+            # stdout. Inherit stdout/stderr here so service/journal output and the
+            # durable runner log contain the same messages without double-writing.
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "scripts.run_collection_cycle",
+                    "--trigger",
+                    trigger,
+                ],
+                cwd=ROOT,
+                start_new_session=True,
+            )
             self._process = process
             return {
                 "started": True,
@@ -75,7 +78,12 @@ class CollectionProcessManager:
     @staticmethod
     def _managed_pid(pid: int) -> bool:
         try:
-            cmdline = Path(f"/proc/{pid}/cmdline").read_bytes().replace(b"\x00", b" ").decode("utf-8", "replace")
+            cmdline = (
+                Path(f"/proc/{pid}/cmdline")
+                .read_bytes()
+                .replace(b"\x00", b" ")
+                .decode("utf-8", "replace")
+            )
         except OSError:
             return False
         return "scripts.run_collection_cycle" in cmdline
@@ -86,9 +94,14 @@ class CollectionProcessManager:
             pid = self._process.pid if self._process is not None else None
             if pid is None:
                 lock = lock_status()
-                pid = (lock.get("metadata") or {}).get("pid") if lock["active"] else None
+                pid = (
+                    (lock.get("metadata") or {}).get("pid") if lock["active"] else None
+                )
             if pid is None:
-                return {"stop_requested": False, "message": "No collection process is running."}
+                return {
+                    "stop_requested": False,
+                    "message": "No collection process is running.",
+                }
             pid = int(pid)
             if not self._managed_pid(pid):
                 raise CollectionProcessError(

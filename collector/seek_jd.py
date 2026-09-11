@@ -14,6 +14,7 @@ from collector.browser_broker import (
     select_page,
 )
 from collector.db import connect, store_job_jd_once, update_job_source_facts
+from collector.run_logging import collection_logger
 from collector.settings import get_setting
 
 SYDNEY = ZoneInfo("Australia/Sydney")
@@ -289,9 +290,8 @@ def fetch_seek_detail(
                 )
                 if not human_mode:
                     select_page(page_id, bring_to_front=True)
-                    print(
-                        last_problem + "; JMM browser is waiting for verification.",
-                        flush=True,
+                    collection_logger().warning(
+                        "%s; JMM browser is waiting for verification", last_problem
                     )
                     human_mode = True
                     human_deadline = time.monotonic() + human_wait_seconds
@@ -469,11 +469,23 @@ def enrich_seek_coverage_jds(
             )
             completed_ids.add(job_id)
             stored += 1
+            if stored == 1 or stored % 25 == 0:
+                collection_logger().info(
+                    "JD progress stored=%s attempted=%s failed=%s job_id=%s source_job_id=%s jd_chars=%s",
+                    stored,
+                    attempted,
+                    failed,
+                    job_id,
+                    expected_source_id,
+                    len(detail.full_description),
+                )
         except BrowserBrokerError:
             raise
         except SeekJDFetchError as exc:
             failed += 1
-            print(f"SEEK JD fetch failed for job {job_id}: {exc}", flush=True)
+            collection_logger().warning(
+                "SEEK JD fetch failed job_id=%s error=%s", job_id, exc
+            )
 
     remaining = len(rows) - len(completed_ids)
     return SeekJDEnrichmentResult(
