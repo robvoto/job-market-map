@@ -38,6 +38,14 @@ def get_job_by_source_id(source: str, source_job_id: str) -> dict[str, object] |
     return dict(row) if row else None
 
 
+def get_job_by_id(job_id: int) -> dict[str, object] | None:
+    """Return one canonical job by JMM job ID."""
+    init_db()
+    with connect() as conn:
+        row = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def job_jd_fetch_completed(job_id: int) -> bool:
     """Return whether this canonical identity has ever had a successful JD fetch."""
     init_db()

@@ -46,6 +46,16 @@ POST /v3/consumers/reset-edge/checkpoint
 
 Each consumer checkpoint is independent. A checkpoint answers only: "how far has this workflow safely processed the shared feed?"
 
+## Canonical JD retrieval
+
+Consumers that need the full JD use:
+
+```text
+POST /v3/jobs/{id}/jd
+```
+
+This is idempotent get-or-enrich behaviour. JMM returns an existing canonical JD without refetching. If the JD is absent and the source is supported, JMM performs the source-specific fetch through its own adapter/browser infrastructure, stores the one canonical JD write-once, and returns it. SEEK is currently supported. Unsupported sources and source-fetch failures are explicit; consumers do not scrape the source page or write JMM SQLite themselves.
+
 ## Personal-history integration
 
 Job Market Map returns stable `identity_key` so an authorised consumer can ask Job Hunter/JH-305 about user-specific history without coupling that history to the market database.

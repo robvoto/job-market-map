@@ -17,12 +17,15 @@ GET /v3/feed/jobs
 GET /v3/jobs/new
 GET /v3/jobs/search
 GET /v3/jobs/{id}
+POST /v3/jobs/{id}/jd
 GET /v3/coverage/seek
 ```
 
 `GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. Job payloads contain `identity_key` for stable cross-service correlation.
 
 When JMM has obtained a full JD, job payloads also expose the one current neutral JD as `full_description`, `jd_fetched_at`, and `jd_source`. JMM does not expose JD snapshot/version history.
+
+`POST /v3/jobs/{id}/jd` is the supported get-or-enrich operation. If the canonical JD already exists, JMM returns it without opening the source page. If it is missing, JMM selects the source adapter, fetches validated neutral source evidence using JMM-owned browser infrastructure, stores the JD once, records permanent successful-fetch memory, and returns it. SEEK is the first supported source. Unsupported sources fail explicitly; consumers must not fetch a JD themselves and write JMM storage directly.
 
 ## Consumer checkpoints
 

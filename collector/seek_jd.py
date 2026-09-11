@@ -396,6 +396,35 @@ def fetch_seek_detail(
         time.sleep(0.35)
 
 
+def fetch_seek_detail_with_navigation_retry(
+    page_id: int,
+    url: str,
+    *,
+    expected_source_job_id: str | None = None,
+    job_id: int | None = None,
+) -> SeekFetchedDetail:
+    """Reuse the proven bounded outer navigation-timeout retry for one SEEK JD."""
+    for navigation_attempt in range(2):
+        try:
+            return fetch_seek_detail(
+                page_id,
+                url,
+                expected_source_job_id=expected_source_job_id,
+            )
+        except BrowserBrokerTimeout as exc:
+            if navigation_attempt == 0:
+                collection_logger().info(
+                    "SEEK JD navigation timeout; retrying once job_id=%s source_job_id=%s error=%s",
+                    job_id,
+                    expected_source_job_id,
+                    exc,
+                )
+                continue
+            raise
+
+    raise AssertionError("unreachable SEEK JD retry state")
+
+
 def fetch_seek_jd(
     page_id: int, url: str, *, timeout_seconds: float | None = None
 ) -> str:
@@ -496,26 +525,12 @@ def enrich_seek_coverage_jds(
             on_progress("attempted")
         try:
             expected_source_id = str(row["source_job_id"] or "").strip()
-            detail = None
-            for navigation_attempt in range(2):
-                try:
-                    detail = fetch_seek_detail(
-                        page_id,
-                        str(row["canonical_url"]),
-                        expected_source_job_id=expected_source_id,
-                    )
-                    break
-                except BrowserBrokerTimeout as exc:
-                    if navigation_attempt == 0:
-                        collection_logger().info(
-                            "SEEK JD navigation timeout; retrying once job_id=%s source_job_id=%s error=%s",
-                            job_id,
-                            expected_source_id,
-                            exc,
-                        )
-                        continue
-                    raise
-            assert detail is not None
+            detail = fetch_seek_detail_with_navigation_retry(
+                page_id,
+                str(row["canonical_url"]),
+                expected_source_job_id=expected_source_id,
+                job_id=job_id,
+            )
             actual_source_id = str(detail.facts.get("source_job_id") or "").strip()
             if not expected_source_id or actual_source_id != expected_source_id:
                 raise SeekJDFetchError(

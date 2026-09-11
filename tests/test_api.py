@@ -166,6 +166,29 @@ def test_v3_stats_is_neutral_and_does_not_require_activity_tables(
         assert "activity_users" not in body
 
 
+def test_v3_job_jd_endpoint_returns_get_or_enrich_result(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        from api import main as api_main
+
+        monkeypatch.setattr(
+            api_main,
+            "get_or_enrich_job_jd",
+            lambda job_id: {
+                "status": "cached",
+                "id": job_id,
+                "full_description": "Canonical JD",
+                "jd_fetched_at": "2026-09-11T00:00:00+00:00",
+                "jd_source": "seek_job_page",
+            },
+        )
+        response = client.post("/v3/jobs/1/jd")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "cached"
+        assert response.json()["full_description"] == "Canonical JD"
+
+
 def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         from api import main as api_main

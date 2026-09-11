@@ -16,6 +16,11 @@ from collector.geographies import (
     seed_geographies,
     set_geography_enabled,
 )
+from collector.jd_enrichment import (
+    JDSourceFetchError,
+    UnsupportedJDSourceError,
+    get_or_enrich_job_jd,
+)
 from collector.query_admin import add_query, set_query_active
 from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
@@ -322,6 +327,24 @@ def search_jobs(
             (*params, resolved_limit),
         ).fetchall()
     return [_job_payload(row) for row in rows]
+
+
+@app.post(f"/{API_VERSION}/jobs/{{job_id}}/jd")
+def job_jd(job_id: int):
+    """Return the canonical JD, enriching it through JMM when it is missing."""
+    try:
+        result = get_or_enrich_job_jd(job_id)
+    except KeyError:
+        raise HTTPException(404, "job not found") from None
+    except UnsupportedJDSourceError as exc:
+        raise HTTPException(422, str(exc)) from None
+    except JDSourceFetchError as exc:
+        raise HTTPException(502, str(exc)) from None
+    return {
+        "api_version": API_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        **result,
+    }
 
 
 @app.get(f"/{API_VERSION}/jobs/{{job_id}}")
