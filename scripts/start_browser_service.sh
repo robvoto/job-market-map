@@ -31,13 +31,6 @@ if systemctl --user is-active --quiet "$UNIT.service"; then
   exit 3
 fi
 
-CHROME="$($PYTHON - <<'PY'
-from playwright.sync_api import sync_playwright
-with sync_playwright() as playwright:
-    print(playwright.chromium.executable_path)
-PY
-)"
-
 mkdir -p "$PROFILE"
 DISPLAY_VALUE="${DISPLAY:-:0}"
 WAYLAND_VALUE="${WAYLAND_DISPLAY:-wayland-0}"
@@ -51,16 +44,8 @@ systemd-run \
   --setenv="DISPLAY=$DISPLAY_VALUE" \
   --setenv="WAYLAND_DISPLAY=$WAYLAND_VALUE" \
   --setenv="XDG_RUNTIME_DIR=$RUNTIME_VALUE" \
-  "$CHROME" \
-  --remote-debugging-address=127.0.0.1 \
-  --remote-debugging-port="$PORT" \
-  --user-data-dir="$PROFILE" \
-  --disable-blink-features=AutomationControlled \
-  --no-sandbox \
-  --disable-dev-shm-usage \
-  --no-first-run \
-  --no-default-browser-check \
-  about:blank >/dev/null
+  --setenv="JMM_BROWSER_CDP_PORT=$PORT" \
+  "$ROOT/scripts/run_browser_service.sh" >/dev/null
 
 for _ in $(seq 1 40); do
   if cdp_ready; then

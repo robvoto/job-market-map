@@ -51,6 +51,7 @@ _pw = None
 _browser = None
 _context = None
 _pages: dict[int, Page] = {}
+_page_targets: dict[int, str] = {}
 _page_ids = itertools.count(1)
 
 _SNAPSHOT_JS = r"""
@@ -309,10 +310,11 @@ def start_browser() -> None:
         ) from exc
 
 
-def close_browser() -> None:
-    """Detach this client only; the JMM Chrome service intentionally stays open."""
+def _detach_playwright(*, clear_targets: bool) -> None:
     global _pw_manager, _pw, _browser, _context
     _pages.clear()
+    if clear_targets:
+        _page_targets.clear()
     _context = None
     _browser = None
     _pw = None
@@ -320,6 +322,11 @@ def close_browser() -> None:
         with suppress(Exception):
             _pw_manager.stop()
     _pw_manager = None
+
+
+def close_browser() -> None:
+    """Detach this client only; the JMM Chrome service intentionally stays open."""
+    _detach_playwright(clear_targets=True)
 
 
 atexit.register(close_browser)
@@ -332,10 +339,159 @@ def _page(page_id: int) -> Page:
     return page
 
 
-def _register_page(page: Page) -> int:
+def _register_page(page: Page, *, target_url: str | None = None) -> int:
     page_id = next(_page_ids)
     _pages[page_id] = page
+    _page_targets[page_id] = str(target_url or page.url or "about:blank")
     return page_id
+
+
+def _browser_lost(exc: Exception) -> bool:
+    text = str(exc).casefold()
+    return any(
+        marker in text
+        for marker in (
+            "target page, context or browser has been closed",
+            "connection closed while reading from the driver",
+            "browser has been closed",
+            "connect econnrefused",
+            "stale jmm browser page id",
+        )
+    )
+
+
+def _recover_browser_pages() -> None:
+    global _browser, _context
+    targets = dict(_page_targets)
+    _pages.clear()
+    _browser = None
+    _context = None
+
+    # Keep the existing Playwright driver alive. Starting another Sync API runtime
+    # while handling an in-flight Playwright exception is invalid.
+    if _pw is None:
+        raise BrowserBrokerError(
+            "persistent JMM browser recovery has no Playwright driver"
+        )
+
+    deadline = time.monotonic() + 20.0
+    last: Exception | None = None
+    while time.monotonic() < deadline:
+        try:
+            _ensure_browser_service()
+            _browser = _pw.chromium.connect_over_cdp(JMM_BROWSER_CDP_URL, timeout=5000)
+            if not _browser.contexts:
+                raise BrowserBrokerError(
+                    "recovered JMM browser exposed no default context"
+                )
+            _context = _browser.contexts[0]
+            _context.add_init_script(_WEBDRIVER_INIT)
+            break
+        except Exception as exc:  # noqa: BLE001 - bounded recovery loop
+            last = exc
+            _browser = None
+            _context = None
+            time.sleep(0.5)
+    else:
+        raise BrowserBrokerError(f"persistent JMM browser recovery failed: {last}")
+
+    assert _context is not None
+    existing = list(_context.pages)
+    used: set[int] = set()
+    for page_id, target in targets.items():
+        page = None
+        for index, candidate in enumerate(existing):
+            if index in used or candidate.is_closed():
+                continue
+            if candidate.url == target:
+                page = candidate
+                used.add(index)
+                break
+        if page is None:
+            page = _context.new_page()
+            if target and target != "about:blank":
+                page.goto(target, wait_until="domcontentloaded", timeout=30000)
+        _pages[page_id] = page
+
+
+def _execute_browser_command(
+    command: str,
+    payload: dict[str, Any],
+    *,
+    page_id: int | None,
+    timeout_seconds: int,
+) -> Any:
+    if command == "list_pages":
+        return [
+            {
+                "pageId": pid,
+                "title": page.title(),
+                "url": page.url,
+                "active": False,
+            }
+            for pid, page in list(_pages.items())
+            if not page.is_closed()
+        ]
+    if command == "open_tab":
+        assert _context is not None
+        page = _context.new_page()
+        url = str(payload.get("url") or "about:blank")
+        pid = _register_page(page, target_url=url)
+        if url != "about:blank":
+            page.goto(
+                url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000
+            )
+        if bool(payload.get("active")):
+            page.bring_to_front()
+        return {"ok": True, "pageId": pid, "url": page.url, "title": page.title()}
+    if command == "navigate":
+        pid = int(page_id or 0)
+        page = _page(pid)
+        url = str(payload.get("url") or "").strip()
+        if not url:
+            raise BrowserBrokerError("navigate url is required")
+        _page_targets[pid] = url
+        page.goto(url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000)
+        return {"ok": True, "pageId": pid, "url": page.url}
+    if command == "snapshot":
+        return _page(int(page_id or 0)).evaluate(
+            _SNAPSHOT_JS, bool(payload.get("verbose", True))
+        )
+    if command == "select_page":
+        pid = int(page_id or payload.get("pageId") or 0)
+        page = _page(pid)
+        if bool(payload.get("bringToFront", True)):
+            page.bring_to_front()
+        return {"ok": True, "pageId": pid, "url": page.url, "title": page.title()}
+    if command == "click":
+        page = _page(int(page_id or 0))
+        uid = str(payload.get("uid") or "").strip()
+        if not uid:
+            raise BrowserBrokerError("click uid is required")
+        clicked = page.evaluate(
+            """uid => {
+                const el = document.querySelector(`[data-jmm-browser-id=\"${CSS.escape(uid)}\"]`);
+                if (!el) return false;
+                el.scrollIntoView({block: 'center', inline: 'center'});
+                el.focus?.();
+                el.click();
+                return true;
+            }""",
+            uid,
+        )
+        if not clicked:
+            raise BrowserBrokerError(f"element uid not found: {uid}")
+        return {"ok": True, "uid": uid}
+    if command == "seek_cards":
+        page = _page(int(page_id or 0))
+        page.wait_for_selector(
+            'article[data-automation="normalJob"], article[data-automation="premiumJob"]',
+            timeout=timeout_seconds * 1000,
+        )
+        return page.evaluate(_SEEK_CARDS_JS)
+    if command == "seek_job_detail":
+        return _page(int(page_id or 0)).evaluate(_SEEK_DETAIL_JS)
+    raise BrowserBrokerError(f"unknown JMM browser command: {command}")
 
 
 def browser_command(
@@ -345,97 +501,44 @@ def browser_command(
     page_id: int | None = None,
     timeout_seconds: int = 30,
     profile: str = "jmm",
+    _allow_recovery: bool = True,
 ) -> BrokerResponse:
-    """Compatibility dispatcher backed by JMM's own persistent Playwright browser."""
+    """Compatibility dispatcher backed by JMM's persistent browser service."""
     del profile
     payload = payload or {}
     started = time.perf_counter()
     start_browser()
     try:
-        if command == "list_pages":
-            result = [
-                {
-                    "pageId": pid,
-                    "title": page.title(),
-                    "url": page.url,
-                    "active": False,
-                }
-                for pid, page in list(_pages.items())
-                if not page.is_closed()
-            ]
-        elif command == "open_tab":
-            assert _context is not None
-            page = _context.new_page()
-            pid = _register_page(page)
-            url = str(payload.get("url") or "about:blank")
-            if url != "about:blank":
-                page.goto(
-                    url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000
-                )
-            if bool(payload.get("active")):
-                page.bring_to_front()
-            result = {"ok": True, "pageId": pid, "url": page.url, "title": page.title()}
-        elif command == "navigate":
-            page = _page(int(page_id or 0))
-            url = str(payload.get("url") or "").strip()
-            if not url:
-                raise BrowserBrokerError("navigate url is required")
-            page.goto(
-                url, wait_until="domcontentloaded", timeout=timeout_seconds * 1000
-            )
-            result = {"ok": True, "pageId": int(page_id or 0), "url": page.url}
-        elif command == "snapshot":
-            page = _page(int(page_id or 0))
-            result = page.evaluate(_SNAPSHOT_JS, bool(payload.get("verbose", True)))
-        elif command == "select_page":
-            page = _page(int(page_id or payload.get("pageId") or 0))
-            if bool(payload.get("bringToFront", True)):
-                page.bring_to_front()
-            result = {
-                "ok": True,
-                "pageId": int(page_id or payload.get("pageId") or 0),
-                "url": page.url,
-                "title": page.title(),
-            }
-        elif command == "click":
-            page = _page(int(page_id or 0))
-            uid = str(payload.get("uid") or "").strip()
-            if not uid:
-                raise BrowserBrokerError("click uid is required")
-            clicked = page.evaluate(
-                """uid => {
-                    const el = document.querySelector(`[data-jmm-browser-id=\"${CSS.escape(uid)}\"]`);
-                    if (!el) return false;
-                    el.scrollIntoView({block: 'center', inline: 'center'});
-                    el.focus?.();
-                    el.click();
-                    return true;
-                }""",
-                uid,
-            )
-            if not clicked:
-                raise BrowserBrokerError(f"element uid not found: {uid}")
-            result = {"ok": True, "uid": uid}
-        elif command == "seek_cards":
-            page = _page(int(page_id or 0))
-            page.wait_for_selector(
-                'article[data-automation="normalJob"], article[data-automation="premiumJob"]',
-                timeout=timeout_seconds * 1000,
-            )
-            result = page.evaluate(_SEEK_CARDS_JS)
-        elif command == "seek_job_detail":
-            page = _page(int(page_id or 0))
-            result = page.evaluate(_SEEK_DETAIL_JS)
-        else:
-            raise BrowserBrokerError(f"unknown JMM browser command: {command}")
+        result = _execute_browser_command(
+            command, payload, page_id=page_id, timeout_seconds=timeout_seconds
+        )
     except PlaywrightTimeoutError as exc:
         raise BrowserBrokerTimeout(
             f"JMM browser {command!r} timed out after {timeout_seconds}s"
         ) from exc
-    except BrowserBrokerError:
+    except BrowserBrokerError as exc:
+        if _allow_recovery and _browser_lost(exc):
+            _recover_browser_pages()
+            return browser_command(
+                command,
+                payload,
+                page_id=page_id,
+                timeout_seconds=timeout_seconds,
+                _allow_recovery=False,
+            )
         raise
     except PlaywrightError as exc:
-        raise BrowserBrokerError(f"JMM browser {command!r} failed: {exc}") from exc
+        wrapped = BrowserBrokerError(f"JMM browser {command!r} failed: {exc}")
+        if _allow_recovery and _browser_lost(wrapped):
+            _recover_browser_pages()
+            return browser_command(
+                command,
+                payload,
+                page_id=page_id,
+                timeout_seconds=timeout_seconds,
+                _allow_recovery=False,
+            )
+        raise wrapped from exc
     except Exception as exc:
         raise BrowserBrokerError(f"JMM browser {command!r} failed: {exc}") from exc
     return BrokerResponse(result=result, elapsed_seconds=time.perf_counter() - started)
