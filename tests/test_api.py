@@ -189,6 +189,98 @@ def test_v3_job_jd_endpoint_returns_get_or_enrich_result(tmp_path, monkeypatch):
         assert response.json()["full_description"] == "Canonical JD"
 
 
+def test_lookup_resolves_exact_source_and_source_job_id(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(3)
+        response = client.get(
+            "/v3/jobs/lookup", params={"source": "seek", "source_job_id": "2"}
+        )
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["job"]["id"] == 2
+        assert payload["job"]["source"] == "seek"
+        assert payload["job"]["source_job_id"] == "2"
+
+
+def test_lookup_resolves_exact_identity_key(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        identity_key = client.get("/v3/jobs/1").json()["job"]["identity_key"]
+        response = client.get("/v3/jobs/lookup", params={"identity_key": identity_key})
+        assert response.status_code == 200
+        assert response.json()["job"]["id"] == 1
+
+
+def test_lookup_unknown_identity_returns_404_not_search_fallback(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        response = client.get(
+            "/v3/jobs/lookup", params={"source": "seek", "source_job_id": "999"}
+        )
+        assert response.status_code == 404
+
+
+def test_lookup_rejects_malformed_and_conflicting_inputs(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        identity_key = client.get("/v3/jobs/1").json()["job"]["identity_key"]
+        # neither identity_key nor source pair supplied
+        assert client.get("/v3/jobs/lookup").status_code == 400
+        # only one half of the source pair supplied
+        assert (
+            client.get("/v3/jobs/lookup", params={"source": "seek"}).status_code == 400
+        )
+        assert (
+            client.get(
+                "/v3/jobs/lookup", params={"source_job_id": "1"}
+            ).status_code
+            == 400
+        )
+        # identity_key combined with a conflicting source pair
+        assert (
+            client.get(
+                "/v3/jobs/lookup",
+                params={
+                    "identity_key": identity_key,
+                    "source": "seek",
+                    "source_job_id": "1",
+                },
+            ).status_code
+            == 400
+        )
+
+
+def test_lookup_keeps_duplicate_linked_source_jobs_independently_resolvable(
+    tmp_path, monkeypatch
+):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(2)
+        with db.connect() as conn:
+            conn.execute(
+                """INSERT INTO duplicate_links(job_id_a,job_id_b,confidence,match_type,reasons_json,detected_at)
+                   VALUES(1,2,0.95,'title_employer','[]','2026-09-11T00:00:00+00:00')"""
+            )
+        first = client.get(
+            "/v3/jobs/lookup", params={"source": "seek", "source_job_id": "1"}
+        ).json()
+        second = client.get(
+            "/v3/jobs/lookup", params={"source": "seek", "source_job_id": "2"}
+        ).json()
+        assert first["job"]["id"] == 1
+        assert second["job"]["id"] == 2
+        assert [d["other_job_id"] for d in first["duplicates"]] == [2]
+        assert [d["other_job_id"] for d in second["duplicates"]] == [1]
+
+
+def test_lookup_never_resolves_by_similar_title_or_employer_text(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        response = client.get(
+            "/v3/jobs/lookup", params={"source": "seek", "source_job_id": "Role 1"}
+        )
+        assert response.status_code == 404
+
+
 def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         from api import main as api_main

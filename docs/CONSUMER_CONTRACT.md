@@ -56,6 +56,15 @@ POST /v3/jobs/{id}/jd
 
 This is idempotent get-or-enrich behaviour. JMM returns an existing canonical JD without refetching. If the JD is absent and the source is supported, JMM performs the source-specific fetch through its own adapter/browser infrastructure, stores the one canonical JD write-once, and returns it. SEEK is currently supported. Unsupported sources and source-fetch failures are explicit; consumers do not scrape the source page or write JMM SQLite themselves.
 
+## Exact source-identity lookup
+
+```text
+GET /v3/jobs/lookup?identity_key=<key>
+GET /v3/jobs/lookup?source=<source>&source_job_id=<id>
+```
+
+Use this to resolve a known source vacancy (or a previously stored `identity_key`) to its JMM record without fuzzy searching, direct SQLite access, or reproducing JMM's internal identity-key construction. Exactly one lookup form is required; supplying both, or only half of the `source`/`source_job_id` pair, fails with 400. An unresolved identity returns 404 rather than falling back to `/v3/jobs/search`. The response is the same job-detail payload as `GET /v3/jobs/{id}`, including current duplicate-link evidence — duplicate-linked source jobs each remain independently resolvable by their own identity.
+
 ## Personal-history integration
 
 Job Market Map returns stable `identity_key` so an authorised consumer can ask Job Hunter/JH-305 about user-specific history without coupling that history to the market database.

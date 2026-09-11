@@ -38,6 +38,17 @@ def get_job_by_source_id(source: str, source_job_id: str) -> dict[str, object] |
     return dict(row) if row else None
 
 
+def get_job_by_identity_key(identity_key: str) -> dict[str, object] | None:
+    """Return an active canonical job by its exact stable identity_key."""
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM jobs WHERE identity_key=?",
+            (str(identity_key).strip(),),
+        ).fetchone()
+    return dict(row) if row else None
+
+
 def get_job_by_id(job_id: int) -> dict[str, object] | None:
     """Return one canonical job by JMM job ID."""
     init_db()

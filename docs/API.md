@@ -16,6 +16,7 @@ GET /v3/stats
 GET /v3/feed/jobs
 GET /v3/jobs/new
 GET /v3/jobs/search
+GET /v3/jobs/lookup
 GET /v3/jobs/{id}
 POST /v3/jobs/{id}/jd
 GET /v3/coverage/seek
@@ -24,6 +25,8 @@ GET /v3/coverage/seek
 `GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. Job payloads contain `identity_key` for stable cross-service correlation.
 
 When JMM has obtained a full JD, job payloads also expose the one current neutral JD as `full_description`, `jd_fetched_at`, and `jd_source`. JMM does not expose JD snapshot/version history.
+
+`GET /v3/jobs/lookup?identity_key=<key>` or `GET /v3/jobs/lookup?source=<source>&source_job_id=<id>` is the exact-identity lookup contract (JMM-009). Exactly one form is required — `identity_key` cannot be combined with `source`/`source_job_id`, and `source`/`source_job_id` must both be present together. It never performs title/employer/raw-text search, fuzzy matching, URL similarity or duplicate inference; a successful lookup returns the same job-detail payload as `GET /v3/jobs/{id}` (job identity, captures, query hits and duplicate-link evidence). No exact match returns 404; malformed or conflicting inputs return 400. There is no fallback to `/v3/jobs/search` or direct SQLite access. Duplicate-linked source jobs remain independently resolvable — lookup never follows a duplicate link to substitute another job.
 
 `POST /v3/jobs/{id}/jd` is the supported get-or-enrich operation. If the canonical JD already exists, JMM returns it without opening the source page. If it is missing, JMM selects the source adapter, fetches validated neutral source evidence using JMM-owned browser infrastructure, stores the JD once, records permanent successful-fetch memory, and returns it. SEEK is the first supported source. Unsupported sources fail explicitly; consumers must not fetch a JD themselves and write JMM storage directly.
 

@@ -10,7 +10,13 @@ from pydantic import BaseModel, Field
 
 from collector.backup import create_backup, list_backups
 from collector.consumers import advance_checkpoint, get_checkpoint
-from collector.db import ROOT, connect, init_db
+from collector.db import (
+    ROOT,
+    connect,
+    get_job_by_identity_key,
+    get_job_by_source_id,
+    init_db,
+)
 from collector.geographies import (
     list_geographies,
     seed_geographies,
@@ -347,9 +353,8 @@ def job_jd(job_id: int):
     }
 
 
-@app.get(f"/{API_VERSION}/jobs/{{job_id}}")
-@app.get("/jobs/{job_id}", include_in_schema=False)
-def get_job(job_id: int):
+def _job_detail_payload(job_id: int) -> dict:
+    """Build the canonical job-detail response: job facts, captures, query hits and duplicate evidence."""
     with connect() as conn:
         row = conn.execute(
             """
@@ -404,6 +409,50 @@ def get_job(job_id: int):
         "query_hits": query_hits,
         "duplicates": duplicates,
     }
+
+
+@app.get(f"/{API_VERSION}/jobs/lookup")
+def lookup_job(
+    identity_key: str | None = Query(
+        None, description="Exact stable identity_key issued by Job Market Map."
+    ),
+    source: str | None = Query(
+        None, description="Exact source name, paired with source_job_id."
+    ),
+    source_job_id: str | None = Query(
+        None, description="Exact source-native job ID, paired with source."
+    ),
+):
+    """Resolve a known source vacancy to its JMM record by exact identity only.
+
+    Never falls back to title/employer/raw-text search, fuzzy matching or URL
+    similarity. Exactly one of identity_key or (source + source_job_id) is required.
+    """
+    if identity_key is not None:
+        if source is not None or source_job_id is not None:
+            raise HTTPException(
+                400, "identity_key cannot be combined with source/source_job_id"
+            )
+        found = get_job_by_identity_key(identity_key)
+    elif source is not None or source_job_id is not None:
+        if source is None or source_job_id is None:
+            raise HTTPException(
+                400, "source and source_job_id must both be provided together"
+            )
+        found = get_job_by_source_id(source, source_job_id)
+    else:
+        raise HTTPException(
+            400, "identity_key or source+source_job_id is required"
+        )
+    if not found:
+        raise HTTPException(404, "job not found")
+    return _job_detail_payload(int(found["id"]))
+
+
+@app.get(f"/{API_VERSION}/jobs/{{job_id}}")
+@app.get("/jobs/{job_id}", include_in_schema=False)
+def get_job(job_id: int):
+    return _job_detail_payload(job_id)
 
 
 @app.get(f"/{API_VERSION}/runs")
