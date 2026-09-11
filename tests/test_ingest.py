@@ -262,3 +262,63 @@ def test_ambiguous_repost_candidate_remains_separate(tmp_path, monkeypatch):
     assert second.job_id == second.observation_job_id
     with db.connect() as conn:
         assert conn.execute("SELECT COUNT(*) FROM same_vacancy_links").fetchone()[0] == 0
+
+
+def test_cross_source_cards_only_same_locality_reuses_primary(tmp_path, monkeypatch):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    first = ingest.ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="123",
+            canonical_url="https://seek.test/jobs/123",
+            title="Resourcing Specialist",
+            employer="Programmed",
+            location="Coffs Harbour, Coffs Harbour & North Coast NSW",
+        )
+    )
+    second = ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="456",
+            canonical_url="https://linkedin.test/jobs/456",
+            title="Resourcing Specialist",
+            employer="Programmed",
+            location="Coffs Harbour, New South Wales, Australia",
+        )
+    )
+    assert second.created is False
+    assert second.job_id == first.job_id
+    with db.connect() as conn:
+        link = conn.execute("SELECT * FROM same_vacancy_links").fetchone()
+    assert link["match_type"] == "cross_source_locality"
+    assert "same specific locality coffs harbour" in json.loads(link["matching_signals_json"])
+
+
+def test_cross_source_locality_match_remains_separate_when_one_to_many(tmp_path, monkeypatch):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    for source_job_id in ("123", "124"):
+        result = ingest.ingest_card(
+            CardObservation(
+                source="seek",
+                source_job_id=source_job_id,
+                canonical_url=f"https://seek.test/jobs/{source_job_id}",
+                title="Registered Nurse | Rockhampton",
+                employer="ForHealth Group",
+                location="Rockhampton, Rockhampton & Capricorn Coast QLD",
+            )
+        )
+        assert result.created is True
+    linked = ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="456",
+            canonical_url="https://linkedin.test/jobs/456",
+            title="Registered Nurse | Rockhampton",
+            employer="ForHealth Group",
+            location="Rockhampton, Queensland, Australia",
+        )
+    )
+    assert linked.created is True
+    assert linked.job_id == linked.observation_job_id
+    with db.connect() as conn:
+        assert conn.execute("SELECT COUNT(*) FROM same_vacancy_links").fetchone()[0] == 0

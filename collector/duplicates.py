@@ -13,6 +13,24 @@ from collector.settings import get_setting
 
 PUNCT_RE = re.compile(r"[^\w]+", re.UNICODE)
 SAME_VACANCY_MATCH_TYPE = "same_vacancy"
+GENERIC_LOCATION_NAMES = {
+    "australia",
+    "new south wales",
+    "nsw",
+    "queensland",
+    "qld",
+    "australian capital territory",
+    "act",
+}
+LOCATION_STATE_SUFFIXES = (
+    " australian capital territory",
+    " new south wales",
+    " queensland",
+    " australia",
+    " nsw",
+    " qld",
+    " act",
+)
 
 
 def normalize(value: Any) -> str:
@@ -88,6 +106,20 @@ def refresh_job_fingerprints(job_id: int) -> dict[str, Any]:
 def _same_nonempty(a: Any, b: Any) -> bool:
     left, right = normalize(a), normalize(b)
     return bool(left and right and left == right)
+
+
+def specific_locality(value: Any) -> str:
+    """Normalize a specific leading locality without treating a state as one."""
+    if value is None:
+        return ""
+    locality = normalize(str(value).split(",", 1)[0])
+    for suffix in LOCATION_STATE_SUFFIXES:
+        if locality.endswith(suffix):
+            locality = locality[: -len(suffix)].strip()
+            break
+    if locality in GENERIC_LOCATION_NAMES:
+        return ""
+    return locality
 
 
 def _teaser_similarity(a: Any, b: Any, *, min_chars: int = 25) -> float | None:
@@ -187,6 +219,17 @@ def same_vacancy_evidence(
             reasons + [f"substantial teaser similarity {teaser_similarity:.2f}"],
         )
 
+    source_a = normalize(a.get("source"))
+    source_b = normalize(b.get("source"))
+    locality_a = specific_locality(a.get("location"))
+    locality_b = specific_locality(b.get("location"))
+    if source_a and source_b and source_a != source_b and locality_a and locality_a == locality_b:
+        return (
+            0.96,
+            "cross_source_locality",
+            reasons + [f"same specific locality {locality_a}"],
+        )
+
     secondary_signals = _secondary_signals(a, b)
     if len(secondary_signals) >= min_secondary_signals:
         duplicate = duplicate_evidence(a, b)
@@ -195,6 +238,38 @@ def same_vacancy_evidence(
         score, _, _ = duplicate
         return score, "secondary_signals", reasons + secondary_signals
     return None
+
+
+def _cross_source_locality_is_reciprocally_unique(
+    conn, current: dict[str, Any], candidate: dict[str, Any]
+) -> bool:
+    """Require one matching source row on each side before locality-only grouping."""
+    core = current.get("core_fingerprint")
+    current_source = str(current.get("source") or "")
+    candidate_source = str(candidate.get("source") or "")
+    locality = specific_locality(current.get("location"))
+    if (
+        not core
+        or not locality
+        or not current_source
+        or not candidate_source
+        or current_source == candidate_source
+        or locality != specific_locality(candidate.get("location"))
+    ):
+        return False
+    rows = conn.execute(
+        "SELECT id, source, location FROM jobs WHERE core_fingerprint=? AND source IN (?, ?)",
+        (core, current_source, candidate_source),
+    ).fetchall()
+    by_source = {current_source: [], candidate_source: []}
+    for row in rows:
+        source = str(row["source"] or "")
+        if source in by_source and specific_locality(row["location"]) == locality:
+            by_source[source].append(int(row["id"]))
+    return (
+        by_source[current_source] == [int(current["id"])]
+        and by_source[candidate_source] == [int(candidate["id"])]
+    )
 
 
 def _same_vacancy_matches(
@@ -224,6 +299,13 @@ def _same_vacancy_matches(
         if evidence is None:
             continue
         confidence, match_type, reasons = evidence
+        if (
+            match_type == "cross_source_locality"
+            and not _cross_source_locality_is_reciprocally_unique(
+                conn, current, candidate
+            )
+        ):
+            continue
         matches.append((int(candidate["id"]), confidence, match_type, reasons))
     return matches
 

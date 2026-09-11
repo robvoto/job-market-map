@@ -3,6 +3,7 @@ from collector.duplicates import (
     duplicate_evidence,
     exact_card_fingerprint_from_mapping,
     same_vacancy_evidence,
+    specific_locality,
 )
 
 
@@ -190,3 +191,80 @@ def test_same_vacancy_accepts_two_agreeing_secondary_signals():
     assert confidence < 0.92
     assert match_type == "secondary_signals"
     assert reasons[-2:] == ["same workplace type", "same classification"]
+
+
+def test_specific_locality_normalizes_cross_board_location_formats():
+    assert specific_locality("Coffs Harbour, New South Wales, Australia") == "coffs harbour"
+    assert specific_locality("Coffs Harbour, Coffs Harbour & North Coast NSW") == "coffs harbour"
+    assert specific_locality("Sydney NSW") == "sydney"
+    assert specific_locality("New South Wales, Australia") == ""
+
+
+def test_same_vacancy_accepts_cross_source_specific_locality_without_rich_fields():
+    a = base_row(
+        id=1,
+        source="seek",
+        location="Coffs Harbour, Coffs Harbour & North Coast NSW",
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        teaser_text=None,
+    )
+    b = base_row(
+        id=2,
+        source="linkedin",
+        location="Coffs Harbour, New South Wales, Australia",
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        teaser_text=None,
+    )
+    evidence = same_vacancy_evidence(
+        a,
+        b,
+        teaser_min_similarity=0.90,
+        teaser_min_chars=40,
+        min_secondary_signals=2,
+    )
+    assert evidence is not None
+    confidence, match_type, reasons = evidence
+    assert confidence == 0.96
+    assert match_type == "cross_source_locality"
+    assert "same specific locality coffs harbour" in reasons
+
+
+def test_same_vacancy_does_not_treat_state_only_location_as_specific_locality():
+    a = base_row(
+        id=1,
+        source="seek",
+        location="NSW",
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        teaser_text=None,
+    )
+    b = base_row(
+        id=2,
+        source="linkedin",
+        location="New South Wales, Australia",
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        teaser_text=None,
+    )
+    evidence = same_vacancy_evidence(
+        a,
+        b,
+        teaser_min_similarity=0.90,
+        teaser_min_chars=40,
+        min_secondary_signals=2,
+    )
+    assert evidence is None
