@@ -99,7 +99,9 @@ SEEK uses **one JMM-owned persistent Playwright browser context** and reuses a s
 LinkedIn uses the proven Job Hunter transport: python-jobspy HTTP discovery, exact native-ID dedupe, then one direct public-HTML detail fetch per deduplicated new/unfetched vacancy. The obsolete browser LinkedIn implementation has been removed. One shared collection runner owns SEEK followed by LinkedIn; there is no second scheduler or browser process for LinkedIn.
 ## SEEK daily collection
 
-Normal ongoing SEEK collection uses the latest **1 day** only. Known SEEK source job IDs are recognised from JMM and do not go through full card ingestion or JD fetching again. Only identities without a successful permanent JD-fetch marker are eligible for JD acquisition.
+Normal ongoing SEEK collection uses the latest **1 day** only. Known SEEK source job IDs are batch-recognised before ingestion. If the current card carries no changed canonical market evidence, JMM only refreshes `last_seen_at`; it does not create another raw capture, rerun duplicate analysis or reopen the JD. If a known card has genuinely changed source-backed evidence such as salary, title, employer/location/work type or Quick Apply, that card is ingested once so the canonical market row stays current. Missing card evidence never clears a previously known value.
+
+Successful JD fetches remain permanently cached in `jd_fetch_registry`, so a repeated card does not cause the vacancy detail page to be fetched again.
 
 The one-off first full-evidence load is explicitly wider and does not change the normal default:
 
@@ -108,3 +110,5 @@ uv run python -m scripts.run_collection_cycle --trigger manual --days 3 --max-ru
 ```
 
 After that, normal scheduler/Admin/manual runs use the configured freshness setting; the default is 1 day.
+
+A successful manual run only counts as the scheduled run when it overlaps the configured scheduler window. A manual evening run before a midnight schedule does **not** suppress midnight, because doing so would leave a gap for jobs posted between the manual run and midnight.

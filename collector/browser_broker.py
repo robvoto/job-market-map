@@ -268,6 +268,7 @@ _SEEK_CARDS_JS = r"""
     const sub = text.match(/(?:^|\n)subClassification:\s*([^\n]+)/i)?.[1]?.trim() || '';
     const cls = text.match(/(?:^|\n)classification:\s*([^\n]+)/i)?.[1]?.trim() || '';
     const tags = ['New to you', 'Strong applicant', 'Be an early applicant'].filter(tag => text.includes(tag));
+    const quickApplyVisible = text.split('\n').some(x => /^Quick apply$/i.test(x.trim()));
     const recruiterMatch = text.match(/(?:^|\n)Recruited by\s*\n([^\n]+)/i);
     return {
       source_job_id: sourceJobId,
@@ -283,6 +284,8 @@ _SEEK_CARDS_JS = r"""
       classification_text: cls,
       subclassification_text: sub,
       card_tags: tags,
+      easy_apply: quickApplyVisible ? true : null,
+      apply_method: quickApplyVisible ? 'quick_apply' : '',
       recruiter: recruiterMatch?.[1]?.trim() || '',
       raw_card_text: text
     };

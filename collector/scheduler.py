@@ -43,6 +43,17 @@ class SchedulerService:
         end = start + timedelta(minutes=int(get_setting("scheduler.run_window_minutes")))
         return start, end
 
+    @staticmethod
+    def manual_run_schedule_date(
+        started_at: datetime, finished_at: datetime
+    ) -> str | None:
+        """Return the scheduled local date a successful manual run actually covers."""
+        for current in (started_at, finished_at):
+            start, end = SchedulerService.schedule_window(current)
+            if started_at <= end and finished_at >= start:
+                return start.date().isoformat()
+        return None
+
     def due_now(self, now: datetime | None = None) -> bool:
         current = now or datetime.now().astimezone()
         if not bool(get_setting("scheduler.enabled")):

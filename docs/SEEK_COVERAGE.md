@@ -68,6 +68,8 @@ This makes completeness fail closed.
 
 SEEK source identity uses SEEK job ID. The same job found through multiple classification/work-type/query paths remains one canonical `jobs` row. `seek_partition_jobs` records every partition that contributed it.
 
+Daily scans still have to read SEEK cards to discover which IDs exist, but known IDs use a cheap fast path. Unchanged known cards only refresh observation time. A known card is fully re-ingested only when currently visible canonical market evidence has changed; this preserves fresh market facts without creating thousands of duplicate captures every day. URL-host variation (`www.seek.com.au` versus `au.seek.com`) is not treated as a vacancy change because the SEEK job ID is the source identity.
+
 Cross-board duplicates (for example SEEK + LinkedIn) remain separate source rows connected by rich duplicate evidence links; they are not destructively merged.
 
 ## Running / resumability

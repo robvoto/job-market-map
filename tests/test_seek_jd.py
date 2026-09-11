@@ -179,8 +179,10 @@ def test_known_seek_card_is_not_reingested_on_daily_coverage(tmp_path, monkeypat
         CardObservation(
             source="seek",
             source_job_id="77777777",
-            canonical_url="https://au.seek.com/job/77777777",
+            canonical_url="https://www.seek.com.au/job/77777777",
             title="Existing role",
+            apply_method="quick_apply",
+            easy_apply=True,
             geography_code="NSW",
             captured_at="2026-09-09T10:00:00+00:00",
         )
@@ -255,6 +257,89 @@ def test_known_seek_card_is_not_reingested_on_daily_coverage(tmp_path, monkeypat
             (partition_id,),
         ).fetchone()
     assert membership[0] == existing.job_id
+
+
+def test_changed_known_seek_card_is_refreshed_once_on_daily_coverage(tmp_path, monkeypatch):
+    import sources.seek_market_map as market
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    db.init_db()
+    existing = ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="77777778",
+            canonical_url="https://au.seek.com/job/77777778",
+            title="Existing role",
+            employer="Example Pty Ltd",
+            salary_text="$100k",
+            geography_code="NSW",
+            captured_at="2026-09-09T10:00:00+00:00",
+        )
+    )
+    with db.connect() as conn:
+        partition_id = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,max_results_threshold,first_seen_at,updated_at
+            ) VALUES('NSW',NULL,'work_type','All',
+                'https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1&sortmode=ListedDate',
+                'PENDING',450,'x','x')"""
+        ).lastrowid
+        before_captures = conn.execute("SELECT COUNT(*) FROM card_captures").fetchone()[0]
+
+    monkeypatch.setattr(market, "navigate", lambda *_a, **_k: None)
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        market,
+        "get_setting",
+        lambda key: 0 if key == "collection.seek_page_load_seconds" else 10,
+    )
+    monkeypatch.setattr(
+        market,
+        "_wait_snapshot",
+        lambda *_a, **_k: {"text": "1 job in New South Wales"},
+    )
+    monkeypatch.setattr(
+        market,
+        "seek_cards",
+        lambda *_a, **_k: type("Response", (), {"result": [{}]})(),
+    )
+    monkeypatch.setattr(
+        market,
+        "parse_seek_dom_cards",
+        lambda *_a, **_k: [
+            CardObservation(
+                source="seek",
+                source_job_id="77777778",
+                canonical_url="https://au.seek.com/job/77777778",
+                title="Existing role",
+                employer="Example Pty Ltd",
+                salary_text="$120k",
+                apply_method="quick_apply",
+                easy_apply=True,
+                geography_code="NSW",
+                captured_at="2026-09-10T10:00:00+00:00",
+            )
+        ],
+    )
+
+    status, count = market._collect_leaf(
+        1,
+        partition_id=partition_id,
+        url="https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1&sortmode=ListedDate",
+        geography_code="NSW",
+        reported=1,
+        tolerance=0,
+    )
+    assert (status, count) == ("COMPLETE", 1)
+    with db.connect() as conn:
+        job = conn.execute(
+            "SELECT salary_text,apply_method,easy_apply FROM jobs WHERE id=?",
+            (existing.job_id,),
+        ).fetchone()
+        after_captures = conn.execute("SELECT COUNT(*) FROM card_captures").fetchone()[0]
+    assert tuple(job) == ("$120k", "quick_apply", 1)
+    assert after_captures == before_captures + 1
 
 
 def test_enrichment_honours_max_attempts(tmp_path, monkeypatch):

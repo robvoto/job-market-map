@@ -31,6 +31,8 @@ The top Admin panel controls the running collector without killing the Admin API
 
 Start the background Admin service with `./scripts/service.sh start`; it must remain running for the in-app overnight scheduler to fire. The status panel refreshes every 10 seconds.
 
+**Run collection now** uses the same configured freshness horizon as the scheduler. A successful manual run counts as the scheduled run only when it overlaps the configured scheduler window; an earlier run does not suppress a later slot if that would leave part of the market day uncovered.
+
 **Backup DB now** creates a transactionally consistent copy of `data/market.db` under `/home/robvoto/projects/job-market-map/backups/`, verifies it with `PRAGMA integrity_check`, and keeps the configured number (`backup.keep_count`, default 14). See `docs/SERVICE.md`.
 
 ## SEEK coverage display

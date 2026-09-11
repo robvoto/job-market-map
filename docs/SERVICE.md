@@ -71,6 +71,8 @@ The scheduler does not blindly restart collection every night:
 - if all enabled states are complete, the next run first snapshots coverage history and starts a **fresh coverage cycle**;
 - a max-runtime stop preserves partial progress for the next run.
 
+A successful manual run using the normal freshness horizon may satisfy the scheduled slot **only when the manual run overlaps that slot's configured run window**. This avoids duplicate collection inside the same operating window without creating a coverage gap. A manual run hours before the next slot does not cancel that future slot.
+
 A daily refresh therefore cannot inherit yesterday's partition memberships and falsely claim current completeness.
 
 The scheduler only starts when the API was launched in service mode (`start-api.sh` / `service.sh`). Direct test imports do not create background collection.

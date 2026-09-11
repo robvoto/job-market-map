@@ -1,4 +1,53 @@
 from contextlib import contextmanager
+from datetime import datetime
+from zoneinfo import ZoneInfo
+
+
+def test_successful_manual_default_run_marks_only_overlapping_schedule_slot(monkeypatch):
+    from scripts import run_collection_cycle as runner
+
+    updates = []
+    monkeypatch.setattr(
+        runner.SchedulerService,
+        "manual_run_schedule_date",
+        lambda _start, _finish: "2026-09-12",
+    )
+    monkeypatch.setattr(runner, "update_scheduler_state", lambda **kwargs: updates.append(kwargs))
+    tz = ZoneInfo("Australia/Sydney")
+
+    result = runner._satisfy_manual_schedule_slot(
+        trigger="manual",
+        final_status="COMPLETE",
+        days=1,
+        default_days=1,
+        started_at=datetime(2026, 9, 12, 0, 30, tzinfo=tz),
+        finished_at=datetime(2026, 9, 12, 1, 0, tzinfo=tz),
+    )
+    assert result == "2026-09-12"
+    assert updates == [
+        {
+            "last_attempt_local_date": "2026-09-12",
+            "last_status": "SATISFIED_MANUAL",
+            "last_message": (
+                "Successful manual collection satisfied the configured overnight slot "
+                "for 2026-09-12."
+            ),
+        }
+    ]
+
+    updates.clear()
+    assert (
+        runner._satisfy_manual_schedule_slot(
+            trigger="manual",
+            final_status="PARTIAL_JD",
+            days=1,
+            default_days=1,
+            started_at=datetime(2026, 9, 12, 0, 30, tzinfo=tz),
+            finished_at=datetime(2026, 9, 12, 1, 0, tzinfo=tz),
+        )
+        is None
+    )
+    assert updates == []
 
 
 def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypatch):

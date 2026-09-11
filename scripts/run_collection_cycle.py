@@ -4,6 +4,7 @@ import argparse
 import signal
 import time
 from dataclasses import asdict
+from datetime import datetime
 from threading import Event
 
 from collector.backup import create_backup
@@ -12,6 +13,7 @@ from collector.campaign import run_linkedin_campaign
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
 from collector.run_stats import build_run_stats, log_run_summary, population_stats
+from collector.scheduler import SchedulerService
 from collector.seek_cycle import (
     all_states_complete,
     enabled_state_codes,
@@ -28,6 +30,31 @@ from collector.service_state import (
     utc_now,
 )
 from collector.settings import get_setting
+
+
+def _satisfy_manual_schedule_slot(
+    *,
+    trigger: str,
+    final_status: str,
+    days: int,
+    default_days: int,
+    started_at: datetime,
+    finished_at: datetime,
+) -> str | None:
+    if trigger != "manual" or final_status != "COMPLETE" or days != default_days:
+        return None
+    schedule_date = SchedulerService.manual_run_schedule_date(started_at, finished_at)
+    if not schedule_date:
+        return None
+    update_scheduler_state(
+        last_attempt_local_date=schedule_date,
+        last_status="SATISFIED_MANUAL",
+        last_message=(
+            "Successful manual collection satisfied the configured "
+            f"overnight slot for {schedule_date}."
+        ),
+    )
+    return schedule_date
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -64,6 +91,7 @@ def main(argv: list[str] | None = None) -> int:
 
     stop_event = Event()
     run_started = time.monotonic()
+    run_started_local = datetime.now().astimezone()
     baseline_stats = None
     run_codes: list[str] = []
     run_partitions_processed = 0
@@ -87,11 +115,8 @@ def main(argv: list[str] | None = None) -> int:
                 log.error("no enabled SEEK geographies")
                 return 2
 
-            days = int(
-                args.days
-                if args.days is not None
-                else get_setting("collection.default_freshness_days")
-            )
+            default_days = int(get_setting("collection.default_freshness_days"))
+            days = int(args.days if args.days is not None else default_days)
             has_coverage_workspace = any(state_root(code) is not None for code in codes)
             mode = (
                 "fresh"
@@ -301,6 +326,14 @@ def main(argv: list[str] | None = None) -> int:
                 status=final_status,
                 message=message,
                 stats=run_stats,
+            )
+            _satisfy_manual_schedule_slot(
+                trigger=args.trigger,
+                final_status=final_status,
+                days=days,
+                default_days=default_days,
+                started_at=run_started_local,
+                finished_at=datetime.now().astimezone(),
             )
             if args.trigger == "scheduled":
                 update_scheduler_state(

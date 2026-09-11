@@ -273,6 +273,7 @@ def parse_seek_dom_cards(
         title = str(card.get("title") or "").strip()
         if not source_job_id or not JOB_ID_RE.search(url) or not title:
             raise SeekParseError(f"invalid SEEK DOM card at rank {rank}: {card!r}")
+        easy_apply = card.get("easy_apply")
         observations.append(
             CardObservation(
                 source="seek",
@@ -294,6 +295,8 @@ def parse_seek_dom_cards(
                     card.get("subclassification_text") or ""
                 ).strip()
                 or None,
+                apply_method=str(card.get("apply_method") or "").strip() or None,
+                easy_apply=easy_apply if isinstance(easy_apply, bool) else None,
                 card_tags=list(card.get("card_tags") or []),
                 raw_json={
                     "classification_text": str(
@@ -305,6 +308,7 @@ def parse_seek_dom_cards(
                     ).strip()
                     or None,
                     "card_tags": list(card.get("card_tags") or []),
+                    "apply_method": str(card.get("apply_method") or "").strip() or None,
                     "recruiter": str(card.get("recruiter") or "").strip() or None,
                 },
                 query_text=query_text,

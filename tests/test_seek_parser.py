@@ -3,7 +3,7 @@ from pathlib import Path
 
 import pytest
 
-from sources.seek import SeekParseError, parse_seek_snapshot
+from sources.seek import SeekParseError, parse_seek_dom_cards, parse_seek_snapshot
 
 
 def test_real_benchmark_snapshot_parses_all_seek_cards():
@@ -39,3 +39,22 @@ def test_seek_parser_fails_on_link_block_count_mismatch():
     }
     with pytest.raises(SeekParseError, match="no parseable cards"):
         parse_seek_snapshot(snapshot, query_text="x", query_location="Sydney")
+
+
+def test_seek_dom_card_preserves_quick_apply_flag():
+    cards = parse_seek_dom_cards(
+        [
+            {
+                "source_job_id": "94581234",
+                "canonical_url": "https://au.seek.com/job/94581234",
+                "title": "Business Analyst",
+                "employer": "Example",
+                "easy_apply": True,
+                "apply_method": "quick_apply",
+            }
+        ],
+        query_text=None,
+        query_location=None,
+    )
+    assert cards[0].easy_apply is True
+    assert cards[0].apply_method == "quick_apply"

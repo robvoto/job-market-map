@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import time
+import unicodedata
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -45,6 +46,39 @@ CHALLENGE_TEXT = (
 
 class SeekHumanCheckRequired(BrowserBrokerError):
     """SEEK is explicitly asking for human verification; leave work retryable."""
+
+
+def _compare_text(value: object) -> str:
+    if value is None:
+        return ""
+    return " ".join(unicodedata.normalize("NFKC", str(value)).casefold().split())
+
+
+def _known_seek_card_changed(existing: dict, card) -> bool:
+    """Return True only when a known card carries changed canonical market evidence."""
+    for field in (
+        "title",
+        "employer",
+        "location",
+        "salary_text",
+        "employment_type",
+        "workplace_type",
+        "teaser_text",
+        "classification_text",
+        "subclassification_text",
+        "apply_method",
+    ):
+        incoming = getattr(card, field, None)
+        if incoming is None or _compare_text(incoming) == "":
+            continue
+        if _compare_text(existing.get(field)) != _compare_text(incoming):
+            return True
+    easy_apply = getattr(card, "easy_apply", None)
+    if easy_apply is not None:
+        stored_easy_apply = existing.get("easy_apply")
+        if stored_easy_apply is None or bool(stored_easy_apply) != bool(easy_apply):
+            return True
+    return False
 
 
 def _navigate_seek(page_id: int, url: str) -> None:
@@ -356,14 +390,14 @@ def _collect_leaf(
         source_ids = [
             str(card.source_job_id) for card in new_cards if card.source_job_id
         ]
-        existing_by_source_id: dict[str, int] = {}
+        existing_by_source_id: dict[str, dict] = {}
         if source_ids:
             placeholders = ",".join("?" for _ in source_ids)
             with connect() as conn:
                 existing_by_source_id = {
-                    str(row["source_job_id"]): int(row["id"])
+                    str(row["source_job_id"]): dict(row)
                     for row in conn.execute(
-                        f"SELECT id,source_job_id FROM jobs WHERE source='seek' AND source_job_id IN ({placeholders})",
+                        f"SELECT * FROM jobs WHERE source='seek' AND source_job_id IN ({placeholders})",
                         source_ids,
                     )
                 }
@@ -371,12 +405,13 @@ def _collect_leaf(
         for card in new_cards:
             source_id = str(card.source_job_id)
             seen.add(source_id)
-            job_id = existing_by_source_id.get(source_id)
-            if job_id is None:
+            existing = existing_by_source_id.get(source_id)
+            if existing is None or _known_seek_card_changed(existing, card):
                 job_id = ingest_card(card).job_id
             else:
                 # Daily scans only need to prove this known identity is still present.
                 # Avoid creating another raw card capture or rerunning duplicate work.
+                job_id = int(existing["id"])
                 with connect() as conn:
                     now = _now()
                     conn.execute(
