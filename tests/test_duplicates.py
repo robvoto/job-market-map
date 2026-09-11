@@ -2,6 +2,7 @@ from collector.duplicates import (
     core_fingerprint_from_values,
     duplicate_evidence,
     exact_card_fingerprint_from_mapping,
+    same_vacancy_evidence,
 )
 
 
@@ -76,3 +77,116 @@ def test_rich_evidence_can_link_cross_board_location_wording_without_merging():
     confidence, match_type, _ = evidence
     assert confidence >= 0.92
     assert match_type == "near_rich_card"
+
+
+def test_same_vacancy_accepts_strong_cross_board_teaser_without_secondary_fields():
+    a = base_row(
+        id=1,
+        location=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        teaser_text=(
+            "Lead enterprise customer onboarding, API integration, testing and "
+            "launch activities for strategic clients."
+        ),
+    )
+    b = base_row(
+        id=2,
+        location=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        teaser_text=(
+            "Lead enterprise customer onboarding, API integration, testing and "
+            "launch activities for strategic clients."
+        ),
+    )
+
+    evidence = same_vacancy_evidence(
+        a,
+        b,
+        teaser_min_similarity=0.90,
+        teaser_min_chars=40,
+        min_secondary_signals=2,
+    )
+
+    assert evidence is not None
+    confidence, match_type, reasons = evidence
+    assert confidence >= 0.90
+    assert match_type == "strong_teaser"
+    assert "substantial teaser similarity 1.00" in reasons
+
+
+def test_same_vacancy_requires_two_secondary_signals():
+    a = base_row(
+        id=1,
+        location=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type="Remote",
+        classification_text=None,
+        subclassification_text=None,
+        teaser_text=None,
+    )
+    b = base_row(
+        id=2,
+        teaser_text=None,
+        location="Melbourne VIC",
+        salary_text=None,
+        employment_type=None,
+        workplace_type="Remote",
+        classification_text=None,
+        subclassification_text=None,
+    )
+
+    evidence = same_vacancy_evidence(
+        a,
+        b,
+        teaser_min_similarity=0.90,
+        teaser_min_chars=40,
+        min_secondary_signals=2,
+    )
+
+    assert evidence is None
+
+
+def test_same_vacancy_accepts_two_agreeing_secondary_signals():
+    a = base_row(
+        id=1,
+        teaser_text=None,
+        location=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type="Remote",
+        classification_text="Information Technology",
+        subclassification_text=None,
+    )
+    b = base_row(
+        id=2,
+        teaser_text=None,
+        location="Melbourne VIC",
+        salary_text=None,
+        employment_type=None,
+        workplace_type="Remote",
+        classification_text="Information Technology",
+        subclassification_text=None,
+    )
+
+    evidence = same_vacancy_evidence(
+        a,
+        b,
+        teaser_min_similarity=0.90,
+        teaser_min_chars=40,
+        min_secondary_signals=2,
+    )
+
+    assert evidence is not None
+    confidence, match_type, reasons = evidence
+    assert confidence < 0.92
+    assert match_type == "secondary_signals"
+    assert reasons[-2:] == ["same workplace type", "same classification"]

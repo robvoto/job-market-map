@@ -53,7 +53,7 @@ from collector.settings import (
 )
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 7
+SCHEMA_VERSION = 8
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -215,7 +215,9 @@ def job_feed(
     include_raw: bool = True,
 ):
     resolved_limit = _limit(limit)
-    clauses = ["j.id > ?"]
+    # Confirmed same-vacancy source postings remain lookup-addressable, but only
+    # their oldest deterministic primary enters downstream processing feeds.
+    clauses = ["j.id > ?", "j.primary_job_id IS NULL"]
     params: list[object] = [after_id]
     if source:
         clauses.append("j.source=?")
@@ -298,7 +300,7 @@ def new_jobs(days: int = Query(1, ge=0, le=30), limit: int | None = Query(None, 
             SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at
               FROM jobs j
               JOIN job_observation_state s ON s.job_id=j.id
-             WHERE s.first_seen_at>=?
+             WHERE s.first_seen_at>=? AND j.primary_job_id IS NULL
              ORDER BY s.first_seen_at DESC LIMIT ?
             """,
             (cutoff, resolved_limit),
@@ -316,7 +318,7 @@ def search_jobs(
     limit: int | None = Query(None, ge=1),
 ):
     resolved_limit = _limit(limit)
-    clauses = []
+    clauses = ["j.primary_job_id IS NULL"]
     params: list[object] = []
     if q:
         clauses.append("(j.title LIKE ? OR j.employer LIKE ? OR j.raw_card_text LIKE ?)")
@@ -409,8 +411,23 @@ def _job_detail_payload(job_id: int) -> dict:
                 (job_id, job_id, job_id),
             )
         ]
+        same_vacancy = [
+            dict(r)
+            for r in conn.execute(
+                """
+                SELECT l.job_id, l.primary_job_id, l.confidence, l.match_type,
+                       l.matching_signals_json, l.detected_at
+                  FROM same_vacancy_links l
+                 WHERE l.job_id=? OR l.primary_job_id=?
+                 ORDER BY l.primary_job_id, l.job_id
+                """,
+                (job_id, job_id),
+            )
+        ]
     for dup in duplicates:
         dup["reasons"] = json.loads(dup.pop("reasons_json"))
+    for link in same_vacancy:
+        link["matching_signals"] = json.loads(link.pop("matching_signals_json"))
     return {
         "api_version": API_VERSION,
         "schema_version": SCHEMA_VERSION,
@@ -418,6 +435,7 @@ def _job_detail_payload(job_id: int) -> dict:
         "captures": captures,
         "query_hits": query_hits,
         "duplicates": duplicates,
+        "same_vacancy": same_vacancy,
     }
 
 

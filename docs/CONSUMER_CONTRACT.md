@@ -63,7 +63,7 @@ GET /v3/jobs/lookup?identity_key=<key>
 GET /v3/jobs/lookup?source=<source>&source_job_id=<id>
 ```
 
-Use this to resolve a known source vacancy (or a previously stored `identity_key`) to its JMM record without fuzzy searching, direct SQLite access, or reproducing JMM's internal identity-key construction. Exactly one lookup form is required; supplying both, or only half of the `source`/`source_job_id` pair, fails with 400. An unresolved identity returns 404 rather than falling back to `/v3/jobs/search`. The response is the same job-detail payload as `GET /v3/jobs/{id}`, including current duplicate-link evidence — duplicate-linked source jobs each remain independently resolvable by their own identity.
+Use this to resolve a known source vacancy (or a previously stored `identity_key`) to its JMM record without fuzzy searching, direct SQLite access, or reproducing JMM's internal identity-key construction. Exactly one lookup form is required; supplying both, or only half of the `source`/`source_job_id` pair, fails with 400. An unresolved identity returns 404 rather than falling back to `/v3/jobs/search`. The response is the same job-detail payload as `GET /v3/jobs/{id}`, including current duplicate-link evidence and any auditable same-vacancy primary link — source postings each remain independently resolvable by their own identity.
 
 ## Personal-history integration
 
@@ -79,7 +79,7 @@ Until JH-305 is operational, consumers must continue using their existing author
 
 ## Duplicate semantics
 
-`duplicate_link_count` indicates strong possible-duplicate evidence. Source rows remain separate. Consumers may collapse presentation, but should retain source identities.
+`duplicate_link_count` indicates strong possible-duplicate evidence. Confirmed same-vacancy links additionally assign the newer source row to the oldest deterministic primary. Source rows and identities remain separately addressable through exact lookup, while `/v3/feed/jobs`, `/v3/jobs/new`, `/v3/jobs/search`, and named consumer feeds return only processing primaries. The detail payload exposes `same_vacancy` audit records containing the primary, confidence, matching signals and detection time.
 
 ## Coverage semantics
 

@@ -26,6 +26,10 @@ Neutral discovery provenance: which source/search/geography found a vacancy and 
 
 Non-destructive possible-duplicate evidence between market rows. Rich card evidence supports confidence; rows are not automatically destroyed/merged.
 
+## `same_vacancy_links`
+
+Auditable, non-destructive cross-source vacancy assignments. Each source posting keeps its own ID and URL, while `primary_job_id` points to the oldest matching JMM row used for JD fetching and downstream processing. `confidence`, `matching_signals_json`, and `detected_at` record why the assignment was made. The explicit rules require normalized title and employer plus either an exact rich-card fingerprint, substantial teaser/intro similarity at the configured minimum, or the configured minimum number of agreeing secondary signals (location, workplace type, employment type, salary, or classification). Uncertain matches remain only in `duplicate_links`.
+
 ## `job_tombstones`
 
 Small neutral identity/history records retained after stale detailed rows are removed. This prevents an old vacancy being rediscovered as falsely new.

@@ -21,6 +21,7 @@ def test_schema_is_neutral_and_keeps_consumer_checkpoints():
         "job_query_hits",
         "consumer_checkpoints",
         "jd_fetch_registry",
+        "same_vacancy_links",
     } <= tables
     assert "user_job_activity_events" not in tables
     assert "user_job_activity_current" not in tables
@@ -38,6 +39,7 @@ def test_schema_is_neutral_and_keeps_consumer_checkpoints():
     assert forbidden.isdisjoint(tomb_columns)
     assert "identity_key" in job_columns
     assert {"full_description", "jd_fetched_at", "jd_source"} <= job_columns
+    assert "primary_job_id" in job_columns
     assert "jd_snapshots" not in tables
     assert "job_description_snapshots" not in tables
 

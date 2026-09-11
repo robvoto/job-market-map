@@ -451,9 +451,12 @@ def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
                             p.url AS partition_url,
                             CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
-              JOIN seek_partition_jobs spj ON spj.job_id=j.id
+              JOIN seek_partition_jobs spj
+                ON spj.job_id=j.id OR spj.job_id=j.primary_job_id
               JOIN seek_partitions p ON p.id=spj.partition_id
-              LEFT JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
+              LEFT JOIN jobs primary_job
+                ON primary_job.id=COALESCE(j.primary_job_id,j.id)
+              LEFT JOIN jd_fetch_registry r ON r.identity_key=primary_job.identity_key
              WHERE j.source='seek' AND COALESCE(j.source_status,'') NOT IN ('no_longer_advertised','not_found') AND p.geography_code IN ({placeholders})
              ORDER BY j.id
             """,
@@ -474,7 +477,9 @@ def all_unfetched_seek_jobs() -> list[dict]:
             SELECT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,j.source_status,
                    CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
-              LEFT JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
+              LEFT JOIN jobs primary_job
+                ON primary_job.id=COALESCE(j.primary_job_id,j.id)
+              LEFT JOIN jd_fetch_registry r ON r.identity_key=primary_job.identity_key
              WHERE j.source='seek' AND r.identity_key IS NULL AND COALESCE(j.source_status,'') NOT IN ('no_longer_advertised','not_found')
              ORDER BY j.id
             """

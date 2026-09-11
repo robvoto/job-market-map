@@ -72,7 +72,7 @@ SEEK source identity uses SEEK job ID. The same job found through multiple class
 
 Daily scans still have to read SEEK cards to discover which IDs exist, but known IDs use a cheap fast path. Unchanged known cards only refresh observation time. A known card is fully re-ingested only when currently visible canonical market evidence has changed; this preserves fresh market facts without creating thousands of duplicate captures every day. URL-host variation (`www.seek.com.au` versus `au.seek.com`) is not treated as a vacancy change because the SEEK job ID is the source identity.
 
-Cross-board duplicates (for example SEEK + LinkedIn) remain separate source rows connected by rich duplicate evidence links; they are not destructively merged.
+Cross-board postings (for example SEEK + LinkedIn) remain separate source rows and identities. Strong same-vacancy evidence assigns the newer row to the oldest primary for JD and downstream processing; uncertain matches remain separate possible duplicates. Partition membership remains keyed to the contributing SEEK source row, not a non-SEEK processing primary, so a SEEK alias can still be selected to supply the first JD when its primary has no JD. JD candidate lookup also tolerates legacy memberships that point at a primary.
 
 ## Running / resumability
 
