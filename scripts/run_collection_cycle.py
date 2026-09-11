@@ -7,7 +7,7 @@ from dataclasses import asdict
 from threading import Event
 
 from collector.backup import create_backup
-from collector.browser_broker import close_browser, open_tab
+from collector.browser_broker import close_browser, close_tab, open_tab
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
 from collector.run_stats import log_run_summary, population_stats
@@ -65,6 +65,8 @@ def main(argv: list[str] | None = None) -> int:
     baseline_stats = None
     run_codes: list[str] = []
     run_partitions_processed = 0
+    list_page_id: int | None = None
+    detail_page_id: int | None = None
     jd_totals = {"attempted": 0, "stored": 0, "failed": 0, "unavailable": 0}
 
     def request_stop(*_args) -> None:
@@ -292,6 +294,15 @@ def main(argv: list[str] | None = None) -> int:
                 )
         return 1
     finally:
+        for page_id in (detail_page_id, list_page_id):
+            if page_id is None:
+                continue
+            try:
+                close_tab(page_id)
+            except Exception as exc:  # noqa: BLE001 - cleanup must not mask run result.
+                log.warning(
+                    "failed to close JMM-owned tab page_id=%s error=%s", page_id, exc
+                )
         close_browser()
 
 

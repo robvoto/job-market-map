@@ -1,3 +1,5 @@
+import pytest
+
 from collector.browser_broker import BrowserBrokerError
 
 
@@ -172,7 +174,9 @@ def test_browser_command_recovers_once_then_retries_same_command(monkeypatch):
 
     monkeypatch.setattr(broker, "start_browser", lambda: None)
     monkeypatch.setattr(broker, "_execute_browser_command", fake_execute)
-    monkeypatch.setattr(broker, "_recover_browser_pages", lambda: recoveries.append(True))
+    monkeypatch.setattr(
+        broker, "_recover_browser_pages", lambda: recoveries.append(True)
+    )
 
     result = broker.browser_command(
         "snapshot", {"verbose": True}, page_id=77, timeout_seconds=9
@@ -200,7 +204,9 @@ def test_browser_command_does_not_loop_recovery_after_retry(monkeypatch):
 
     monkeypatch.setattr(broker, "start_browser", lambda: None)
     monkeypatch.setattr(broker, "_execute_browser_command", always_lost)
-    monkeypatch.setattr(broker, "_recover_browser_pages", lambda: recoveries.append(True))
+    monkeypatch.setattr(
+        broker, "_recover_browser_pages", lambda: recoveries.append(True)
+    )
 
     with pytest.raises(broker.BrowserBrokerError, match="browser has been closed"):
         broker.browser_command("snapshot", page_id=77)
@@ -227,10 +233,43 @@ def test_browser_command_recovers_from_playwright_browser_loss(monkeypatch):
     monkeypatch.setattr(broker, "PlaywrightError", FakePlaywrightError)
     monkeypatch.setattr(broker, "start_browser", lambda: None)
     monkeypatch.setattr(broker, "_execute_browser_command", fake_execute)
-    monkeypatch.setattr(broker, "_recover_browser_pages", lambda: recoveries.append(True))
+    monkeypatch.setattr(
+        broker, "_recover_browser_pages", lambda: recoveries.append(True)
+    )
 
     result = broker.browser_command("snapshot", page_id=88)
 
     assert result.result == {"ok": True}
     assert recoveries == [True]
     assert calls == ["snapshot", "snapshot"]
+
+
+def test_close_tab_only_accepts_registered_page(monkeypatch):
+    from collector import browser_broker as broker
+
+    class FakePage:
+        def __init__(self):
+            self.url = "https://example.com"
+            self.closed = False
+
+        def is_closed(self):
+            return self.closed
+
+        def close(self):
+            self.closed = True
+
+    page = FakePage()
+    broker._pages.clear()
+    broker._page_targets.clear()
+    broker._pages[77] = page
+    broker._page_targets[77] = page.url
+    monkeypatch.setattr(broker, "start_browser", lambda: None)
+
+    result = broker.close_tab(77).result
+    assert result["ok"] is True
+    assert page.closed is True
+    assert 77 not in broker._pages
+    assert 77 not in broker._page_targets
+
+    with pytest.raises(broker.BrowserBrokerError, match="stale JMM browser page id"):
+        broker.close_tab(999)

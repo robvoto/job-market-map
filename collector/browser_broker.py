@@ -467,6 +467,14 @@ def _execute_browser_command(
         if bool(payload.get("bringToFront", True)):
             page.bring_to_front()
         return {"ok": True, "pageId": pid, "url": page.url, "title": page.title()}
+    if command == "close_tab":
+        pid = int(page_id or payload.get("pageId") or 0)
+        page = _page(pid)
+        url = page.url
+        page.close()
+        _pages.pop(pid, None)
+        _page_targets.pop(pid, None)
+        return {"ok": True, "pageId": pid, "url": url}
     if command == "click":
         page = _page(int(page_id or 0))
         uid = str(payload.get("uid") or "").strip()
@@ -570,6 +578,16 @@ def list_pages() -> BrokerResponse:
 
 def open_tab(url: str, *, active: bool = False) -> BrokerResponse:
     return browser_command("open_tab", {"url": url, "active": active})
+
+
+def close_tab(page_id: int) -> BrokerResponse:
+    """Close only a tab registered by this JMM broker client."""
+    return browser_command(
+        "close_tab",
+        {"pageId": page_id},
+        page_id=page_id,
+        _allow_recovery=False,
+    )
 
 
 def navigate(page_id: int, url: str) -> BrokerResponse:

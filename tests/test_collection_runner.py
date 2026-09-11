@@ -33,6 +33,7 @@ def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypa
     monkeypatch.setattr(runner, "snapshot_and_reset_coverage", lambda *_a, **_k: None)
     monkeypatch.setattr(runner, "update_scheduler_state", lambda **_kwargs: None)
     monkeypatch.setattr(runner, "close_browser", lambda: None)
+    monkeypatch.setattr(runner, "close_tab", lambda *_a, **_k: None)
     monkeypatch.setattr(
         runner,
         "get_setting",
