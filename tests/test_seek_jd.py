@@ -396,7 +396,9 @@ def test_no_longer_advertised_is_terminal_not_failed(tmp_path, monkeypatch):
         seek_jd,
         "fetch_seek_detail",
         lambda *_a, **_k: (_ for _ in ()).throw(
-            seek_jd.SeekJDUnavailableError("no longer advertised")
+            seek_jd.SeekJDUnavailableError(
+                "no longer advertised", source_status="no_longer_advertised"
+            )
         ),
     )
 
@@ -486,3 +488,55 @@ def test_navigation_timeout_retries_once_then_continues(tmp_path, monkeypatch):
     assert events.count("attempted") == 2
     assert events.count("failed") == 1
     assert events.count("stored") == 1
+
+
+def test_not_found_is_terminal_and_excluded(tmp_path, monkeypatch):
+    seek_jd = _wire(tmp_path, monkeypatch)
+    obs = CardObservation(
+        source="seek",
+        source_job_id="94520983",
+        canonical_url="https://au.seek.com/job/94520983",
+        title="Fraud Manager",
+        geography_code="ACT",
+        captured_at="2026-09-11T00:00:00+00:00",
+    )
+    job_id = ingest_card(obs).job_id
+    with db.connect() as conn:
+        partition_id = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,reported_results,collected_unique_jobs,
+                max_results_threshold,first_seen_at,updated_at,completed_at
+            ) VALUES('ACT',NULL,'state','ACT',
+                'https://au.seek.com/jobs/in-Australian-Capital-Territory-ACT?daterange=3',
+                'COMPLETE',1,1,450,'x','x','x')"""
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+            (partition_id, job_id, "x"),
+        )
+
+    monkeypatch.setattr(
+        seek_jd,
+        "fetch_seek_detail",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            seek_jd.SeekJDUnavailableError("404", source_status="not_found")
+        ),
+    )
+    result = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+    )
+    assert result.failed == 0
+    assert result.unavailable == 1
+    assert result.remaining == 0
+    with db.connect() as conn:
+        assert (
+            conn.execute(
+                "SELECT source_status FROM jobs WHERE id=?", (job_id,)
+            ).fetchone()[0]
+            == "not_found"
+        )
+    assert seek_jd.coverage_seek_jobs(codes=["ACT"], days=3) == []

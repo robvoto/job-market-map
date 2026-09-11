@@ -43,7 +43,11 @@ class SeekJDFetchError(RuntimeError):
 
 
 class SeekJDUnavailableError(SeekJDFetchError):
-    """SEEK explicitly says the source job is no longer advertised."""
+    """SEEK explicitly says the source job cannot provide a JD."""
+
+    def __init__(self, message: str, *, source_status: str) -> None:
+        super().__init__(message)
+        self.source_status = source_status
 
 
 @dataclass(frozen=True)
@@ -314,8 +318,10 @@ def fetch_seek_detail(
 
             actual_id = str(raw.get("source_job_id") or "").strip()
             if bool(raw.get("terminal_unavailable")):
+                terminal_status = str(raw.get("source_status") or "not_found").strip()
                 raise SeekJDUnavailableError(
-                    f"SEEK job {expected_id or actual_id or page_url} is no longer advertised"
+                    f"SEEK job {expected_id or actual_id or page_url} is unavailable ({terminal_status})",
+                    source_status=terminal_status,
                 )
             if expected_id and actual_id != expected_id:
                 raise SeekJDFetchError(
@@ -384,7 +390,7 @@ def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
               JOIN seek_partition_jobs spj ON spj.job_id=j.id
               JOIN seek_partitions p ON p.id=spj.partition_id
               LEFT JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
-             WHERE j.source='seek' AND COALESCE(j.source_status,'') <> 'no_longer_advertised' AND p.geography_code IN ({placeholders})
+             WHERE j.source='seek' AND COALESCE(j.source_status,'') NOT IN ('no_longer_advertised','not_found') AND p.geography_code IN ({placeholders})
              ORDER BY j.id
             """,
             codes,
@@ -405,7 +411,7 @@ def all_unfetched_seek_jobs() -> list[dict]:
                    CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
               LEFT JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
-             WHERE j.source='seek' AND r.identity_key IS NULL AND COALESCE(j.source_status,'') <> 'no_longer_advertised'
+             WHERE j.source='seek' AND r.identity_key IS NULL AND COALESCE(j.source_status,'') NOT IN ('no_longer_advertised','not_found')
              ORDER BY j.id
             """
         ).fetchall()
@@ -522,16 +528,17 @@ def enrich_seek_coverage_jds(
             )
         except BrowserBrokerError:
             raise
-        except SeekJDUnavailableError:
-            update_job_source_facts(job_id, source_status="no_longer_advertised")
+        except SeekJDUnavailableError as exc:
+            update_job_source_facts(job_id, source_status=exc.source_status)
             unavailable += 1
             unavailable_ids.add(job_id)
             if on_progress is not None:
                 on_progress("unavailable")
             collection_logger().info(
-                "SEEK JD unavailable job_id=%s source_job_id=%s status=no_longer_advertised",
+                "SEEK JD unavailable job_id=%s source_job_id=%s status=%s",
                 job_id,
                 str(row["source_job_id"] or "").strip(),
+                exc.source_status,
             )
         except SeekJDFetchError as exc:
             failed += 1
