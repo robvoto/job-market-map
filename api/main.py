@@ -686,6 +686,30 @@ def admin_resume_scheduler():
     return {"ok": True, "setting": setting, "scheduler": SCHEDULER.status()}
 
 
+@app.post(f"/{API_VERSION}/admin/scheduler/seek/pause")
+def admin_pause_seek_scheduler():
+    setting = set_setting("scheduler.seek_enabled", False, actor="rob-admin")
+    return {"ok": True, "setting": setting, "scheduler": SCHEDULER.status()}
+
+
+@app.post(f"/{API_VERSION}/admin/scheduler/seek/resume")
+def admin_resume_seek_scheduler():
+    setting = set_setting("scheduler.seek_enabled", True, actor="rob-admin")
+    return {"ok": True, "setting": setting, "scheduler": SCHEDULER.status()}
+
+
+@app.post(f"/{API_VERSION}/admin/scheduler/linkedin/pause")
+def admin_pause_linkedin_scheduler():
+    setting = set_setting("scheduler.linkedin_enabled", False, actor="rob-admin")
+    return {"ok": True, "setting": setting, "scheduler": SCHEDULER.status()}
+
+
+@app.post(f"/{API_VERSION}/admin/scheduler/linkedin/resume")
+def admin_resume_linkedin_scheduler():
+    setting = set_setting("scheduler.linkedin_enabled", True, actor="rob-admin")
+    return {"ok": True, "setting": setting, "scheduler": SCHEDULER.status()}
+
+
 @app.get(f"/{API_VERSION}/admin/backups")
 def admin_backups(limit: int = Query(20, ge=1, le=120)):
     return {"backups": list_backups(limit=limit)}

@@ -59,7 +59,9 @@ class SchedulerService:
 
     def due_now(self, now: datetime | None = None) -> bool:
         current = now or datetime.now().astimezone()
-        if not bool(get_setting("scheduler.enabled")):
+        if not bool(get_setting("scheduler.enabled")) or not bool(
+            get_setting("scheduler.seek_enabled")
+        ):
             return False
         start, end = self.schedule_window(current)
         if not (start <= current <= end):
@@ -85,8 +87,10 @@ class SchedulerService:
         current = now or datetime.now().astimezone()
         slot = cls.linkedin_slot(current)
         target_cycle = cls.linkedin_cycle_key(current)
-        if not bool(get_setting("scheduler.enabled")) or not bool(
-            get_setting("collection.linkedin_enabled")
+        if (
+            not bool(get_setting("scheduler.enabled"))
+            or not bool(get_setting("scheduler.linkedin_enabled"))
+            or not bool(get_setting("collection.linkedin_enabled"))
         ):
             return False, target_cycle, slot
 
@@ -120,6 +124,8 @@ class SchedulerService:
         return {
             "service_active": self.active,
             "enabled": bool(get_setting("scheduler.enabled")),
+            "seek_enabled": bool(get_setting("scheduler.seek_enabled")),
+            "linkedin_enabled": bool(get_setting("scheduler.linkedin_enabled")),
             "daily_time_local": f"{int(get_setting('scheduler.daily_hour')):02d}:{int(get_setting('scheduler.daily_minute')):02d}",
             "next_run_at": next_run.isoformat(timespec="seconds"),
             "linkedin_window_hours": int(get_setting("collection.linkedin_window_hours")),

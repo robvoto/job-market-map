@@ -40,7 +40,9 @@ The Admin page provides:
 - **Run SEEK now** — starts the same safe SEEK whole-state cycle used by the daily scheduler;
 - **Run LinkedIn now** — starts the current rolling LinkedIn geography slot without SEEK;
 - **Stop current collection** — requests a graceful stop after the current partition unit;
-- **Pause scheduler** / **Resume scheduler** — controls both source schedules;
+- **Pause ALL schedules** / **Resume ALL schedules** — emergency master switch for automatic collection;
+- **Pause SEEK schedule** / **Resume SEEK schedule** — controls only the daily SEEK run;
+- **Pause LinkedIn schedule** / **Resume LinkedIn schedule** — controls only rolling LinkedIn refreshes;
 - overnight local time control (default **02:00**);
 - current collector PID/state;
 - persistent JMM browser running/unavailable state (reachability only; not proof of SEEK sign-in);
@@ -64,7 +66,7 @@ Do not remove these locks in favour of a UI-only `running=true` flag.
 
 ## Scheduling semantics
 
-SEEK uses the configured daily local time (default **02:00**). LinkedIn defaults to a **5-hour rolling window every 4 hours**. The LinkedIn window must remain larger than its cadence so adjacent runs overlap. Both schedules share `data/collection.lock`, so they never mutate JMM concurrently.
+SEEK uses the configured daily local time (default **02:00**). LinkedIn defaults to a **5-hour rolling window every 4 hours**. The LinkedIn window must remain larger than its cadence so adjacent runs overlap. `scheduler.enabled` is only the emergency master switch; `scheduler.seek_enabled` and `scheduler.linkedin_enabled` control the two automatic source rhythms independently. Both schedules share `data/collection.lock`, so they never mutate JMM concurrently.
 
 When LinkedIn and SEEK are both due, LinkedIn is started first. The daily SEEK slot remains due and starts after LinkedIn releases the singleton lock.
 

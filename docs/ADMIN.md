@@ -16,7 +16,8 @@ The page exposes runtime settings, service health, collection controls, coverage
 The top Admin panel controls the running collector without killing the Admin API itself:
 - Run collection now;
 - graceful Stop current collection;
-- Pause / Resume overnight schedule;
+- Pause / Resume **all** automatic schedules with the emergency master switch;
+- independently Pause / Resume the SEEK schedule and LinkedIn schedule;
 - set overnight time (default 02:00 local);
 - Backup DB now;
 - collector/JMM-browser/scheduler status dots;

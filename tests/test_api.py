@@ -443,6 +443,33 @@ def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
         }
 
 
+def test_admin_source_scheduler_controls_are_independent(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        from api import main as api_main
+        from collector.settings import get_setting
+
+        monkeypatch.setattr(api_main.SCHEDULER, "status", dict)
+        assert get_setting("scheduler.enabled") is True
+        assert get_setting("scheduler.seek_enabled") is True
+        assert get_setting("scheduler.linkedin_enabled") is True
+
+        assert client.post("/v3/admin/scheduler/seek/pause").status_code == 200
+        assert get_setting("scheduler.seek_enabled") is False
+        assert get_setting("scheduler.linkedin_enabled") is True
+        assert get_setting("scheduler.enabled") is True
+
+        assert client.post("/v3/admin/scheduler/linkedin/pause").status_code == 200
+        assert get_setting("scheduler.seek_enabled") is False
+        assert get_setting("scheduler.linkedin_enabled") is False
+
+        assert client.post("/v3/admin/scheduler/seek/resume").status_code == 200
+        assert get_setting("scheduler.seek_enabled") is True
+        assert get_setting("scheduler.linkedin_enabled") is False
+
+        assert client.post("/v3/admin/scheduler/linkedin/resume").status_code == 200
+        assert get_setting("scheduler.linkedin_enabled") is True
+
+
 def test_admin_log_returns_durable_collection_log_tail(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         from api import main as api_main

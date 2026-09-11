@@ -239,7 +239,21 @@
       "category": "Scheduler",
       "type": "boolean",
       "default": true,
-      "help": "Run the neutral overnight collection scheduler while the Job Market Map API service is running. Pause this to stop automatic overnight starts; Run Now remains available."
+      "help": "Emergency master switch for automatic collection. When false, neither SEEK nor LinkedIn starts automatically; source-specific scheduler switches remain unchanged and manual Run Now actions remain available."
+    },
+    {
+      "key": "scheduler.seek_enabled",
+      "category": "Scheduler",
+      "type": "boolean",
+      "default": true,
+      "help": "Enable the daily automatic SEEK whole-state run independently of LinkedIn. Turning this off does not pause LinkedIn or manual SEEK runs."
+    },
+    {
+      "key": "scheduler.linkedin_enabled",
+      "category": "Scheduler",
+      "type": "boolean",
+      "default": true,
+      "help": "Enable automatic LinkedIn rolling-window refreshes independently of SEEK. Turning this off does not pause SEEK or manual LinkedIn runs."
     },
     {
       "key": "scheduler.linkedin_interval_hours",

@@ -7,6 +7,7 @@ def test_scheduler_due_only_inside_window_and_once_per_local_day(monkeypatch):
 
     settings = {
         "scheduler.enabled": True,
+        "scheduler.seek_enabled": True,
         "scheduler.daily_hour": 2,
         "scheduler.daily_minute": 0,
         "scheduler.run_window_minutes": 240,
@@ -21,6 +22,10 @@ def test_scheduler_due_only_inside_window_and_once_per_local_day(monkeypatch):
     tz = ZoneInfo("Australia/Sydney")
     assert service.due_now(datetime(2026, 9, 10, 3, 0, tzinfo=tz)) is True
     assert service.due_now(datetime(2026, 9, 10, 12, 0, tzinfo=tz)) is False
+
+    settings["scheduler.seek_enabled"] = False
+    assert service.due_now(datetime(2026, 9, 10, 3, 0, tzinfo=tz)) is False
+    settings["scheduler.seek_enabled"] = True
 
     monkeypatch.setattr(
         scheduler,
@@ -67,6 +72,7 @@ def test_linkedin_uses_four_hour_slots_and_does_not_repeat_terminal_slot(monkeyp
 
     settings = {
         "scheduler.enabled": True,
+        "scheduler.linkedin_enabled": True,
         "scheduler.linkedin_interval_hours": 4,
         "collection.linkedin_enabled": True,
     }
@@ -88,12 +94,18 @@ def test_linkedin_uses_four_hour_slots_and_does_not_repeat_terminal_slot(monkeyp
     due, _, _ = scheduler.SchedulerService.linkedin_due_context(now)
     assert due is False
 
+    settings["scheduler.linkedin_enabled"] = False
+    monkeypatch.setattr(scheduler, "get_cycle", lambda _source: None)
+    due, _, _ = scheduler.SchedulerService.linkedin_due_context(now)
+    assert due is False
+
 
 def test_linkedin_partial_cycle_is_resumed_before_new_slot(monkeypatch):
     from collector import scheduler
 
     settings = {
         "scheduler.enabled": True,
+        "scheduler.linkedin_enabled": True,
         "scheduler.linkedin_interval_hours": 4,
         "collection.linkedin_enabled": True,
     }
