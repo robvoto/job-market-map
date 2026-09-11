@@ -42,6 +42,10 @@ class SeekJDFetchError(RuntimeError):
     pass
 
 
+class SeekJDTransientError(SeekJDFetchError):
+    """SEEK returned a non-terminal page that may succeed on a later attempt."""
+
+
 class SeekJDUnavailableError(SeekJDFetchError):
     """SEEK explicitly says the source job cannot provide a JD."""
 
@@ -281,7 +285,7 @@ def fetch_seek_detail(
     normal_deadline = time.monotonic() + timeout_seconds
     human_deadline: float | None = None
     human_mode = False
-    incomplete_render_retries = 0
+    render_retries = 0
     last_problem = "SEEK job detail did not become readable"
 
     while True:
@@ -319,6 +323,20 @@ def fetch_seek_detail(
                 continue
 
             actual_id = str(raw.get("source_job_id") or "").strip()
+            transient_error = str(raw.get("transient_error") or "").strip()
+            if transient_error:
+                last_problem = f"SEEK returned transient detail page ({transient_error})"
+                if render_retries == 0:
+                    render_retries += 1
+                    collection_logger().info(
+                        "SEEK JD transient page; re-navigating once source_job_id=%s reason=%s",
+                        expected_id,
+                        transient_error,
+                    )
+                    navigate(page_id, fetch_url)
+                    normal_deadline = time.monotonic() + timeout_seconds
+                    continue
+                raise SeekJDTransientError(last_problem + " after retry")
             if bool(raw.get("terminal_unavailable")):
                 terminal_status = str(raw.get("source_status") or "not_found").strip()
                 raise SeekJDUnavailableError(
@@ -363,9 +381,9 @@ def fetch_seek_detail(
         if not human_mode and time.monotonic() >= normal_deadline:
             if (
                 last_problem == "SEEK returned an implausibly short JD"
-                and incomplete_render_retries == 0
+                and render_retries == 0
             ):
-                incomplete_render_retries += 1
+                render_retries += 1
                 collection_logger().info(
                     "SEEK JD incomplete render; re-navigating once source_job_id=%s",
                     expected_id,
@@ -543,6 +561,18 @@ def enrich_seek_coverage_jds(
             )
         except BrowserBrokerError:
             raise
+        except SeekJDTransientError as exc:
+            failed += 1
+            if on_progress is not None:
+                on_progress("failed")
+            collection_logger().warning(
+                "SEEK JD transient source error after retry; leaving retryable and ending sweep "
+                "job_id=%s source_job_id=%s error=%s",
+                job_id,
+                str(row["source_job_id"] or "").strip(),
+                exc,
+            )
+            break
         except SeekJDUnavailableError as exc:
             update_job_source_facts(job_id, source_status=exc.source_status)
             unavailable += 1

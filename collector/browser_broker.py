@@ -102,6 +102,7 @@ _SEEK_DETAIL_JS = r"""
 () => {
   const pageText = (document.body?.innerText || '').replace(/\r/g, '');
   const low = pageText.toLowerCase();
+  const pageTitle = document.title.toLowerCase();
   const pageUrl = location.href;
   const actualChallenge = [
     'help us keep seek secure',
@@ -111,7 +112,7 @@ _SEEK_DETAIL_JS = r"""
     'performing security verification',
     'enable javascript and cookies to continue',
     'access denied'
-  ].some(x => low.includes(x) || document.title.toLowerCase().includes(x));
+  ].some(x => low.includes(x) || pageTitle.includes(x));
 
   if (actualChallenge) return {page_url: pageUrl, human_check: true};
 
@@ -131,7 +132,16 @@ _SEEK_DETAIL_JS = r"""
     ? String(job.id)
     : (pageUrl.match(/\/job\/(\d+)/)?.[1] || '');
   const noLongerAdvertised = low.includes('this job is no longer advertised');
-  const notFound = low.includes('we couldn’t find that page') || low.includes("we couldn't find that page") || document.title.toLowerCase().includes('404 page not found');
+  const notFound = low.includes('we couldn’t find that page') || low.includes("we couldn't find that page") || pageTitle.includes('404 page not found');
+  const technicalError = pageTitle.includes('technical error');
+  if (technicalError && !noLongerAdvertised && !notFound) {
+    return {
+      page_url: pageUrl,
+      source_job_id: sourceJobId,
+      transient_error: 'technical_error',
+      human_check: false
+    };
+  }
   const title = job?.title || textOf(['[data-automation="job-detail-title"]', 'h1']);
   const employer = job?.advertiser?.name || textOf([
     '[data-automation="advertiser-name"]',

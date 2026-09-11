@@ -20,6 +20,13 @@ def test_browser_attaches_to_long_lived_jmm_chrome():
     assert broker.SEEK_PLAYWRIGHT_USER_DATA_DIR.name == "playwright_jmm_seek_user_data"
 
 
+def test_seek_detail_marks_technical_error_as_transient():
+    import collector.browser_broker as broker
+
+    assert "pageTitle.includes('technical error')" in broker._SEEK_DETAIL_JS
+    assert "transient_error: 'technical_error'" in broker._SEEK_DETAIL_JS
+
+
 def test_snapshot_retries_one_broker_timeout(monkeypatch):
     import collector.browser_broker as broker
 

@@ -424,6 +424,89 @@ def test_short_seek_jd_reloads_once_and_recovers(monkeypatch):
     assert detail.full_description.startswith("A complete source-backed job description")
 
 
+def test_technical_error_retries_once_then_stays_retryable(monkeypatch):
+    from collector import seek_jd
+
+    navigations = []
+    monkeypatch.setattr(
+        seek_jd, "navigate", lambda *_a, **_k: navigations.append((_a, _k))
+    )
+    monkeypatch.setattr(
+        seek_jd,
+        "seek_job_detail",
+        lambda *_a, **_k: type(
+            "Response",
+            (),
+            {
+                "result": {
+                    "page_url": "https://au.seek.com/job/94511500",
+                    "source_job_id": "94511500",
+                    "transient_error": "technical_error",
+                    "human_check": False,
+                }
+            },
+        )(),
+    )
+
+    with pytest.raises(seek_jd.SeekJDTransientError, match="after retry"):
+        seek_jd.fetch_seek_detail(
+            1,
+            "https://au.seek.com/job/94511500",
+            expected_source_job_id="94511500",
+            timeout_seconds=15.0,
+        )
+
+    assert len(navigations) == 2
+
+
+def test_transient_seek_error_ends_only_current_jd_sweep(monkeypatch):
+    from collector import seek_jd
+
+    monkeypatch.setattr(
+        seek_jd,
+        "coverage_seek_jobs",
+        lambda **_kwargs: [
+            {
+                "id": 1,
+                "identity_key": "seek:id:1",
+                "source_job_id": "1",
+                "canonical_url": "https://au.seek.com/job/1",
+                "jd_fetch_completed": 0,
+            },
+            {
+                "id": 2,
+                "identity_key": "seek:id:2",
+                "source_job_id": "2",
+                "canonical_url": "https://au.seek.com/job/2",
+                "jd_fetch_completed": 0,
+            },
+        ],
+    )
+    calls = []
+
+    def transient_fetch(_page_id, url, **_kwargs):
+        calls.append(url)
+        raise seek_jd.SeekJDTransientError("technical error after retry")
+
+    monkeypatch.setattr(seek_jd, "fetch_seek_detail", transient_fetch)
+    events = []
+    result = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+        on_progress=events.append,
+    )
+
+    assert calls == ["https://au.seek.com/job/1"]
+    assert result.attempted == 1
+    assert result.failed == 1
+    assert result.stored == 0
+    assert result.remaining == 2
+    assert events == ["attempted", "failed"]
+
+
 def test_no_longer_advertised_is_terminal_not_failed(tmp_path, monkeypatch):
     from collector import db, seek_jd
 
