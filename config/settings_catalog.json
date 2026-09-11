@@ -77,6 +77,15 @@
       "help": "Maximum bounded wait for a SEEK page to become a valid card page or explicit terminal page."
     },
     {
+      "key": "collection.seek_human_check_wait_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 900.0,
+      "min": 30,
+      "max": 3600,
+      "help": "Maximum time JMM waits in the visible persistent SEEK browser for a genuine human/Cloudflare verification to clear before leaving the item retryable."
+    },
+    {
       "key": "collection.seek_safety_page_limit",
       "category": "Collection",
       "type": "integer",

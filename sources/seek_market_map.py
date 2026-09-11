@@ -38,10 +38,8 @@ CHALLENGE_TEXT = (
     "verification successful. waiting for www.seek.com.au to respond",
     "__cf_chl",
     "captcha",
-    "performing security verification",
     "enable javascript and cookies to continue",
 )
-HUMAN_CHECK_WAIT_SECONDS = 900.0
 
 
 @dataclass(frozen=True)
@@ -141,7 +139,9 @@ def _wait_snapshot(
                     flush=True,
                 )
                 brought_forward = True
-                human_deadline = time.monotonic() + HUMAN_CHECK_WAIT_SECONDS
+                human_deadline = time.monotonic() + float(
+                    get_setting("collection.seek_human_check_wait_seconds")
+                )
             elif human_deadline is not None and time.monotonic() >= human_deadline:
                 raise BrowserBrokerError("SEEK human-check wait expired")
             time.sleep(1.0)

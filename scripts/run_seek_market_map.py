@@ -4,6 +4,7 @@ import argparse
 import json
 from dataclasses import asdict
 
+from collector.geographies import load_catalog
 from collector.settings import get_setting
 from sources.seek_market_map import collect_enabled_states, collect_states
 
@@ -13,7 +14,7 @@ p = argparse.ArgumentParser(
 p.add_argument(
     "--state",
     action="append",
-    choices=["NSW", "ACT", "QLD"],
+    choices=[row["code"] for row in load_catalog()],
     help="Repeat to run selected states; default is all enabled states.",
 )
 p.add_argument(

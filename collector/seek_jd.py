@@ -14,10 +14,9 @@ from collector.browser_broker import (
     select_page,
 )
 from collector.db import connect, store_job_jd_once, update_job_source_facts
+from collector.settings import get_setting
 
 SYDNEY = ZoneInfo("Australia/Sydney")
-HUMAN_CHECK_WAIT_SECONDS = 900.0
-
 _CHALLENGE_MARKERS = (
     "help us keep seek secure",
     "confirm you are human",
@@ -251,11 +250,21 @@ def fetch_seek_detail(
     url: str,
     *,
     expected_source_job_id: str | None = None,
-    timeout_seconds: float = 15.0,
-    human_wait_seconds: float = HUMAN_CHECK_WAIT_SECONDS,
+    timeout_seconds: float | None = None,
+    human_wait_seconds: float | None = None,
 ) -> SeekFetchedDetail:
     """Read one SEEK JD + structured facts from JMM's dedicated Playwright tab."""
     expected_id = str(expected_source_job_id or _seek_job_id(url)).strip()
+    timeout_seconds = float(
+        timeout_seconds
+        if timeout_seconds is not None
+        else get_setting("collection.seek_parse_wait_seconds")
+    )
+    human_wait_seconds = float(
+        human_wait_seconds
+        if human_wait_seconds is not None
+        else get_setting("collection.seek_human_check_wait_seconds")
+    )
     navigate(page_id, _seek_fetch_url(expected_id, url))
     normal_deadline = time.monotonic() + timeout_seconds
     human_deadline: float | None = None
@@ -338,7 +347,9 @@ def fetch_seek_detail(
         time.sleep(0.35)
 
 
-def fetch_seek_jd(page_id: int, url: str, *, timeout_seconds: float = 15.0) -> str:
+def fetch_seek_jd(
+    page_id: int, url: str, *, timeout_seconds: float | None = None
+) -> str:
     return fetch_seek_detail(
         page_id, url, timeout_seconds=timeout_seconds
     ).full_description
