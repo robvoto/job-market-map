@@ -7,6 +7,7 @@ from threading import Lock
 from collector.db import (
     get_job_by_id,
     get_job_jd,
+    get_primary_job_id,
     store_job_jd_once,
     update_job_source_facts,
 )
@@ -65,16 +66,18 @@ def _cached_result(job_id: int) -> dict[str, object] | None:
 
 def get_or_enrich_job_jd(job_id: int) -> dict[str, object]:
     """Return JMM's canonical JD, fetching it once from the source when absent."""
-    cached = _cached_result(job_id)
+    primary_job_id = get_primary_job_id(job_id)
+    cached = _cached_result(primary_job_id)
     if cached is not None:
         return cached
 
     with _ENRICH_LOCK:
-        cached = _cached_result(job_id)
+        primary_job_id = get_primary_job_id(job_id)
+        cached = _cached_result(primary_job_id)
         if cached is not None:
             return cached
 
-        job = get_job_by_id(job_id)
+        job = get_job_by_id(primary_job_id)
         if job is None:
             raise KeyError(f"job {job_id} not found")
 
@@ -92,10 +95,10 @@ def get_or_enrich_job_jd(job_id: int) -> dict[str, object]:
             raise JDSourceFetchError("source adapter returned no JD provenance")
 
         if fetched.facts:
-            update_job_source_facts(job_id, **fetched.facts)
+            update_job_source_facts(primary_job_id, **fetched.facts)
 
         stored = store_job_jd_once(
-            job_id,
+            primary_job_id,
             full_description=fetched.full_description,
             jd_fetched_at=datetime.now(UTC).isoformat(timespec="seconds"),
             jd_source=fetched.jd_source,

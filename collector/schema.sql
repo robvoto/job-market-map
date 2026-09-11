@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS jobs (
     possible_same_job_group TEXT,
     core_fingerprint TEXT,
     exact_card_fingerprint TEXT,
+    primary_job_id INTEGER REFERENCES jobs(id) ON DELETE SET NULL,
     UNIQUE(identity_key),
     UNIQUE(source, source_job_id),
     UNIQUE(source, canonical_url)
@@ -174,6 +175,21 @@ CREATE TABLE IF NOT EXISTS duplicate_links (
 );
 
 CREATE INDEX IF NOT EXISTS idx_duplicate_links_confidence ON duplicate_links(confidence DESC);
+
+-- A confirmed same-vacancy relationship keeps both source postings addressable,
+-- while assigning the newer posting to one deterministic processing primary.
+CREATE TABLE IF NOT EXISTS same_vacancy_links (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    primary_job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    confidence REAL NOT NULL,
+    match_type TEXT NOT NULL,
+    matching_signals_json TEXT NOT NULL,
+    detected_at TEXT NOT NULL,
+    CHECK(job_id <> primary_job_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_same_vacancy_links_primary
+    ON same_vacancy_links(primary_job_id);
 
 CREATE TABLE IF NOT EXISTS job_tombstones (
     id INTEGER PRIMARY KEY,

@@ -180,14 +180,14 @@
       "default": 0.92,
       "min": 0.75,
       "max": 1.0,
-      "help": "Minimum evidence score for recording a non-destructive possible duplicate link between two separately sourced job rows."
+      "help": "Minimum evidence score for recording strong duplicate evidence and assigning separately sourced postings to one same-vacancy processing primary."
     },
     {
       "key": "dedupe.enable_near_match",
       "category": "Duplicates",
       "type": "boolean",
       "default": true,
-      "help": "Allow title/employer/location plus rich card evidence to create possible-duplicate links. Exact same-source IDs remain deterministic regardless of this setting."
+      "help": "Allow title/employer/location plus rich card evidence to create possible-duplicate links and same-vacancy primary assignments. Exact same-source IDs remain deterministic regardless of this setting."
     },
     {
       "key": "api.default_page_size",

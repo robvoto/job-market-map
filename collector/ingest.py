@@ -5,8 +5,11 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from collector.db import connect, init_db
-from collector.duplicates import fingerprints, refresh_duplicate_links
+from collector.db import connect, get_primary_job_id, init_db
+from collector.duplicates import (
+    fingerprints,
+    refresh_duplicate_links,
+)
 from collector.identity import job_identity_key
 from collector.models import CardObservation
 
@@ -29,6 +32,7 @@ class IngestResult:
     created: bool
     query_id: int | None
     resurrected: bool = False
+    observation_job_id: int | None = None
 
 
 def utc_now() -> str:
@@ -294,7 +298,43 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                 (int(created), int(not created), query_id),
             )
 
-    refresh_duplicate_links(job_id)
+    observation_job_id = job_id
+    refresh_duplicate_links(observation_job_id)
+    primary_job_id = get_primary_job_id(observation_job_id)
+    if primary_job_id != observation_job_id:
+        # Keep the source posting's capture/history row, but keep the primary's
+        # lifecycle active so downstream feeds do not hide a live repost.
+        with connect() as conn:
+            state = conn.execute(
+                "SELECT first_seen_at FROM job_observation_state WHERE job_id=?",
+                (observation_job_id,),
+            ).fetchone()
+            if state is not None:
+                conn.execute(
+                    """
+                    UPDATE job_observation_state
+                       SET last_seen_at=?, archived=0, compacted_at=NULL
+                     WHERE job_id=?
+                    """,
+                    (captured_at, primary_job_id),
+                )
+        if created and query_id is not None:
+            # The source row is new, but it is not a new downstream vacancy.
+            with connect() as conn:
+                conn.execute(
+                    """
+                    UPDATE queries
+                       SET unique_new_jobs=MAX(unique_new_jobs-1, 0),
+                           duplicate_hits=duplicate_hits+1
+                     WHERE id=?
+                    """,
+                    (query_id,),
+                )
+        created = False
     return IngestResult(
-        job_id=job_id, created=created, query_id=query_id, resurrected=resurrected
+        job_id=primary_job_id,
+        created=created,
+        query_id=query_id,
+        resurrected=resurrected,
+        observation_job_id=observation_job_id,
     )

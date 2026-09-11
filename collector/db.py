@@ -27,6 +27,30 @@ def connect() -> sqlite3.Connection:
     return conn
 
 
+def resolve_primary_job_id(conn: sqlite3.Connection, job_id: int) -> int:
+    """Resolve a source posting through same-vacancy links to its primary row."""
+    current = int(job_id)
+    visited: set[int] = set()
+    while current not in visited:
+        visited.add(current)
+        row = conn.execute(
+            "SELECT id, primary_job_id FROM jobs WHERE id=?", (current,)
+        ).fetchone()
+        if row is None:
+            raise KeyError(job_id)
+        if row["primary_job_id"] is None:
+            return int(row["id"])
+        current = int(row["primary_job_id"])
+    raise RuntimeError(f"same-vacancy primary cycle includes job {job_id}")
+
+
+def get_primary_job_id(job_id: int) -> int:
+    """Return the deterministic processing primary for a source posting."""
+    init_db()
+    with connect() as conn:
+        return resolve_primary_job_id(conn, job_id)
+
+
 def get_job_by_source_id(source: str, source_job_id: str) -> dict[str, object] | None:
     """Return an active canonical job by trustworthy source ID."""
     init_db()
@@ -61,6 +85,7 @@ def job_jd_fetch_completed(job_id: int) -> bool:
     """Return whether this canonical identity has ever had a successful JD fetch."""
     init_db()
     with connect() as conn:
+        primary_job_id = resolve_primary_job_id(conn, job_id)
         row = conn.execute(
             """
             SELECT 1
@@ -68,7 +93,7 @@ def job_jd_fetch_completed(job_id: int) -> bool:
               JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
              WHERE j.id=?
             """,
-            (job_id,),
+            (primary_job_id,),
         ).fetchone()
     return row is not None
 
@@ -173,7 +198,9 @@ def update_job_source_facts(job_id: int, **facts: object) -> dict[str, object]:
                 f"UPDATE jobs SET {', '.join(assignments)} WHERE id=?",
                 (*values, job_id),
             )
-        stored = conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
+        stored = conn.execute(
+            "SELECT * FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
     return dict(stored)
 
 
@@ -181,9 +208,10 @@ def get_job_jd(job_id: int) -> dict[str, object] | None:
     """Return the one canonical neutral JD for a job, if JMM has it."""
     init_db()
     with connect() as conn:
+        primary_job_id = resolve_primary_job_id(conn, job_id)
         row = conn.execute(
             "SELECT id, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
-            (job_id,),
+            (primary_job_id,),
         ).fetchone()
     if row is None:
         raise KeyError(f"job {job_id} not found")
@@ -211,9 +239,10 @@ def store_job_jd_once(
 
     init_db()
     with connect() as conn:
+        primary_job_id = resolve_primary_job_id(conn, job_id)
         existing = conn.execute(
             "SELECT id, identity_key, source, source_job_id, canonical_url, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
-            (job_id,),
+            (primary_job_id,),
         ).fetchone()
         if existing is None:
             raise KeyError(f"job {job_id} not found")
@@ -234,11 +263,11 @@ def store_job_jd_once(
              WHERE id=?
                AND (full_description IS NULL OR trim(full_description)='')
             """,
-            (full_description, fetched_at, source, job_id),
+            (full_description, fetched_at, source, primary_job_id),
         )
         stored = conn.execute(
             "SELECT id, identity_key, source, source_job_id, canonical_url, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
-            (job_id,),
+            (primary_job_id,),
         ).fetchone()
         _record_successful_jd_fetch(conn, stored)
     return {
@@ -426,6 +455,7 @@ def init_db() -> None:
         _ensure_column(
             conn, "jobs", "exact_card_fingerprint", "exact_card_fingerprint TEXT"
         )
+        _ensure_column(conn, "jobs", "primary_job_id", "primary_job_id INTEGER")
         _ensure_column(conn, "jobs", "identity_key", "identity_key TEXT")
         _ensure_column(conn, "job_tombstones", "identity_key", "identity_key TEXT")
         _ensure_column(conn, "queries", "geography_code", "geography_code TEXT")
@@ -483,6 +513,9 @@ def init_db() -> None:
         )
         conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_jobs_exact_card_fingerprint ON jobs(exact_card_fingerprint)"
+        )
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_jobs_primary_job_id ON jobs(primary_job_id)"
         )
 
 

@@ -1,6 +1,8 @@
 from fastapi.testclient import TestClient
 
 from collector import db
+from collector.ingest import ingest_card
+from collector.models import CardObservation
 
 
 def client_for_tmp_db(tmp_path, monkeypatch):
@@ -35,7 +37,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 7
+        assert payload["schema_version"] == 8
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
         assert "raw_card_text" not in payload["items"][0]
@@ -325,6 +327,52 @@ def test_lookup_keeps_duplicate_linked_source_jobs_independently_resolvable(
         assert second["job"]["id"] == 2
         assert [d["other_job_id"] for d in first["duplicates"]] == [2]
         assert [d["other_job_id"] for d in second["duplicates"]] == [1]
+
+
+def test_same_vacancy_alias_is_lookupable_but_not_in_downstream_feed(
+    tmp_path, monkeypatch
+):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        fields = {
+            "title": "Implementation Consultant",
+            "employer": "Example Co",
+            "location": "Sydney NSW",
+            "salary_text": "$120k + super",
+            "employment_type": "Full time",
+            "workplace_type": "Hybrid",
+            "classification_text": "Information & Communication Technology",
+            "subclassification_text": "Consultants",
+            "teaser_text": "Lead enterprise onboarding and API integration.",
+        }
+        primary = ingest_card(
+            CardObservation(
+                source="seek",
+                source_job_id="123",
+                canonical_url="https://seek.test/jobs/123",
+                **fields,
+            )
+        )
+        alias = ingest_card(
+            CardObservation(
+                source="linkedin",
+                source_job_id="456",
+                canonical_url="https://linkedin.test/jobs/456",
+                **fields,
+            )
+        )
+
+        feed = client.get("/v3/feed/jobs", params={"limit": 10}).json()
+        assert [item["id"] for item in feed["items"]] == [primary.job_id]
+
+        lookup = client.get(
+            "/v3/jobs/lookup", params={"source": "linkedin", "source_job_id": "456"}
+        )
+        assert lookup.status_code == 200
+        payload = lookup.json()
+        assert payload["job"]["id"] == alias.observation_job_id
+        assert payload["job"]["primary_job_id"] == primary.job_id
+        assert payload["same_vacancy"][0]["primary_job_id"] == primary.job_id
+        assert payload["same_vacancy"][0]["matching_signals"]
 
 
 def test_lookup_never_resolves_by_similar_title_or_employer_text(tmp_path, monkeypatch):

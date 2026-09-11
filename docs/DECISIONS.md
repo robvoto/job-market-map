@@ -16,9 +16,9 @@
 **Reason:** Result cards can be collected at far higher throughput. JD acquisition is a separate on-demand enrichment step; when a neutral JD is obtained, JMM remains its canonical owner rather than a consumer storing a duplicate raw copy.
 
 ## ADR-004 — Evidence-based, non-destructive duplicate linking
-**Decision:** Stable same-source identity upserts deterministically. Rich cross-source/same-title evidence creates duplicate links rather than destructive merges.
+**Decision:** Stable source identity upserts deterministically. Rich cross-source/same-title evidence remains source-addressable; strong confirmed same-vacancy evidence assigns the newer row to the oldest primary for JD and downstream processing, while retaining both rows and an auditable relationship.
 
-**Reason:** Capturing title, employer, location, employment/workplace type, salary, classification and teaser makes duplicates highly detectable, while keeping both rows prevents false merges from hiding real vacancies.
+**Reason:** Capturing title, employer, location, employment/workplace type, salary, classification and teaser makes reposts highly detectable. Keeping both source rows prevents false merges from hiding source evidence, while the primary assignment stops agents reopening the same vacancy.
 
 ## ADR-005 — Evidence-preserving retention by default
 **Decision:** Destructive retention is opt-in. By default Job Market Map preserves canonical job evidence and raw captures indefinitely. Separate Admin switches can later enable raw-capture pruning, archive/compaction, and archived-row removal; their age thresholds are inert while the switches are off.

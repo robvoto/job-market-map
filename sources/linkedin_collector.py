@@ -8,7 +8,14 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 from collector.cursors import get_cursor, save_cursor
-from collector.db import connect, store_job_jd_once
+from collector.db import (
+    connect,
+    get_job_by_id,
+    get_primary_job_id,
+    store_job_jd_once,
+    update_job_source_facts,
+)
+from collector.duplicates import refresh_duplicate_links, refresh_job_fingerprints
 from collector.ingest import ingest_card
 from collector.linkedin_detail import LinkedInDetailError, fetch_linkedin_detail
 from collector.run_log import finish_run, start_run
@@ -259,18 +266,22 @@ def collect_linkedin_chunk(
                     iter(linkedin_identity_aliases(observation.source_job_id or "")),
                     observation.source_job_id or observation.canonical_url,
                 )
+                # Ingest the card before detail work. This lets JMM detect a
+                # confirmed repost and reuse the primary's JD instead of opening
+                # the newer source posting again.
+                ingest_result = ingest_card(observation)
+                canonical_job = get_job_by_id(ingest_result.job_id)
+                if canonical_job is None:
+                    raise LinkedInCollectionError(
+                        f"ingest returned missing primary job {ingest_result.job_id}"
+                    )
                 detail = None
-                needs_detail = existing is None or not str(existing.get("full_description") or "").strip()
+                needs_detail = not str(canonical_job.get("full_description") or "").strip()
                 if needs_detail and native_key not in detail_attempted_ids:
                     detail_attempted_ids.add(native_key)
                     detail_attempted += 1
                     try:
                         detail = fetch_linkedin_detail(observation.canonical_url)
-                        observation.source_status = detail.source_status
-                        observation.apply_method = detail.apply_method
-                        observation.reposted = detail.reposted
-                        observation.applicant_count = detail.applicant_count
-                        observation.easy_apply = detail.easy_apply
                         if not detail.full_description:
                             detail_failed += 1
                     except LinkedInDetailError as exc:
@@ -281,7 +292,40 @@ def collect_linkedin_chunk(
                             exc,
                         )
 
-                ingest_result = ingest_card(observation)
+                if detail is not None:
+                    observation_job_id = (
+                        ingest_result.observation_job_id or ingest_result.job_id
+                    )
+                    update_job_source_facts(
+                        observation_job_id,
+                        source_status=detail.source_status,
+                        apply_method=detail.apply_method,
+                        reposted=detail.reposted,
+                        applicant_count=detail.applicant_count,
+                        easy_apply=detail.easy_apply,
+                    )
+                    refresh_job_fingerprints(observation_job_id)
+                    refresh_duplicate_links(observation_job_id)
+                    final_primary_id = get_primary_job_id(observation_job_id)
+                    if final_primary_id != ingest_result.job_id:
+                        if ingest_result.created:
+                            with connect() as conn:
+                                conn.execute(
+                                    """
+                                    UPDATE queries
+                                       SET unique_new_jobs=MAX(unique_new_jobs-1, 0),
+                                           duplicate_hits=duplicate_hits+1
+                                     WHERE id=?
+                                    """,
+                                    (ingest_result.query_id,),
+                                )
+                        ingest_result = type(ingest_result)(
+                            job_id=final_primary_id,
+                            created=False,
+                            query_id=ingest_result.query_id,
+                            resurrected=ingest_result.resurrected,
+                            observation_job_id=observation_job_id,
+                        )
                 observed += 1
                 unique_new += int(ingest_result.created)
                 duplicates += int(not ingest_result.created)
