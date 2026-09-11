@@ -433,12 +433,16 @@ def lookup_job(
             raise HTTPException(
                 400, "identity_key cannot be combined with source/source_job_id"
             )
+        if not identity_key.strip():
+            raise HTTPException(400, "identity_key must not be blank")
         found = get_job_by_identity_key(identity_key)
     elif source is not None or source_job_id is not None:
         if source is None or source_job_id is None:
             raise HTTPException(
                 400, "source and source_job_id must both be provided together"
             )
+        if not source.strip() or not source_job_id.strip():
+            raise HTTPException(400, "source and source_job_id must not be blank")
         found = get_job_by_source_id(source, source_job_id)
     else:
         raise HTTPException(

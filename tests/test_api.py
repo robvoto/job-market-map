@@ -236,6 +236,20 @@ def test_lookup_rejects_malformed_and_conflicting_inputs(tmp_path, monkeypatch):
             ).status_code
             == 400
         )
+        # blank values are malformed rather than unknown identities
+        assert client.get("/v3/jobs/lookup", params={"identity_key": "   "}).status_code == 400
+        assert (
+            client.get(
+                "/v3/jobs/lookup", params={"source": "   ", "source_job_id": "1"}
+            ).status_code
+            == 400
+        )
+        assert (
+            client.get(
+                "/v3/jobs/lookup", params={"source": "seek", "source_job_id": "   "}
+            ).status_code
+            == 400
+        )
         # identity_key combined with a conflicting source pair
         assert (
             client.get(
