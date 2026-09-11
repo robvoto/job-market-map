@@ -109,6 +109,33 @@ def test_geography_admin_and_seek_coverage_api(tmp_path, monkeypatch):
         by_code = {g["geography_code"]: g for g in coverage["geographies"]}
         assert by_code["QLD"]["enabled"] is False
         assert by_code["NSW"]["status"] == "NOT_RUN"
+        assert by_code["NSW"]["has_current_cycle"] is False
+        assert by_code["NSW"]["previous"] is None
+
+
+def test_seek_coverage_exposes_previous_archived_cycle(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO seek_coverage_history(
+                    captured_at,geography_code,root_status,reported_results,
+                    covered_unique_jobs,incomplete_partitions
+                ) VALUES(?,?,?,?,?,?)
+                """,
+                ("2026-09-11T06:12:41+00:00", "NSW", "INCOMPLETE_CHILD_COVERAGE", 6958, 6905, 59),
+            )
+        coverage = client.get("/v3/coverage/seek").json()
+        nsw = next(g for g in coverage["geographies"] if g["geography_code"] == "NSW")
+        assert nsw["status"] == "NOT_RUN"
+        assert nsw["has_current_cycle"] is False
+        assert nsw["previous"] == {
+            "captured_at": "2026-09-11T06:12:41+00:00",
+            "root_status": "INCOMPLETE_CHILD_COVERAGE",
+            "reported_results": 6958,
+            "covered_unique_jobs": 6905,
+            "incomplete_partitions": 59,
+        }
 
 
 def test_feed_can_filter_by_normalized_geography(tmp_path, monkeypatch):
@@ -310,6 +337,7 @@ def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
             lambda: {"service_active": True, "enabled": True, "daily_time_local": "02:00"},
         )
         monkeypatch.setattr(api_main, "list_backups", lambda limit=20: [])
+        monkeypatch.setattr(api_main, "persistent_browser_ready", lambda: True)
         monkeypatch.setattr(
             api_main.PROCESS_MANAGER,
             "start",
@@ -319,6 +347,20 @@ def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
         status = client.get("/v3/admin/service/status")
         assert status.status_code == 200
         assert status.json()["scheduler"]["daily_time_local"] == "02:00"
+        assert status.json()["browser"] == {"active": True}
+        assert status.json()["log_url"] == "/v3/admin/log"
+        assert status.json()["backup_directory"].endswith("/backups")
         started = client.post("/v3/admin/collection/run")
         assert started.status_code == 200
         assert started.json() == {"started": True, "pid": 123, "trigger": "manual"}
+
+
+def test_admin_log_returns_durable_collection_log_tail(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        from api import main as api_main
+
+        monkeypatch.setattr(api_main, "read_collection_log_tail", lambda lines: f"tail:{lines}\n")
+        response = client.get("/v3/admin/log?lines=25")
+        assert response.status_code == 200
+        assert response.text == "tail:25\n"
+        assert response.headers["content-type"].startswith("text/plain")

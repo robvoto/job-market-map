@@ -56,9 +56,16 @@ PATCH /v3/admin/queries/{id}
 GET   /v3/admin/geographies
 PATCH /v3/admin/geographies/{code}
 POST  /v3/admin/retention/run
+GET   /v3/admin/service/status
+GET   /v3/admin/log?lines=500
+POST  /v3/admin/collection/run
+POST  /v3/admin/collection/stop
+POST  /v3/admin/backup/run
 ```
 
 Admin UI: `/admin`.
+
+`GET /v3/coverage/seek` keeps the machine-readable current status (`NOT_RUN` when no current workspace exists) and also returns `has_current_cycle` plus the latest archived `previous` coverage summary when available.
 
 ## Compatibility
 

@@ -5,10 +5,11 @@ from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
 
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from collector.backup import create_backup, list_backups
+from collector.browser_broker import persistent_browser_ready
 from collector.consumers import advance_checkpoint, get_checkpoint
 from collector.db import (
     ROOT,
@@ -31,6 +32,7 @@ from collector.query_admin import add_query, set_query_active
 from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
 from collector.retention import apply_retention
+from collector.run_logging import read_collection_log_tail
 from collector.scheduler import SCHEDULER
 from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
 from collector.settings import (
@@ -532,15 +534,27 @@ def seek_coverage():
                 "SELECT COUNT(*) FROM seek_partitions WHERE geography_code=? AND status NOT LIKE 'COMPLETE%'",
                 (geography["code"],),
             ).fetchone()[0]
+            previous = conn.execute(
+                """
+                SELECT captured_at,root_status,reported_results,covered_unique_jobs,incomplete_partitions
+                  FROM seek_coverage_history
+                 WHERE geography_code=?
+                 ORDER BY captured_at DESC, id DESC
+                 LIMIT 1
+                """,
+                (geography["code"],),
+            ).fetchone()
             coverage.append(
                 {
                     "geography_code": geography["code"],
                     "label": geography["label"],
                     "enabled": bool(geography["enabled"]),
+                    "has_current_cycle": root is not None,
                     "status": root["status"] if root else "NOT_RUN",
                     "reported_results": root["reported_results"] if root else None,
                     "covered_unique_jobs": root["collected_unique_jobs"] if root else 0,
                     "incomplete_partitions": int(incomplete),
+                    "previous": dict(previous) if previous else None,
                 }
             )
     return {
@@ -574,8 +588,16 @@ def admin_service_status():
     return {
         "scheduler": SCHEDULER.status(),
         "collection": PROCESS_MANAGER.status(),
+        "browser": {"active": persistent_browser_ready()},
         "last_backup": backups[0] if backups else None,
+        "backup_directory": str(ROOT / "backups"),
+        "log_url": f"/{API_VERSION}/admin/log",
     }
+
+
+@app.get(f"/{API_VERSION}/admin/log", response_class=PlainTextResponse)
+def admin_collection_log(lines: int = Query(500, ge=1, le=5000)):
+    return PlainTextResponse(read_collection_log_tail(lines))
 
 
 @app.post(f"/{API_VERSION}/admin/collection/run")

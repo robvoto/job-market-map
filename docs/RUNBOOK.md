@@ -6,14 +6,14 @@
 ./scripts/service.sh start
 ```
 
-Then open `http://127.0.0.1:8770/admin`. The service runs in the background; the UI starts/stops collection and pauses/resumes the overnight scheduler. No Windows Task Scheduler is used.
+Then open `http://127.0.0.1:8770/admin`. The service runs in the background; the UI starts/stops collection, controls the overnight scheduler and shows current runtime health.
 
 ```bash
 ./scripts/service.sh status
 ./scripts/service.sh stop
 ```
 
-Before every manual/scheduled collection, a verified SQLite backup is created by default. Only one collection process can hold `data/collection.lock`.
+Before every manual/scheduled collection, a verified SQLite backup is created by default. The API, persistent browser and collector each have a single-instance guard; the collector lock is `data/collection.lock`.
 
 
 ## Check project
@@ -92,11 +92,13 @@ The admin default partition chunk is intentionally small so ChatGPT/Claude tool-
 
 Use `--fresh` only when intentionally discarding resume behaviour for a fresh coverage pass.
 
-Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*`, `FAILED`, or `NOT_RUN` state means coverage is not proven complete. For the latest live recovery point, read local-only `docs/CURRENT_STATE.md` if present. That handoff is intentionally not tracked in Git.
+Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*` or `FAILED` state means current coverage is not proven complete. `NOT_RUN` means no current coverage workspace exists; Admin renders that as **Waiting for next run** and, when available, shows the archived previous coverage result. For the latest live recovery point, read local-only `docs/CURRENT_STATE.md` if present. That handoff is intentionally not tracked in Git.
 
 ### Collection logging
 
 Every collection runner writes timestamped progress to `logs/collection.log` and to stdout. The file rotates at 10 MB and keeps five previous files. Important events include run configuration/start/end, backup path, browser page setup, JD sweep start/end, JD progress every 25 successful stores, failed JD attempts, coverage progress, genuine human-verification waits, browser loss/recovery, and full exception tracebacks.
+
+Admin's **View collection log** link opens the bounded tail of this same durable file at `/v3/admin/log`.
 
 For a Windows/WSL terminal that should stay open and show the daily run live, use the foreground launcher:
 

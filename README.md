@@ -102,4 +102,4 @@ Start once in the background:
 
 Admin: `http://127.0.0.1:8770/admin`
 
-The in-app scheduler defaults to 02:00 local time and is controlled from Admin. It currently schedules the proven whole-state SEEK stage only. Manual and scheduled collection share one cross-process lock, so they cannot overlap. A verified SQLite online backup is created before each collection by default. See `docs/SERVICE.md`.
+The Admin page shows human-readable run times, collector/browser/scheduler health, latest-run status, current/previous SEEK coverage, backup status and a direct collection-log link. The in-app scheduler defaults to 02:00 local time and currently schedules the proven whole-state SEEK stage only. The API service, browser service and collector each have a single-instance guard. A verified SQLite online backup is created before each collection by default. See `docs/SERVICE.md`.

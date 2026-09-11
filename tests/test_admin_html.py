@@ -9,6 +9,8 @@ def test_admin_page_exposes_helper_driven_settings_query_and_retention_controls(
     assert "/admin/queries/" in html
     assert "run-retention" in html
     assert "add-query" in html
+    assert "Optional source keyword queries (advanced)" in html
+    assert "Normal SEEK daily coverage uses whole-state partitioning" in html
 
 
 def test_admin_page_exposes_geography_and_seek_coverage_controls():
@@ -31,6 +33,11 @@ def test_admin_page_exposes_collection_scheduler_and_backup_controls():
         "/admin/collection/run",
         "/admin/collection/stop",
         "/admin/backup/run",
+        "/admin/log",
+        "fmtTime",
+        "dashboard",
+        "Waiting for next run",
     ):
         assert token in html
-    assert "No Windows Task Scheduler is used" in html
+    assert "data/market.db" in html
+    assert "setInterval" in html

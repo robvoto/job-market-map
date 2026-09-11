@@ -4,8 +4,6 @@
 
 Job Market Map uses an **in-app scheduler**, following the same basic pattern as Job Hunter: a small long-running service checks whether the daily local-time window is due and starts a bounded collection subprocess.
 
-There is **no Windows Task Scheduler integration**.
-
 The distinction is important:
 - the API/Admin service stays running;
 - the scheduler lives inside that service;
@@ -34,7 +32,7 @@ Check or stop the **Admin service itself** from a terminal:
 
 The UI intentionally does not contain a button that kills its own web service, because after doing so the UI could not restart itself.
 
-This does not create operating-system startup persistence. After a Windows reboot, start the service again. We deliberately do not use Windows Task Scheduler for that.
+This does not create operating-system startup persistence. After Windows/WSL restarts, run `./scripts/service.sh start` again.
 
 ## Admin collection controls
 
@@ -44,16 +42,21 @@ The Admin page provides:
 - **Pause overnight schedule** / **Resume overnight schedule**;
 - overnight local time control (default **02:00**);
 - current collector PID/state;
+- persistent browser ready/broken state;
 - scheduler active/enabled/next-run state;
 - latest collection outcome;
 - **Backup DB now**;
-- latest backup status.
+- latest backup status;
+- direct link to the durable collection log.
 
-## One collection process only
+## Single-instance runtime services
 
-This is enforced below the UI with a WSL `flock` on `data/collection.lock`.
+Supported JMM runtime entrypoints are single-instance:
+- API/Admin service: `data/api-service.lock`;
+- persistent browser runner: `data/browser-service.lock` plus its fixed systemd user unit;
+- collector: `data/collection.lock`.
 
-A manual Run Now and a scheduled run cannot overlap. Another API/process cannot bypass this merely by racing the button. The API service itself is also single-instance when started through `scripts/start-api.sh` / `scripts/service.sh` using `data/api-service.lock`.
+A manual Run Now and a scheduled run cannot overlap. Starting the supported API/browser launchers again reuses or refuses the existing instance rather than creating another JMM runtime process.
 
 Do not remove these locks in favour of a UI-only `running=true` flag.
 
@@ -63,6 +66,7 @@ Default schedule: **02:00 local host time**. The time, start window, polling int
 
 The scheduler does not blindly restart collection every night:
 - if the current SEEK NSW/ACT/QLD coverage cycle is incomplete, the run **resumes it**;
+- if there is no current coverage workspace, the run starts a **fresh coverage cycle**;
 - if all enabled states are complete, the next run first snapshots coverage history and starts a **fresh coverage cycle**;
 - a max-runtime stop preserves partial progress for the next run.
 
@@ -87,6 +91,10 @@ Backups live under:
 Backups are local runtime data and are ignored by Git.
 
 If backup creation/integrity fails, the market run is recorded as `FAILED` and collection does not start.
+
+## Collection log
+
+The durable collection log is `logs/collection.log`. Admin links to `GET /v3/admin/log`, which returns a bounded tail of that same file; there is no second UI-specific log stream.
 
 ## Current scheduled source scope
 

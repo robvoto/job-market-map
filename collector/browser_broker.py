@@ -5,6 +5,7 @@ import itertools
 import os
 import subprocess
 import time
+import urllib.request
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -55,6 +56,16 @@ _context = None
 _pages: dict[int, Page] = {}
 _page_targets: dict[int, str] = {}
 _page_ids = itertools.count(1)
+
+
+def persistent_browser_ready(timeout: float = 0.5) -> bool:
+    try:
+        with urllib.request.urlopen(
+            f"{JMM_BROWSER_CDP_URL}/json/version", timeout=timeout
+        ) as response:
+            return response.status == 200
+    except OSError:
+        return False
 
 _SNAPSHOT_JS = r"""
 (verbose) => {

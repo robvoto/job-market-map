@@ -5,6 +5,14 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PORT="${JMM_BROWSER_CDP_PORT:-9223}"
 PYTHON="$ROOT/.venv/bin/python3"
 PROFILE="$ROOT/data/playwright_jmm_seek_user_data"
+LOCK="$ROOT/data/browser-service.lock"
+
+mkdir -p "$ROOT/data"
+exec 8>"$LOCK"
+if ! flock -n 8; then
+  echo "JMM_BROWSER_SERVICE_ALREADY_RUNNING" >&2
+  exit 3
+fi
 
 CHROME="$($PYTHON - <<'PY'
 from playwright.sync_api import sync_playwright

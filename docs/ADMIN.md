@@ -8,7 +8,7 @@ Start the API and open:
 http://127.0.0.1:<configured-port>/admin
 ```
 
-The page exposes runtime settings with helper text and discovery-query enable/disable controls.
+The page exposes runtime settings, service health, collection controls, coverage and advanced discovery-query controls.
 
 
 ## Service / scheduler controls
@@ -19,11 +19,21 @@ The top Admin panel controls the running collector without killing the Admin API
 - Pause / Resume overnight schedule;
 - set overnight time (default 02:00 local);
 - Backup DB now;
-- current PID/run/scheduler/backup status.
+- collector/browser/scheduler status dots;
+- latest run start/finish/duration and result;
+- next run using human-readable local date/time;
+- direct **View collection log** link;
+- latest backup status.
 
-There is no Windows Task Scheduler integration. Start the background Admin service with `./scripts/service.sh start`; it must remain running for the in-app overnight scheduler to fire. Manual and scheduled collection share the same cross-process lock and cannot overlap.
+Start the background Admin service with `./scripts/service.sh start`; it must remain running for the in-app overnight scheduler to fire. The status panel refreshes every 10 seconds.
 
-Backups use SQLite's online backup API plus `PRAGMA integrity_check`; `backup.before_collection_enabled=true` and `backup.keep_count=14` by default. See `docs/SERVICE.md`.
+**Backup DB now** creates a transactionally consistent copy of `data/market.db` under `/home/robvoto/projects/job-market-map/backups/`, verifies it with `PRAGMA integrity_check`, and keeps the configured number (`backup.keep_count`, default 14). See `docs/SERVICE.md`.
+
+## SEEK coverage display
+
+`NOT_RUN` is the raw API state when there is no current coverage workspace. In Admin this is shown as **Waiting for next run**, not as a failure. If archived coverage exists, Admin also shows the previous run's reported/covered totals and incomplete-partition count.
+
+After the accepted 3-day bootstrap, the temporary coverage workspace was intentionally cleared so the first normal 1-day run starts fresh. Canonical jobs and JDs are independent of that workspace.
 
 ## What is configurable without code
 
@@ -52,8 +62,8 @@ Personal applied/rejected/presented state is not a retention exception here beca
 - default/max API page sizes;
 - local API port.
 
-### Query discovery
-Queries are operational DB data. Admin can enable/disable them; API clients can also add a new source/query/location combination without Python changes. Registry sync does not silently re-enable a query Rob disabled.
+### Optional source keyword queries (advanced)
+These are extra source/query/location searches for LinkedIn, APSJobs or targeted experiments. Normal SEEK daily coverage uses whole-state partitioning and does not depend on these keyword queries. Queries are operational DB data; Admin can enable/disable them, and registry sync does not silently re-enable a query Rob disabled.
 
 ## Safety semantics
 

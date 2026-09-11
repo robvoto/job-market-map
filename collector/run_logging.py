@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import sys
+from collections import deque
 from logging.handlers import RotatingFileHandler
 
 from collector.db import ROOT
@@ -44,3 +45,12 @@ def configure_collection_logging() -> logging.Logger:
 
 def collection_logger() -> logging.Logger:
     return logging.getLogger(LOGGER_NAME)
+
+
+def read_collection_log_tail(lines: int = 500) -> str:
+    if lines < 1:
+        raise ValueError("lines must be >= 1")
+    if not LOG_PATH.exists():
+        return ""
+    with LOG_PATH.open("r", encoding="utf-8", errors="replace") as handle:
+        return "".join(deque(handle, maxlen=lines))

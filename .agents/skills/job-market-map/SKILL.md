@@ -88,6 +88,6 @@ Market lifecycle is rich/current -> archived/compacted -> neutral tombstone. Ret
 Every parser, partition, dedupe, cursor, retention, settings or API-contract bug gets a regression test. Update docs with architecture/API changes in the same commit. Source parser failures must be explicit; never silently fall back to JD opening.
 
 ## Scheduler / service / backup rule
-Use the project-owned in-app scheduler, not Windows Task Scheduler. The background Admin/API service is started with `./scripts/service.sh start`; scheduled and manual collection both invoke the same collection-cycle runner. `data/collection.lock` is the cross-process authority preventing overlap.
+Use the project-owned in-app scheduler. The background Admin/API service is started with `./scripts/service.sh start`; scheduled and manual collection both invoke the same collection-cycle runner. Supported runtime entrypoints are single-instance: API via `data/api-service.lock`, persistent browser via `data/browser-service.lock`/its fixed user-service unit, and collection via `data/collection.lock`.
 
 Create/verify an online SQLite backup before collection by default. Backup policy is admin-configurable, but do not disable or bypass it casually. The scheduler currently owns only the proven whole-state SEEK stage; do not add LinkedIn whole-registry scheduling until campaign-level continuation is implemented and tested.
