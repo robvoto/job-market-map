@@ -92,9 +92,11 @@ JD enrichment is a distinct source-detail operation, but for JMM-007 it is part 
 JMM uses one visible long-lived Chromium service with profile `data/playwright_jmm_seek_user_data`. It must not reuse Rob's normal Chrome or Job Hunter's SEEK profile. Collection runs attach over localhost CDP and detach without closing Chrome, so SEEK/Cloudflare session state survives retries and later runs. Genuine human verification is completed in that same visible JMM window and the run resumes.
 For long-running manual/MCP starts, use `scripts/start_collection_service.sh ...`; it ensures the persistent browser service exists and launches the same `scripts.run_collection_cycle` runner in the user systemd manager.
 
-## Campaign browser ownership
+## Source transport ownership
 
-A full campaign starts/reuses **one JMM-owned persistent Playwright browser context** and reuses a small number of workflow pages across source/query steps. It must not create a browser/profile per job or query. The JMM profile is isolated from both Rob's normal Chrome and Job Hunter's browser profile.
+SEEK uses **one JMM-owned persistent Playwright browser context** and reuses a small number of workflow pages. The JMM profile is isolated from both Rob's normal Chrome and Job Hunter's browser profile.
+
+LinkedIn must not reuse that Chromium path. JMM-011 is defined to port the proven Job Hunter transport: python-jobspy HTTP discovery, exact native-ID dedupe, then one direct public-HTML detail fetch per deduplicated new/unfetched vacancy. Do not keep both browser and HTTP LinkedIn collectors after cutover.
 ## SEEK daily collection
 
 Normal ongoing SEEK collection uses the latest **1 day** only. Known SEEK source job IDs are recognised from JMM and do not go through full card ingestion or JD fetching again. Only identities without a successful permanent JD-fetch marker are eligible for JD acquisition.

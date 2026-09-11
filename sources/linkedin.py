@@ -125,19 +125,22 @@ def parse_linkedin_snapshot(
             workplace_type = match.group(1).replace("On site", "On-site")
             location = WORKPLACE_RE.sub("", location).strip()
 
-        tags = [
+        easy_apply = any(line.casefold() == "easy apply" for line in metadata)
+        source_metadata = [line for line in metadata if line.casefold() != "viewed"]
+        teaser_metadata = [
             line
-            for line in metadata
+            for line in source_metadata
             if line.casefold()
-            in {
+            not in {
                 "promoted",
                 "easy apply",
                 "actively reviewing applicants",
                 "be an early applicant",
-                "viewed",
             }
         ]
-        raw_block = "\n".join(block_lines)
+        raw_block = "\n".join(
+            line for line in block_lines if line.casefold() != "viewed"
+        )
         observations.append(
             CardObservation(
                 source="linkedin",
@@ -147,15 +150,13 @@ def parse_linkedin_snapshot(
                 employer=employer,
                 location=location,
                 workplace_type=workplace_type,
-                easy_apply=True
-                if any(tag.casefold() == "easy apply" for tag in tags)
-                else None,
-                card_tags=tags,
-                teaser_text="\n".join(metadata).strip() or None,
+                easy_apply=True if easy_apply else None,
+                card_tags=None,
+                teaser_text="\n".join(teaser_metadata).strip() or None,
                 raw_card_text=raw_block,
                 raw_json={
                     "offset": offset,
-                    "metadata_lines": metadata,
+                    "metadata_lines": source_metadata,
                     "link_title": title,
                 },
                 query_text=query_text,

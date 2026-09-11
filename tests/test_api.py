@@ -364,3 +364,54 @@ def test_admin_log_returns_durable_collection_log_tail(tmp_path, monkeypatch):
         assert response.status_code == 200
         assert response.text == "tail:25\n"
         assert response.headers["content-type"].startswith("text/plain")
+
+
+def test_admin_seek_browser_focuses_persistent_seek_tab(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        from api import main as api_main
+
+        monkeypatch.setattr(
+            api_main,
+            "focus_or_open_tab",
+            lambda url, host_suffix: type(
+                "Response",
+                (),
+                {"result": {"ok": True, "url": url, "reused": True}},
+            )(),
+        )
+        response = client.post("/v3/admin/browser/seek")
+        assert response.status_code == 200
+        assert response.json()["reused"] is True
+        assert response.json()["url"] == "https://au.seek.com/"
+
+
+def test_admin_stats_exposes_current_bootstrap_and_latest(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        from api import main as api_main
+
+        monkeypatch.setattr(api_main, "enabled_state_codes", lambda: ["NSW"])
+        monkeypatch.setattr(
+            api_main,
+            "population_stats",
+            lambda _codes: {
+                "jobs": 200,
+                "source_jobs": {"seek": 180, "linkedin": 20},
+                "jd_markers": 100,
+            },
+        )
+        bootstrap = {"id": 24, "run_kind": "bootstrap", "stats": {"jobs_total": 190}}
+        latest = {"id": 25, "run_kind": "normal", "stats": {"jobs_total": 200}}
+        monkeypatch.setattr(api_main, "bootstrap_market_run", lambda: bootstrap)
+        monkeypatch.setattr(api_main, "latest_market_run", lambda: latest)
+
+        response = client.get("/v3/admin/stats")
+        assert response.status_code == 200
+        assert response.json() == {
+            "current": {
+                "jobs": 200,
+                "source_jobs": {"seek": 180, "linkedin": 20},
+                "jd_markers": 100,
+            },
+            "bootstrap": bootstrap,
+            "latest": latest,
+        }

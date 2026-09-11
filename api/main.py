@@ -9,7 +9,11 @@ from fastapi.responses import HTMLResponse, PlainTextResponse
 from pydantic import BaseModel, Field
 
 from collector.backup import create_backup, list_backups
-from collector.browser_broker import persistent_browser_ready
+from collector.browser_broker import (
+    BrowserBrokerError,
+    focus_or_open_tab,
+    persistent_browser_ready,
+)
 from collector.consumers import advance_checkpoint, get_checkpoint
 from collector.db import (
     ROOT,
@@ -33,8 +37,11 @@ from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
 from collector.retention import apply_retention
 from collector.run_logging import read_collection_log_tail
+from collector.run_stats import population_stats
 from collector.scheduler import SCHEDULER
+from collector.seek_cycle import enabled_state_codes
 from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
+from collector.service_state import bootstrap_market_run, latest_market_run
 from collector.settings import (
     SettingError,
     get_setting,
@@ -598,6 +605,24 @@ def admin_service_status():
 @app.get(f"/{API_VERSION}/admin/log", response_class=PlainTextResponse)
 def admin_collection_log(lines: int = Query(500, ge=1, le=5000)):
     return PlainTextResponse(read_collection_log_tail(lines))
+
+
+@app.post(f"/{API_VERSION}/admin/browser/seek")
+def admin_open_seek_browser():
+    try:
+        result = focus_or_open_tab("https://au.seek.com/", host_suffix="seek.com")
+    except BrowserBrokerError as exc:
+        raise HTTPException(502, str(exc)) from None
+    return result.result
+
+
+@app.get(f"/{API_VERSION}/admin/stats")
+def admin_collection_stats():
+    return {
+        "current": population_stats(enabled_state_codes()),
+        "bootstrap": bootstrap_market_run(),
+        "latest": latest_market_run(),
+    }
 
 
 @app.post(f"/{API_VERSION}/admin/collection/run")

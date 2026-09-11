@@ -243,6 +243,7 @@ CREATE TABLE IF NOT EXISTS market_collection_runs (
     id INTEGER PRIMARY KEY,
     trigger TEXT NOT NULL,
     source_scope TEXT NOT NULL,
+    run_kind TEXT NOT NULL DEFAULT 'normal',
     mode TEXT NOT NULL,
     status TEXT NOT NULL,
     pid INTEGER,
@@ -250,6 +251,7 @@ CREATE TABLE IF NOT EXISTS market_collection_runs (
     finished_at TEXT,
     backup_path TEXT,
     states_json TEXT,
+    stats_json TEXT,
     message TEXT,
     error TEXT
 );

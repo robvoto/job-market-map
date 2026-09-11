@@ -76,7 +76,7 @@ Primary SEEK coverage is state-wide partitioning, not keyword searches. A partit
 A parent is complete only when all children are complete and their deduplicated union covers the parent reported count within configured tolerance. `/v3/coverage/seek` is the coverage proof; a non-empty feed is not proof.
 
 ## Browser/collection infrastructure
-Collection uses one JMM-owned visible long-lived Chromium service/profile (`data/playwright_jmm_seek_user_data`), isolated from Rob's normal Chrome and Job Hunter's SEEK profile. Runs attach/detach over localhost CDP and must not close/relaunch the browser between retries. SQLite WAL is enabled and normal consumers use HTTP, so many agents may consume the API concurrently even while collection runs.
+SEEK uses one JMM-owned visible long-lived Chromium service/profile (`data/playwright_jmm_seek_user_data`), isolated from Rob's normal Chrome and Job Hunter's SEEK profile. SEEK runs attach/detach over localhost CDP and must not close/relaunch the browser between retries. **Do not use that browser for LinkedIn.** JMM-011 is explicitly defined around the proven Job Hunter transport: python-jobspy HTTP discovery plus a bounded direct public-HTML vacancy fetch after exact LinkedIn-ID dedupe. SQLite WAL is enabled and normal consumers use HTTP, so many agents may consume the API concurrently even while collection runs.
 
 ## Admin/settings
 Operational knobs belong in settings/admin with helper text and validation, not scattered constants — see `.agents/skills/no-hardcoding/SKILL.md`. Retention, collection timing, partition thresholds, API page sizes, geography enablement and query enablement are admin-manageable where practical.
@@ -90,4 +90,4 @@ Every parser, partition, dedupe, cursor, retention, settings or API-contract bug
 ## Scheduler / service / backup rule
 Use the project-owned in-app scheduler. The background Admin/API service is started with `./scripts/service.sh start`; scheduled and manual collection both invoke the same collection-cycle runner. Supported runtime entrypoints are single-instance: API via `data/api-service.lock`, persistent browser via `data/browser-service.lock`/its fixed user-service unit, and collection via `data/collection.lock`.
 
-Create/verify an online SQLite backup before collection by default. Backup policy is admin-configurable, but do not disable or bypass it casually. The scheduler currently owns only the proven whole-state SEEK stage; do not add LinkedIn whole-registry scheduling until campaign-level continuation is implemented and tested.
+Create/verify an online SQLite backup before collection by default. Backup policy is admin-configurable, but do not disable or bypass it casually. The scheduler currently owns only the proven whole-state SEEK stage; do not add LinkedIn scheduling until JMM-011's JobSpy/HTTP campaign continuation is implemented and tested, and remove the obsolete browser LinkedIn path after cutover.

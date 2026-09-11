@@ -280,3 +280,31 @@ def test_close_tab_only_accepts_registered_page(monkeypatch):
 
     with pytest.raises(broker.BrowserBrokerError, match="stale JMM browser page id"):
         broker.close_tab(999)
+
+
+def test_focus_or_open_tab_reuses_existing_matching_host(monkeypatch):
+    from collector import browser_broker as broker
+
+    class FakePage:
+        def __init__(self, url):
+            self.url = url
+            self.front = 0
+
+        def is_closed(self):
+            return False
+
+        def bring_to_front(self):
+            self.front += 1
+
+        def title(self):
+            return "SEEK"
+
+    page = FakePage("https://au.seek.com/")
+    context = type("FakeContext", (), {"pages": [page]})()
+    monkeypatch.setattr(broker, "start_browser", lambda: None)
+    monkeypatch.setattr(broker, "_context", context)
+
+    result = broker.focus_or_open_tab("https://au.seek.com/", host_suffix="seek.com")
+    assert result.result["reused"] is True
+    assert result.result["url"] == "https://au.seek.com/"
+    assert page.front == 1

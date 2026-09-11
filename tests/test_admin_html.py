@@ -33,6 +33,7 @@ def test_admin_page_exposes_collection_scheduler_and_backup_controls():
         "/admin/collection/run",
         "/admin/collection/stop",
         "/admin/backup/run",
+        "/admin/browser/seek",
         "/admin/log",
         "fmtTime",
         "dashboard",
@@ -40,4 +41,18 @@ def test_admin_page_exposes_collection_scheduler_and_backup_controls():
     ):
         assert token in html
     assert "data/market.db" in html
+    assert "Open SEEK login browser" in html
+    assert "SEEK sign-in is not verified here" in html
+    assert "clearStatusError" in html
     assert "setInterval" in html
+
+
+def test_admin_page_exposes_side_stats_for_bootstrap_and_latest_run():
+    html = Path("api/admin.html").read_text(encoding="utf-8")
+    assert "stats-sidebar" in html
+    assert "3-day bootstrap" in html
+    assert "Latest run" in html
+    assert "Current market" in html
+    assert "/admin/stats" in html
+    assert "JD attempts" in html
+    assert "partitions" in html

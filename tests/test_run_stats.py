@@ -1,4 +1,4 @@
-from collector.run_stats import log_run_summary
+from collector.run_stats import build_run_stats, log_run_summary
 
 
 class _CaptureLog:
@@ -47,3 +47,17 @@ def test_run_summary_reports_population_deltas_and_coverage():
     assert "jd_failed=0" in log.lines[0]
     assert "jd_unavailable=2" in log.lines[0]
     assert "COVERAGE SUMMARY run_id=15 geography=ACT status=COMPLETE" in log.lines[1]
+
+    stats = build_run_stats(
+        duration_seconds=123.4,
+        baseline=baseline,
+        current=current,
+        partitions_processed=7,
+        jd_totals={"attempted": 27, "stored": 25, "failed": 0, "unavailable": 2},
+    )
+    assert stats["duration_seconds"] == 123.4
+    assert stats["jobs_total"] == 110
+    assert stats["jobs_added"] == 10
+    assert stats["jds_added"] == 25
+    assert stats["jd_attempted"] == 27
+    assert stats["partitions_processed"] == 7

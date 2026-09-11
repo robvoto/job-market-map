@@ -10,6 +10,7 @@ from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 from playwright.sync_api import (
     Error as PlaywrightError,
@@ -600,6 +601,36 @@ def list_pages() -> BrokerResponse:
 
 def open_tab(url: str, *, active: bool = False) -> BrokerResponse:
     return browser_command("open_tab", {"url": url, "active": active})
+
+
+def focus_or_open_tab(url: str, *, host_suffix: str) -> BrokerResponse:
+    """Bring an existing persistent-browser tab forward, or open it once if absent."""
+    started = time.perf_counter()
+    try:
+        start_browser()
+        assert _context is not None
+        suffix = host_suffix.strip().casefold().lstrip(".")
+        for page in reversed(_context.pages):
+            if page.is_closed():
+                continue
+            host = (urlsplit(page.url).hostname or "").casefold()
+            if host == suffix or host.endswith(f".{suffix}"):
+                page.bring_to_front()
+                return BrokerResponse(
+                    result={"ok": True, "url": page.url, "title": page.title(), "reused": True},
+                    elapsed_seconds=time.perf_counter() - started,
+                )
+        page = _context.new_page()
+        page.goto(url, wait_until="domcontentloaded", timeout=30000)
+        page.bring_to_front()
+        return BrokerResponse(
+            result={"ok": True, "url": page.url, "title": page.title(), "reused": False},
+            elapsed_seconds=time.perf_counter() - started,
+        )
+    except BrowserBrokerError:
+        raise
+    except Exception as exc:
+        raise BrowserBrokerError(f"failed to focus/open persistent JMM browser tab: {exc}") from exc
 
 
 def close_tab(page_id: int) -> BrokerResponse:

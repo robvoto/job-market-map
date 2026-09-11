@@ -10,7 +10,7 @@ from collector.backup import create_backup
 from collector.browser_broker import close_browser, close_tab, open_tab
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
-from collector.run_stats import log_run_summary, population_stats
+from collector.run_stats import build_run_stats, log_run_summary, population_stats
 from collector.seek_cycle import (
     all_states_complete,
     enabled_state_codes,
@@ -237,7 +237,20 @@ def main(argv: list[str] | None = None) -> int:
                     f"stored={jd_result.stored}, failed={jd_result.failed}, "
                     f"unavailable={jd_result.unavailable}, remaining={jd_result.remaining}."
                 )
-            finish_market_run(run_id, status=final_status, message=message)
+            current_stats = population_stats(codes)
+            run_stats = build_run_stats(
+                duration_seconds=time.monotonic() - run_started,
+                baseline=baseline_stats,
+                current=current_stats,
+                partitions_processed=run_partitions_processed,
+                jd_totals=jd_totals,
+            )
+            finish_market_run(
+                run_id,
+                status=final_status,
+                message=message,
+                stats=run_stats,
+            )
             if args.trigger == "scheduled":
                 update_scheduler_state(
                     last_finished_at=utc_now(),
@@ -259,7 +272,7 @@ def main(argv: list[str] | None = None) -> int:
                     status=final_status,
                     duration_seconds=time.monotonic() - run_started,
                     baseline=baseline_stats,
-                    current=population_stats(codes),
+                    current=current_stats,
                     partitions_processed=run_partitions_processed,
                     jd_totals=jd_totals,
                 )
@@ -275,11 +288,20 @@ def main(argv: list[str] | None = None) -> int:
     except Exception as exc:  # noqa: BLE001 - CLI boundary persists unexpected run failures.
         try:
             if "run_id" in locals():
+                current_stats = population_stats(run_codes)
+                run_stats = build_run_stats(
+                    duration_seconds=time.monotonic() - run_started,
+                    baseline=baseline_stats,
+                    current=current_stats,
+                    partitions_processed=run_partitions_processed,
+                    jd_totals=jd_totals,
+                )
                 finish_market_run(
                     run_id,
                     status="FAILED",
                     message="Collection failed.",
                     error=str(exc),
+                    stats=run_stats,
                 )
             if args.trigger == "scheduled":
                 update_scheduler_state(
@@ -296,7 +318,7 @@ def main(argv: list[str] | None = None) -> int:
                     status="FAILED",
                     duration_seconds=time.monotonic() - run_started,
                     baseline=baseline_stats,
-                    current=population_stats(run_codes),
+                    current=current_stats,
                     partitions_processed=run_partitions_processed,
                     jd_totals=jd_totals,
                 )

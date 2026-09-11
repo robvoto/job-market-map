@@ -31,8 +31,8 @@ It does not own:
 ## Data flow
 
 ```text
-LinkedIn cards ----\
-SEEK cards ----------> source collectors ---> neutral ingest ---> SQLite market.db
+LinkedIn JobSpy/HTTP -\
+SEEK browser ----------> source collectors ---> neutral ingest ---> SQLite market.db
 Employer boards -----/                              |                 |
 Other sources --------------------------------------/                 |
                                                                      v
@@ -44,7 +44,7 @@ Other sources --------------------------------------/                 |
                      policy                      policy                            policy
 ```
 
-A consumer may decide that a card deserves an individual JD review. That acquisition occurs **outside** the neutral bulk-mapping stage, but the resulting neutral JD belongs in JMM and is reused from there rather than permanently duplicated by the consumer.
+A source collector may capture a validated JD/detail response during collection, and a consumer may request a missing JD on demand through JMM-003. In both cases the neutral JD belongs in JMM and is reused from there rather than permanently duplicated by the consumer.
 
 ## Why SQLite
 
@@ -68,7 +68,7 @@ The database is the shared canonical state. Collectors and agents must:
 - record observations rather than overwriting history destructively;
 - never infer that another agent's presence is an error.
 
-Browser ownership is local to JMM. JMM keeps one visible long-lived Chromium service with its own user-data directory and localhost-only CDP endpoint; it does not share Rob's ordinary Chrome tabs or Job Hunter's SEEK profile. Collection runs attach to and detach from that same browser instead of relaunching it, preserving SEEK/Cloudflare session state across retries and runs. Collection remains single-writer/run-locked.
+SEEK browser ownership is local to JMM. JMM keeps one visible long-lived Chromium service with its own user-data directory and localhost-only CDP endpoint; it does not share Rob's ordinary Chrome tabs or Job Hunter's SEEK profile. SEEK collection runs attach to and detach from that same browser instead of relaunching it, preserving SEEK/Cloudflare session state across retries and runs. LinkedIn does not use this Chromium service; its JMM-011 target architecture is JobSpy/direct HTTP. Collection remains single-writer/run-locked.
 
 ## Identity strategy
 

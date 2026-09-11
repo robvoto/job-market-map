@@ -444,6 +444,18 @@ def init_db() -> None:
             "duplicate_hits INTEGER NOT NULL DEFAULT 0",
         )
         _ensure_column(conn, "queries", "last_error", "last_error TEXT")
+        _ensure_column(
+            conn,
+            "market_collection_runs",
+            "run_kind",
+            "run_kind TEXT NOT NULL DEFAULT 'normal'",
+        )
+        _ensure_column(
+            conn,
+            "market_collection_runs",
+            "stats_json",
+            "stats_json TEXT",
+        )
 
         _migrate_job_observation_state(conn)
         _backfill_identity(conn, "jobs")

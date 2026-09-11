@@ -19,11 +19,15 @@ The top Admin panel controls the running collector without killing the Admin API
 - Pause / Resume overnight schedule;
 - set overnight time (default 02:00 local);
 - Backup DB now;
-- collector/browser/scheduler status dots;
+- collector/JMM-browser/scheduler status dots;
 - latest run start/finish/duration and result;
 - next run using human-readable local date/time;
+- right-side current-market, accepted 3-day-bootstrap and latest-run statistics;
+- **Open SEEK login browser**, which focuses or opens SEEK in the persistent JMM Chrome;
 - direct **View collection log** link;
 - latest backup status.
+
+**JMM browser: Running** means only that the dedicated persistent Chrome process is reachable. It does not claim SEEK is signed in. Use **Open SEEK login browser** to bring that same persistent SEEK session forward and sign in when needed.
 
 Start the background Admin service with `./scripts/service.sh start`; it must remain running for the in-app overnight scheduler to fire. The status panel refreshes every 10 seconds.
 
@@ -51,7 +55,7 @@ Personal applied/rejected/presented state is not a retention exception here beca
 ### Collection
 - default freshness horizon;
 - SEEK page settling, parser wait and safety-page guard;
-- LinkedIn settling, parser wait and resumable chunk size;
+- legacy LinkedIn prototype settings remain visible until JMM-011 replaces the browser-based prototype with the proven JobSpy/HTTP design;
 - campaign source/query chunk size (execution bound only, never a market-coverage limit).
 
 ### Duplicate detection

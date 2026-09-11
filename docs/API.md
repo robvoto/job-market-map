@@ -57,7 +57,9 @@ GET   /v3/admin/geographies
 PATCH /v3/admin/geographies/{code}
 POST  /v3/admin/retention/run
 GET   /v3/admin/service/status
+GET   /v3/admin/stats
 GET   /v3/admin/log?lines=500
+POST  /v3/admin/browser/seek
 POST  /v3/admin/collection/run
 POST  /v3/admin/collection/stop
 POST  /v3/admin/backup/run

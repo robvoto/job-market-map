@@ -12,16 +12,33 @@ def utc_now() -> str:
     return datetime.now(UTC).isoformat(timespec="seconds")
 
 
-def start_market_run(*, trigger: str, mode: str, states: list[str], backup_path: str | None) -> int:
+def start_market_run(
+    *,
+    trigger: str,
+    mode: str,
+    states: list[str],
+    backup_path: str | None,
+    source_scope: str = "seek_whole_state",
+    run_kind: str = "normal",
+) -> int:
     init_db()
     with connect() as conn:
         cur = conn.execute(
             """
             INSERT INTO market_collection_runs(
-                trigger,source_scope,mode,status,pid,started_at,backup_path,states_json,message
-            ) VALUES(?, 'seek_whole_state', ?, 'RUNNING', ?, ?, ?, ?, 'Collection started')
+                trigger,source_scope,run_kind,mode,status,pid,started_at,backup_path,states_json,message
+            ) VALUES(?, ?, ?, ?, 'RUNNING', ?, ?, ?, ?, 'Collection started')
             """,
-            (trigger, mode, os.getpid(), utc_now(), backup_path, json.dumps(states)),
+            (
+                trigger,
+                source_scope,
+                run_kind,
+                mode,
+                os.getpid(),
+                utc_now(),
+                backup_path,
+                json.dumps(states),
+            ),
         )
         return int(cur.lastrowid)
 
@@ -34,24 +51,33 @@ def set_market_run_backup(run_id: int, backup_path: str) -> None:
         )
 
 
-def finish_market_run(run_id: int, *, status: str, message: str, error: str | None = None) -> None:
+def finish_market_run(
+    run_id: int,
+    *,
+    status: str,
+    message: str,
+    error: str | None = None,
+    stats: dict[str, Any] | None = None,
+) -> None:
     with connect() as conn:
         conn.execute(
             """
             UPDATE market_collection_runs
-               SET status=?, finished_at=?, message=?, error=?
+               SET status=?, finished_at=?, message=?, error=?, stats_json=?
              WHERE id=?
             """,
-            (status, utc_now(), message, error, run_id),
+            (
+                status,
+                utc_now(),
+                message,
+                error,
+                json.dumps(stats, ensure_ascii=False, sort_keys=True) if stats else None,
+                run_id,
+            ),
         )
 
 
-def latest_market_run() -> dict | None:
-    init_db()
-    with connect() as conn:
-        row = conn.execute(
-            "SELECT * FROM market_collection_runs ORDER BY id DESC LIMIT 1"
-        ).fetchone()
+def _decode_market_run(row) -> dict | None:
     if not row:
         return None
     item = dict(row)
@@ -60,7 +86,37 @@ def latest_market_run() -> dict | None:
             item["states"] = json.loads(item.pop("states_json"))
         except json.JSONDecodeError:
             item["states"] = []
+    if item.get("stats_json"):
+        try:
+            item["stats"] = json.loads(item.pop("stats_json"))
+        except json.JSONDecodeError:
+            item["stats"] = None
+    else:
+        item.pop("stats_json", None)
+        item["stats"] = None
     return item
+
+
+def latest_market_run() -> dict | None:
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            "SELECT * FROM market_collection_runs ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    return _decode_market_run(row)
+
+
+def bootstrap_market_run() -> dict | None:
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM market_collection_runs
+             WHERE run_kind='bootstrap'
+             ORDER BY id DESC LIMIT 1
+            """
+        ).fetchone()
+    return _decode_market_run(row)
 
 
 def scheduler_state() -> dict:

@@ -42,7 +42,8 @@ The Admin page provides:
 - **Pause overnight schedule** / **Resume overnight schedule**;
 - overnight local time control (default **02:00**);
 - current collector PID/state;
-- persistent browser ready/broken state;
+- persistent JMM browser running/unavailable state (reachability only; not proof of SEEK sign-in);
+- **Open SEEK login browser** control for the same persistent JMM Chrome/profile;
 - scheduler active/enabled/next-run state;
 - latest collection outcome;
 - **Backup DB now**;
@@ -100,4 +101,4 @@ The durable collection log is `logs/collection.log`. Admin links to `GET /v3/adm
 
 The safe scheduled stage currently runs **whole-state SEEK only** for enabled NSW/ACT/QLD geographies.
 
-LinkedIn individual queries have resumable offsets, but the entire LinkedIn query registry does not yet have a proven campaign-level cursor. Do not advertise or wire it as an overnight whole-registry stage until that is fixed and tested.
+LinkedIn is not yet part of the overnight runner. JMM-011 must replace the early browser-based LinkedIn prototype with Job Hunter's proven pattern: python-jobspy HTTP discovery plus one bounded direct public-HTML detail fetch per deduplicated new/unfetched vacancy. LinkedIn must not use the persistent JMM Chromium service.

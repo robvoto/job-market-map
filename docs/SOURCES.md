@@ -19,18 +19,22 @@ Known SEEK IDs are linked to current coverage without full re-ingest. If a canon
 
 ## LinkedIn
 
-Status: card-only extraction and resumable offset collection implemented.
+Status: an early browser/snapshot card prototype exists, but it is **not** the approved production path and is not scheduled. JMM-011 supersedes that design.
 
-Mechanics:
-- the search list is virtualised and exposes only about seven cards in one snapshot;
-- arbitrary `start=N` offsets produce different card windows;
-- collector advances by the number of cards parsed rather than assuming 25-card pages;
-- cursor is persisted by source/query/location so long result sets can resume across invocations;
-- source result count is treated as a hint because LinkedIn can change it between requests.
+Approved JMM-011 mechanics are based on Job Hunter's proven implementation:
+- discovery uses `python-jobspy` over HTTP, not Chromium/Playwright;
+- JobSpy runs in an isolated subprocess with pagination-progress reporting and a bounded no-progress watchdog;
+- discovery uses `linkedin_fetch_description=False` and deduplicates by native LinkedIn ID before detail work;
+- each genuinely new/unfetched canonical vacancy gets at most one bounded direct public-HTML fetch, and that same response supplies JD plus neutral detail facts;
+- apply method uses the current public page's direct apply URL: trustworthy external URL -> `external_apply`; no external URL -> `easy_apply`; otherwise unknown;
+- explicit `Reposted` sets `reposted=true`; repost identity/merging remains JMM-008's responsibility;
+- explicit `No longer accepting applications` supplies the LinkedIn closed source status;
+- `applicant_count` is stored only for an exact numeric count such as `30 applicants` or `187 applicants`; threshold text such as `Be among the first 25 applicants` is not converted into a count;
+- personal/UI activity such as `Viewed` is never canonical JMM data. Low-value badges such as `Promoted`, `Actively reviewing applicants` and `Be an early applicant` are not promoted into structured canonical fields.
 
-Captured card data currently includes title, employer, source ID, URL, location/work arrangement, visible card metadata/tags and raw card evidence.
+Existing LinkedIn rows are not bulk re-fetched merely to fill these fields. Unknown stays unknown unless a vacancy is naturally fetched later for another valid reason.
 
-Individual JDs are not opened.
+After JMM-011 proves the HTTP path, remove the obsolete browser LinkedIn collector rather than leaving two source implementations.
 
 ## APSJobs
 
