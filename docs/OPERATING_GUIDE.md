@@ -96,7 +96,7 @@ For long-running manual/MCP starts, use `scripts/start_collection_service.sh ...
 
 SEEK uses **one JMM-owned persistent Playwright browser context** and reuses a small number of workflow pages. The JMM profile is isolated from both Rob's normal Chrome and Job Hunter's browser profile.
 
-LinkedIn must not reuse that Chromium path. JMM-011 is defined to port the proven Job Hunter transport: python-jobspy HTTP discovery, exact native-ID dedupe, then one direct public-HTML detail fetch per deduplicated new/unfetched vacancy. Do not keep both browser and HTTP LinkedIn collectors after cutover.
+LinkedIn uses the proven Job Hunter transport: python-jobspy HTTP discovery, exact native-ID dedupe, then one direct public-HTML detail fetch per deduplicated new/unfetched vacancy. The obsolete browser LinkedIn implementation has been removed. One shared collection runner owns SEEK followed by LinkedIn; there is no second scheduler or browser process for LinkedIn.
 ## SEEK daily collection
 
 Normal ongoing SEEK collection uses the latest **1 day** only. Known SEEK source job IDs are recognised from JMM and do not go through full card ingestion or JD fetching again. Only identities without a successful permanent JD-fetch marker are eligible for JD acquisition.

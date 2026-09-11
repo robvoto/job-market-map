@@ -8,6 +8,7 @@ from threading import Event
 
 from collector.backup import create_backup
 from collector.browser_broker import close_browser, close_tab, open_tab
+from collector.campaign import run_linkedin_campaign
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
 from collector.run_stats import build_run_stats, log_run_summary, population_stats
@@ -31,7 +32,7 @@ from collector.settings import get_setting
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run one safe SEEK discovery + write-once JD collection cycle."
+        description="Run one safe SEEK + LinkedIn market collection cycle."
     )
     parser.add_argument("--trigger", choices=["manual", "scheduled"], default="manual")
     parser.add_argument(
@@ -69,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     list_page_id: int | None = None
     detail_page_id: int | None = None
     jd_totals = {"attempted": 0, "stored": 0, "failed": 0, "unavailable": 0}
+    linkedin_result = None
 
     def request_stop(*_args) -> None:
         stop_event.set()
@@ -101,6 +103,7 @@ def main(argv: list[str] | None = None) -> int:
                 mode=mode,
                 states=codes,
                 backup_path=None,
+                source_scope="seek_whole_state+linkedin",
             )
             log.info(
                 "run started run_id=%s mode=%s days=%s states=%s backfill_existing_jds=%s max_runtime_minutes=%s",
@@ -123,7 +126,7 @@ def main(argv: list[str] | None = None) -> int:
                 update_scheduler_state(
                     last_started_at=utc_now(),
                     last_status="RUNNING",
-                    last_message=f"Scheduled SEEK collection started ({mode}, {days}d).",
+                    last_message=f"Scheduled market collection started ({mode}, {days}d).",
                 )
 
             configured_limit = int(get_setting("scheduler.max_runtime_minutes"))
@@ -216,16 +219,54 @@ def main(argv: list[str] | None = None) -> int:
                     include_existing_unfetched=args.backfill_existing_jds
                 )
 
+            # LinkedIn deliberately does not use Chromium. Release this process's
+            # SEEK-owned pages/CDP attachment before starting the HTTP-only stage.
+            for page_id in (detail_page_id, list_page_id):
+                if page_id is None:
+                    continue
+                try:
+                    close_tab(page_id)
+                except Exception as exc:  # noqa: BLE001 - cleanup is non-fatal here.
+                    log.warning(
+                        "failed to close SEEK page before LinkedIn page_id=%s error=%s",
+                        page_id,
+                        exc,
+                    )
+            detail_page_id = None
+            list_page_id = None
+            close_browser()
+
+            if (
+                not stop_event.is_set()
+                and not deadline_reached()
+                and result.status != "BLOCKED_HUMAN"
+            ):
+                log.info("LinkedIn campaign started days=%s", days)
+                linkedin_result = run_linkedin_campaign(
+                    days=days,
+                    should_stop=stop_event.is_set,
+                    deadline_reached=deadline_reached,
+                )
+                log.info("LinkedIn campaign finished result=%s", asdict(linkedin_result))
+
             if stop_event.is_set():
                 final_status = "STOPPED"
-            elif deadline_reached() and (jd_result is None or jd_result.remaining):
+            elif deadline_reached():
                 final_status = "PARTIAL_TIME_LIMIT"
             elif result.status != "COMPLETE":
                 final_status = result.status
             elif jd_result is None or jd_result.remaining:
                 final_status = "PARTIAL_JD"
-            else:
+            elif linkedin_result is None or linkedin_result.status in {"COMPLETE", "DISABLED"}:
                 final_status = "COMPLETE"
+            elif linkedin_result.status == "PARTIAL_FAILURE":
+                final_status = "PARTIAL_SOURCE"
+            elif linkedin_result.status == "STOPPED":
+                final_status = "STOPPED"
+            elif linkedin_result.status == "PARTIAL_TIME_LIMIT":
+                final_status = "PARTIAL_TIME_LIMIT"
+            else:
+                final_status = "PARTIAL_LINKEDIN"
 
             message = (
                 f"SEEK {mode} {days}d cycle {final_status.lower()}; "
@@ -237,6 +278,14 @@ def main(argv: list[str] | None = None) -> int:
                     f"stored={jd_result.stored}, failed={jd_result.failed}, "
                     f"unavailable={jd_result.unavailable}, remaining={jd_result.remaining}."
                 )
+            if linkedin_result is not None:
+                message += (
+                    f" LinkedIn {linkedin_result.status.lower()}: "
+                    f"queries={linkedin_result.queries_complete}/{linkedin_result.queries_total}, "
+                    f"observed={linkedin_result.cards_observed}, new={linkedin_result.unique_new_jobs}, "
+                    f"detail_stored={linkedin_result.detail_stored}, "
+                    f"detail_failed={linkedin_result.detail_failed}."
+                )
             current_stats = population_stats(codes)
             run_stats = build_run_stats(
                 duration_seconds=time.monotonic() - run_started,
@@ -245,6 +294,8 @@ def main(argv: list[str] | None = None) -> int:
                 partitions_processed=run_partitions_processed,
                 jd_totals=jd_totals,
             )
+            if linkedin_result is not None:
+                run_stats["linkedin"] = asdict(linkedin_result)
             finish_market_run(
                 run_id,
                 status=final_status,

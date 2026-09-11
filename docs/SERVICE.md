@@ -99,6 +99,4 @@ The durable collection log is `logs/collection.log`. Admin links to `GET /v3/adm
 
 ## Current scheduled source scope
 
-The safe scheduled stage currently runs **whole-state SEEK only** for enabled NSW/ACT/QLD geographies.
-
-LinkedIn is not yet part of the overnight runner. JMM-011 must replace the early browser-based LinkedIn prototype with Job Hunter's proven pattern: python-jobspy HTTP discovery plus one bounded direct public-HTML detail fetch per deduplicated new/unfetched vacancy. LinkedIn must not use the persistent JMM Chromium service.
+The singleton scheduled runner performs **whole-state SEEK first**, then detaches from its SEEK browser pages and runs the resumable **LinkedIn JobSpy/HTTP campaign** inside the same collection lock, backup and wall-clock runtime budget. LinkedIn never uses the persistent JMM Chromium service. An unfinished LinkedIn cycle resumes on the next run; a new daily cycle starts only after the previous cycle completes.

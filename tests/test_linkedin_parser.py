@@ -1,53 +1,51 @@
-import json
-from pathlib import Path
+from datetime import date
 
-from sources.linkedin import parse_linkedin_snapshot
+from sources.linkedin import (
+    linkedin_identity_aliases,
+    normalize_linkedin_source_job_id,
+    observation_from_jobspy_row,
+)
 
 
-def test_real_linkedin_snapshot_parses_seven_card_only_results():
-    snapshot = json.loads(
-        Path("tests/fixtures/linkedin_snapshot.json").read_text(encoding="utf-8")
+def test_linkedin_identity_normalises_jobspy_and_accepts_old_numeric_alias():
+    assert normalize_linkedin_source_job_id("li-4464190406") == "li-4464190406"
+    assert normalize_linkedin_source_job_id("4464190406") == "li-4464190406"
+    assert linkedin_identity_aliases("li-4464190406") == (
+        "li-4464190406",
+        "4464190406",
     )
-    cards, total = parse_linkedin_snapshot(
-        snapshot, query_text="technical implementation", query_location="Sydney NSW"
-    )
-    assert total == 645
-    assert len(cards) == 7
-    assert cards[0].source_job_id == "4464190406"
-    assert cards[0].title == "Project Coordinator – Tier 2 Builder"
-    assert cards[0].employer == "Linktal Recruitment"
-    assert cards[0].location == "Sydney, New South Wales, Australia"
-    assert cards[0].workplace_type == "On-site"
-    assert cards[1].title == "F5 Platforms Engineer"
-    assert cards[1].workplace_type == "Hybrid"
 
 
-def test_linkedin_parser_keeps_easy_apply_but_discards_personal_viewed_and_ui_badges():
-    snapshot = {
-        "text": (
-            "Example Role\n"
-            "Example Role\n"
-            "Example Co\n"
-            "Sydney, New South Wales, Australia\n"
-            "Viewed\n"
-            "Promoted\n"
-            "Easy Apply\n"
-            "Actively reviewing applicants"
-        ),
-        "elements": [
-            {
-                "href": "https://www.linkedin.com/jobs/view/example-role-4464190406",
-                "text": "Example Role",
-                "ariaLabel": "Example Role",
-            }
-        ],
+def test_jobspy_row_maps_only_neutral_discovery_fields():
+    row = {
+        "id": "li-4464190406",
+        "title": "Business Analyst",
+        "company": "Example Co",
+        "location": "Sydney, NSW, Australia",
+        "job_url": "https://www.linkedin.com/jobs/view/4464190406",
+        "date_posted": date(2026, 9, 11),
+        "is_remote": True,
+        "min_amount": 800,
+        "max_amount": 900,
+        "currency": "AUD",
+        "interval": "day",
+        "easy_apply": True,
     }
-    cards, _ = parse_linkedin_snapshot(
-        snapshot, query_text="example", query_location="Sydney NSW"
+    observation = observation_from_jobspy_row(
+        row,
+        query_text="business analyst",
+        query_location="New South Wales, Australia",
+        geography_code="NSW",
+        rank=1,
+        offset=0,
+        page_size=25,
     )
-    card = cards[0]
-    assert card.easy_apply is True
-    assert card.card_tags is None
-    assert "Viewed" not in (card.raw_card_text or "")
-    assert "Viewed" not in str(card.raw_json)
-    assert card.teaser_text is None
+    assert observation.source_job_id == "li-4464190406"
+    assert observation.title == "Business Analyst"
+    assert observation.salary_text == "AUD 800 - 900 day"
+    assert observation.posted_at == "2026-09-11"
+    assert observation.workplace_type == "Remote"
+    # JobSpy's Easy Apply value is deliberately not canonicalised; the direct
+    # vacancy response owns apply-method evidence.
+    assert observation.easy_apply is None
+    assert observation.card_tags is None

@@ -8,6 +8,12 @@ from typing import Any
 from collector.db import ROOT, connect, init_db
 
 CATALOG_PATH = ROOT / "config" / "settings_catalog.json"
+OBSOLETE_SETTING_KEYS = {
+    "collection.linkedin_initial_wait_seconds",
+    "collection.linkedin_parse_wait_seconds",
+    "collection.linkedin_chunk_offsets",
+    "collection.campaign_query_chunk_size",
+}
 
 
 class SettingError(ValueError):
@@ -37,6 +43,12 @@ def seed_settings() -> int:
         conn.execute(
             "DELETE FROM settings WHERE key IN ('retention.preserve_activity_jobs_forever','retention.preserve_status_jobs_forever')"
         )
+        if OBSOLETE_SETTING_KEYS:
+            placeholders = ",".join("?" for _ in OBSOLETE_SETTING_KEYS)
+            conn.execute(
+                f"DELETE FROM settings WHERE key IN ({placeholders})",
+                tuple(sorted(OBSOLETE_SETTING_KEYS)),
+            )
         for key, spec in catalog.items():
             conn.execute(
                 """

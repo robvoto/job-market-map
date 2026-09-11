@@ -14,6 +14,7 @@ from collector.browser_broker import (
     focus_or_open_tab,
     persistent_browser_ready,
 )
+from collector.campaign import linkedin_campaign_progress
 from collector.consumers import advance_checkpoint, get_checkpoint
 from collector.db import (
     ROOT,
@@ -52,7 +53,7 @@ from collector.settings import (
 )
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 6
+SCHEMA_VERSION = 7
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -622,6 +623,7 @@ def admin_collection_stats():
         "current": population_stats(enabled_state_codes()),
         "bootstrap": bootstrap_market_run(),
         "latest": latest_market_run(),
+        "linkedin_campaign": linkedin_campaign_progress(),
     }
 
 

@@ -19,11 +19,12 @@ Known SEEK IDs are linked to current coverage without full re-ingest. If a canon
 
 ## LinkedIn
 
-Status: an early browser/snapshot card prototype exists, but it is **not** the approved production path and is not scheduled. JMM-011 supersedes that design.
+Status: JobSpy/HTTP discovery, resumable daily campaign state and direct public-page detail/JD enrichment implemented and scheduled after SEEK.
 
-Approved JMM-011 mechanics are based on Job Hunter's proven implementation:
+Mechanics are based on Job Hunter's proven implementation:
 - discovery uses `python-jobspy` over HTTP, not Chromium/Playwright;
 - JobSpy runs in an isolated subprocess with pagination-progress reporting and a bounded no-progress watchdog;
+- six consecutive query failures open the default source circuit breaker so an outage does not hammer the remaining registry; the threshold is Admin-configurable;
 - discovery uses `linkedin_fetch_description=False` and deduplicates by native LinkedIn ID before detail work;
 - each genuinely new/unfetched canonical vacancy gets at most one bounded direct public-HTML fetch, and that same response supplies JD plus neutral detail facts;
 - apply method uses the current public page's direct apply URL: trustworthy external URL -> `external_apply`; no external URL -> `easy_apply`; otherwise unknown;
@@ -34,7 +35,7 @@ Approved JMM-011 mechanics are based on Job Hunter's proven implementation:
 
 Existing LinkedIn rows are not bulk re-fetched merely to fill these fields. Unknown stays unknown unless a vacancy is naturally fetched later for another valid reason.
 
-After JMM-011 proves the HTTP path, remove the obsolete browser LinkedIn collector rather than leaving two source implementations.
+The old browser/snapshot LinkedIn path has been removed. LinkedIn has no Playwright/Chromium runtime dependency.
 
 ## APSJobs
 

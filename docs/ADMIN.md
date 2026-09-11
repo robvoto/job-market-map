@@ -55,8 +55,9 @@ Personal applied/rejected/presented state is not a retention exception here beca
 ### Collection
 - default freshness horizon;
 - SEEK page settling, parser wait and safety-page guard;
-- legacy LinkedIn prototype settings remain visible until JMM-011 replaces the browser-based prototype with the proven JobSpy/HTTP design;
-- campaign source/query chunk size (execution bound only, never a market-coverage limit).
+- LinkedIn enable/disable, JobSpy results per query, no-progress timeout, direct-detail HTTP timeout and consecutive-query failure circuit breaker.
+
+The right-side stats panel also shows the current LinkedIn cycle (queries complete/remaining) and, after a normal run, LinkedIn cards read, new jobs, JDs stored and detail failures.
 
 ### Duplicate detection
 - near-match enable/disable;

@@ -27,6 +27,7 @@ def get_cursor(source: str, query_text: str, location: str) -> dict:
             "status": "PENDING",
             "last_job_id": None,
             "total_results_hint": None,
+            "cycle_key": None,
         }
     )
 
@@ -40,20 +41,22 @@ def save_cursor(
     status: str,
     last_job_id: str | None = None,
     total_results_hint: int | None = None,
+    cycle_key: str | None = None,
 ) -> None:
     init_db()
     with connect() as conn:
         conn.execute(
             """
             INSERT INTO collection_cursors(source, query_text, location, cursor_value, status, updated_at,
-                                           last_job_id, total_results_hint)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                                           last_job_id, total_results_hint, cycle_key)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             ON CONFLICT(source, query_text, location) DO UPDATE SET
                 cursor_value=excluded.cursor_value,
                 status=excluded.status,
                 updated_at=excluded.updated_at,
                 last_job_id=excluded.last_job_id,
-                total_results_hint=COALESCE(excluded.total_results_hint, collection_cursors.total_results_hint)
+                total_results_hint=COALESCE(excluded.total_results_hint, collection_cursors.total_results_hint),
+                cycle_key=excluded.cycle_key
             """,
             (
                 source,
@@ -64,5 +67,6 @@ def save_cursor(
                 now(),
                 last_job_id,
                 total_results_hint,
+                cycle_key,
             ),
         )

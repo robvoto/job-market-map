@@ -43,13 +43,14 @@ uv run python -m scripts.run_seek_query "technical implementation" --location "S
 
 The SEEK query should finish only on a verified terminal/no-new-result state. A safety-page limit is a failure, not completion.
 
-## LinkedIn prototype — do not use as the production path
+## Run/resume one LinkedIn query through the production HTTP path
 
 ```bash
-uv run python -m scripts.run_linkedin_chunk "technical implementation" --location "Sydney NSW" --days 7 --max-offsets 8
+uv run python -m scripts.run_linkedin_chunk "business analyst" \
+  --location "New South Wales, Australia" --geography-code NSW --days 1
 ```
 
-This command exercises the early browser/snapshot prototype only. It is not the approved production design and must not be wired into the scheduler. JMM-011 replaces it with the proven Job Hunter architecture: python-jobspy HTTP discovery, exact LinkedIn-ID dedupe, then one direct public-HTML vacancy fetch reused for JD/apply/repost/closed/applicant-count evidence. After that cutover the obsolete browser LinkedIn path must be removed rather than kept as a fallback.
+This diagnostic command uses the same production JobSpy/HTTP collector as the scheduler. `--results-wanted N` may be used for a small one-query diagnostic only; normal scheduled collection uses the Admin setting and durable campaign/cursor state.
 
 ## Start local API
 
@@ -65,7 +66,7 @@ uv run python -m collector.retention
 
 ## SEEK browser prerequisite
 
-JMM keeps one visible long-lived Chromium service using `data/playwright_jmm_seek_user_data` **for SEEK**. `scripts/start_browser_service.sh` starts it only when it is not already running; later SEEK collection runs attach to the same browser over localhost CDP and detach without closing it. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, use Admin's **Open SEEK login browser** control, complete it in the visible JMM browser and let the run continue. LinkedIn must not use this browser.
+JMM keeps one visible long-lived Chromium service using `data/playwright_jmm_seek_user_data` **for SEEK only**. `scripts/start_browser_service.sh` starts it only when it is not already running; later SEEK collection runs attach to the same browser over localhost CDP and detach without closing it. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, use Admin's **Open SEEK login browser** control, complete it in the visible JMM browser and let the run continue. The shared runner closes/detaches its SEEK pages before the LinkedIn HTTP stage starts.
 
 For a long-running/manual collection launched from MCP or another temporary shell, start the existing collection runner inside JMM's user-service scope so the visible Chromium process survives after the calling shell exits:
 

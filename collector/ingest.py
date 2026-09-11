@@ -133,6 +133,8 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             "employment_type": _clean(obs.employment_type),
             "workplace_type": _clean(obs.workplace_type),
             "posted_at": _clean(obs.posted_at),
+            "source_status": _clean(obs.source_status),
+            "apply_method": _clean(obs.apply_method),
             "applicant_count": obs.applicant_count,
             "teaser_text": _clean(obs.teaser_text),
             "raw_card_text": obs.raw_card_text,
@@ -176,9 +178,9 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                 INSERT INTO jobs(
                     source, source_job_id, identity_key, canonical_url, title, employer, location, geography_code,
                     salary_text, employment_type, workplace_type, posted_at,
-                    reposted, applicant_count, easy_apply, teaser_text, raw_card_text,
+                    source_status, apply_method, reposted, applicant_count, easy_apply, teaser_text, raw_card_text,
                     classification_text, subclassification_text, card_tags_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -193,6 +195,8 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                     fields["employment_type"],
                     fields["workplace_type"],
                     fields["posted_at"],
+                    fields["source_status"],
+                    fields["apply_method"],
                     int(bool(obs.reposted)),
                     fields["applicant_count"],
                     None if obs.easy_apply is None else int(obs.easy_apply),

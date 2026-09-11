@@ -68,7 +68,7 @@ The database is the shared canonical state. Collectors and agents must:
 - record observations rather than overwriting history destructively;
 - never infer that another agent's presence is an error.
 
-SEEK browser ownership is local to JMM. JMM keeps one visible long-lived Chromium service with its own user-data directory and localhost-only CDP endpoint; it does not share Rob's ordinary Chrome tabs or Job Hunter's SEEK profile. SEEK collection runs attach to and detach from that same browser instead of relaunching it, preserving SEEK/Cloudflare session state across retries and runs. LinkedIn does not use this Chromium service; its JMM-011 target architecture is JobSpy/direct HTTP. Collection remains single-writer/run-locked.
+SEEK browser ownership is local to JMM. JMM keeps one visible long-lived Chromium service with its own user-data directory and localhost-only CDP endpoint; it does not share Rob's ordinary Chrome tabs or Job Hunter's SEEK profile. SEEK collection runs attach to and detach from that same browser instead of relaunching it, preserving SEEK/Cloudflare session state across retries and runs. LinkedIn uses JobSpy/direct HTTP and does not use this Chromium service. Collection remains single-writer/run-locked.
 
 ## Identity strategy
 

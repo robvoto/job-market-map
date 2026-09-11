@@ -103,7 +103,7 @@ def test_fetch_failure_creates_no_jd_or_success_marker(tmp_path, monkeypatch):
 
 def test_unsupported_source_fails_explicitly(tmp_path, monkeypatch):
     enrichment = _wire(tmp_path, monkeypatch)
-    job_id = _insert_job(source="linkedin", source_job_id="abc")
+    job_id = _insert_job(source="apsjobs", source_job_id="abc")
 
-    with pytest.raises(enrichment.UnsupportedJDSourceError, match="linkedin"):
+    with pytest.raises(enrichment.UnsupportedJDSourceError, match="apsjobs"):
         enrichment.get_or_enrich_job_jd(job_id)

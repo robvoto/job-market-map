@@ -35,7 +35,7 @@ def test_settings_seed_with_helper_text_and_can_change_without_code(
 def test_setting_validation_and_cross_setting_order(tmp_path, monkeypatch):
     settings = _wire(tmp_path, monkeypatch)
     with pytest.raises(settings.SettingError):
-        settings.set_setting("collection.linkedin_chunk_offsets", 0)
+        settings.set_setting("collection.linkedin_results_per_query", 0)
     with pytest.raises(settings.SettingError, match="greater than archive"):
         settings.set_setting("retention.remove_archived_after_days", 30)
     with pytest.raises(KeyError):
@@ -70,6 +70,23 @@ def test_seed_removes_obsolete_personal_activity_settings(tmp_path, monkeypatch)
     with db.connect() as conn:
         row = conn.execute(
             "SELECT 1 FROM settings WHERE key='retention.preserve_activity_jobs_forever'"
+        ).fetchone()
+    assert row is None
+
+
+def test_seed_removes_obsolete_linkedin_browser_settings(tmp_path, monkeypatch):
+    settings = _wire(tmp_path, monkeypatch)
+    settings.seed_settings()
+    with db.connect() as conn:
+        conn.execute(
+            """INSERT OR REPLACE INTO settings(
+                key,category,value_type,value_json,default_json,help_text,updated_at
+            ) VALUES('collection.linkedin_chunk_offsets','Collection','integer','8','8','obsolete','x')"""
+        )
+    settings.seed_settings()
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT 1 FROM settings WHERE key='collection.linkedin_chunk_offsets'"
         ).fetchone()
     assert row is None
 

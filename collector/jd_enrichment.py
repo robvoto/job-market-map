@@ -43,8 +43,15 @@ def _fetch_seek(job: dict[str, object]) -> FetchedJD:
     return fetch_seek_jd_for_job(job)
 
 
+def _fetch_linkedin(job: dict[str, object]) -> FetchedJD:
+    from collector.linkedin_jd_adapter import fetch_linkedin_jd_for_job
+
+    return fetch_linkedin_jd_for_job(job)
+
+
 _SOURCE_FETCHERS: dict[str, Callable[[dict[str, object]], FetchedJD]] = {
     "seek": _fetch_seek,
+    "linkedin": _fetch_linkedin,
 }
 _ENRICH_LOCK = Lock()
 

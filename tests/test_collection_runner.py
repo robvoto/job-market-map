@@ -2,6 +2,7 @@ from contextlib import contextmanager
 
 
 def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypatch):
+    from collector.campaign import LinkedInCampaignResult
     from collector.seek_cycle import SeekCycleResult
     from collector.seek_jd import SeekJDEnrichmentResult
     from scripts import run_collection_cycle as runner
@@ -74,6 +75,25 @@ def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypa
         return SeekCycleResult("COMPLETE", ["ACT"], 1, [])
 
     monkeypatch.setattr(runner, "run_seek_cycle", fake_cycle)
+    monkeypatch.setattr(
+        runner,
+        "run_linkedin_campaign",
+        lambda **_kwargs: LinkedInCampaignResult(
+            status="COMPLETE",
+            cycle_key="2026-09-11",
+            queries_total=1,
+            queries_complete=1,
+            queries_processed=1,
+            failed_queries=0,
+            cards_observed=1,
+            unique_new_jobs=1,
+            duplicate_observations=0,
+            detail_attempted=1,
+            detail_stored=1,
+            detail_failed=0,
+            elapsed_seconds=1.0,
+        ),
+    )
 
     assert (
         runner.main(

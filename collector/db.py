@@ -123,6 +123,8 @@ CANONICAL_DETAIL_FACT_COLUMNS = (
     "expires_at",
     "source_status",
     "apply_method",
+    "applicant_count",
+    "reposted",
     "classification_text",
     "subclassification_text",
     "easy_apply",
@@ -130,11 +132,11 @@ CANONICAL_DETAIL_FACT_COLUMNS = (
 
 
 def update_job_source_facts(job_id: int, **facts: object) -> dict[str, object]:
-    """Fill missing canonical market facts from validated source detail evidence.
+    """Apply validated source-detail facts without degrading canonical evidence.
 
-    This is deliberately fill-only: a later/poorer extraction cannot overwrite
-    source facts already held by JMM. Collector observation times do not belong
-    in this operation.
+    Stable descriptive fields are fill-only. Current source status and exact
+    applicant count may refresh from newer explicit source evidence; reposted is
+    monotonic once observed. Collector observation times do not belong here.
     """
     unknown = sorted(set(facts) - set(CANONICAL_DETAIL_FACT_COLUMNS))
     if unknown:
@@ -157,10 +159,15 @@ def update_job_source_facts(job_id: int, **facts: object) -> dict[str, object]:
                 if not incoming:
                     continue
             current = row[column] if column in row_keys else None
-            if current not in (None, ""):
+            if column == "reposted":
+                if not bool(incoming) or bool(current):
+                    continue
+            elif column not in {"source_status", "applicant_count"} and current not in (None, ""):
                 continue
             assignments.append(f"{column}=?")
-            values.append(int(incoming) if column == "easy_apply" else incoming)
+            values.append(
+                int(bool(incoming)) if column in {"easy_apply", "reposted"} else incoming
+            )
         if assignments:
             conn.execute(
                 f"UPDATE jobs SET {', '.join(assignments)} WHERE id=?",
@@ -444,6 +451,7 @@ def init_db() -> None:
             "duplicate_hits INTEGER NOT NULL DEFAULT 0",
         )
         _ensure_column(conn, "queries", "last_error", "last_error TEXT")
+        _ensure_column(conn, "collection_cursors", "cycle_key", "cycle_key TEXT")
         _ensure_column(
             conn,
             "market_collection_runs",

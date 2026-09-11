@@ -56,3 +56,6 @@ def test_admin_page_exposes_side_stats_for_bootstrap_and_latest_run():
     assert "/admin/stats" in html
     assert "JD attempts" in html
     assert "partitions" in html
+    assert "LinkedIn cycle" in html
+    assert "LinkedIn read" in html
+    assert "queries done" in html

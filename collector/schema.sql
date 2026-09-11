@@ -136,7 +136,17 @@ CREATE TABLE IF NOT EXISTS collection_cursors (
     updated_at TEXT NOT NULL,
     last_job_id TEXT,
     total_results_hint INTEGER,
+    cycle_key TEXT,
     PRIMARY KEY(source, query_text, location)
+);
+
+CREATE TABLE IF NOT EXISTS source_campaign_state (
+    source TEXT PRIMARY KEY,
+    cycle_key TEXT NOT NULL,
+    status TEXT NOT NULL,
+    started_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    completed_at TEXT
 );
 
 CREATE TABLE IF NOT EXISTS settings (

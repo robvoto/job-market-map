@@ -35,7 +35,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 6
+        assert payload["schema_version"] == 7
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
         assert "raw_card_text" not in payload["items"][0]
@@ -403,6 +403,16 @@ def test_admin_stats_exposes_current_bootstrap_and_latest(tmp_path, monkeypatch)
         latest = {"id": 25, "run_kind": "normal", "stats": {"jobs_total": 200}}
         monkeypatch.setattr(api_main, "bootstrap_market_run", lambda: bootstrap)
         monkeypatch.setattr(api_main, "latest_market_run", lambda: latest)
+        linkedin_campaign = {
+            "status": "PARTIAL",
+            "cycle_key": "2026-09-11",
+            "queries_total": 327,
+            "queries_complete": 100,
+            "queries_remaining": 227,
+        }
+        monkeypatch.setattr(
+            api_main, "linkedin_campaign_progress", lambda: linkedin_campaign
+        )
 
         response = client.get("/v3/admin/stats")
         assert response.status_code == 200
@@ -414,4 +424,5 @@ def test_admin_stats_exposes_current_bootstrap_and_latest(tmp_path, monkeypatch)
             },
             "bootstrap": bootstrap,
             "latest": latest,
+            "linkedin_campaign": linkedin_campaign,
         }

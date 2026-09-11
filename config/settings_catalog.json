@@ -129,40 +129,47 @@
       "help": "Maximum genuinely unfinished SEEK partitions processed per resumable state-crawl invocation. This bounds one agent/tool call; it is not a market coverage limit."
     },
     {
-      "key": "collection.linkedin_initial_wait_seconds",
+      "key": "collection.linkedin_enabled",
       "category": "Collection",
-      "type": "number",
-      "default": 2.0,
-      "min": 0,
-      "max": 15,
-      "help": "Initial LinkedIn navigation settling time before card-state polling begins."
+      "type": "boolean",
+      "default": true,
+      "help": "Run resumable LinkedIn JobSpy/HTTP discovery after SEEK inside the same singleton collection process."
     },
     {
-      "key": "collection.linkedin_parse_wait_seconds",
+      "key": "collection.linkedin_results_per_query",
+      "category": "Collection",
+      "type": "integer",
+      "default": 25,
+      "min": 1,
+      "max": 100,
+      "help": "LinkedIn JobSpy results requested per query chunk. A full daily campaign resumes query offsets until complete or the shared runtime limit is reached."
+    },
+    {
+      "key": "collection.linkedin_jobspy_stall_timeout_seconds",
       "category": "Collection",
       "type": "number",
-      "default": 12.0,
-      "min": 2,
+      "default": 90,
+      "min": 15,
+      "max": 300,
+      "help": "Maximum time one LinkedIn JobSpy query may make no real pagination progress before that query fails retryably."
+    },
+    {
+      "key": "collection.linkedin_detail_timeout_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 20,
+      "min": 5,
       "max": 60,
-      "help": "Maximum bounded wait for a LinkedIn offset to expose parseable result cards."
+      "help": "Timeout for one direct public LinkedIn vacancy-page HTTP fetch used for neutral JD/apply/repost/closed/applicant evidence."
     },
     {
-      "key": "collection.linkedin_chunk_offsets",
+      "key": "collection.linkedin_max_consecutive_query_failures",
       "category": "Collection",
       "type": "integer",
-      "default": 8,
+      "default": 6,
       "min": 1,
-      "max": 50,
-      "help": "Number of LinkedIn result offsets to process per resumable chunk. This bounds one agent call without limiting total market coverage."
-    },
-    {
-      "key": "collection.campaign_query_chunk_size",
-      "category": "Collection",
-      "type": "integer",
-      "default": 10,
-      "min": 1,
-      "max": 250,
-      "help": "Number of source/query combinations processed per campaign invocation. This is a resumable execution chunk, not a market-coverage limit."
+      "max": 25,
+      "help": "Stop the current LinkedIn source stage after this many consecutive failed queries so a source outage does not hammer the remaining registry. Work stays resumable for the next run."
     },
     {
       "key": "dedupe.near_match_min_score",

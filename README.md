@@ -73,11 +73,11 @@ The port itself is an admin setting and takes effect on the next API start.
 - opt-in retention controls with preserve-evidence defaults: implemented
 - 109 neutral query specs expanded across NSW/ACT/QLD (684 seeded source-geography searches)
 - SEEK recent-window discovery + recursive whole-state NSW/ACT/QLD coverage + write-once JD enrichment: implemented
-- LinkedIn card-only parser + resumable arbitrary-offset traversal: implemented
+- LinkedIn resumable JobSpy/HTTP daily discovery + one-fetch neutral detail/JD enrichment: implemented
 - APSJobs neutral collector: pending
 - permanent SEEK JD fetch memory: implemented; successfully fetched jobs are not reopened on later daily runs
 
-Measured 10 Sep 2026: one SEEK `technical implementation` search exposed **220 cards over seven populated pages**, with **0 individual JD opens**. LinkedIn card collection is resumable because large virtualised result sets exceed one bounded execution. See `docs/BENCHMARKS.md`.
+Measured 10 Sep 2026: one SEEK `technical implementation` search exposed **220 cards over seven populated pages**, with **0 individual JD opens**. LinkedIn uses per-query JobSpy offsets plus a durable daily campaign cycle so incomplete work resumes inside the shared runtime budget. See `docs/BENCHMARKS.md`.
 
 ## Read first
 
