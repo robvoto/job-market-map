@@ -13,6 +13,18 @@ def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypa
         yield
 
     monkeypatch.setattr(runner, "collection_run_lock", fake_lock)
+
+    class _TestLog:
+        def info(self, *_args, **_kwargs):
+            pass
+
+        def error(self, *_args, **_kwargs):
+            pass
+
+        def exception(self, *_args, **_kwargs):
+            pass
+
+    monkeypatch.setattr(runner, "configure_collection_logging", lambda: _TestLog())
     monkeypatch.setattr(runner, "enabled_state_codes", lambda: ["ACT"])
     monkeypatch.setattr(runner, "all_states_complete", lambda _codes: False)
     monkeypatch.setattr(runner, "start_market_run", lambda **_kwargs: 1)
