@@ -168,6 +168,50 @@ def test_strong_cross_source_repost_keeps_source_rows_but_reuses_primary(tmp_pat
     assert json.loads(link["matching_signals_json"])
 
 
+def test_seek_linkedin_identical_intro_reuses_primary_when_other_fields_missing(
+    tmp_path, monkeypatch
+):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    teaser = (
+        "Lead enterprise customer onboarding, API integration, testing and "
+        "launch activities for strategic clients."
+    )
+    first = ingest.ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="123",
+            canonical_url="https://seek.test/jobs/123",
+            title="Implementation Consultant",
+            employer="Example Co",
+            teaser_text=teaser,
+        )
+    )
+    second = ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="456",
+            canonical_url="https://linkedin.test/jobs/456",
+            title="Implementation Consultant",
+            employer="Example Co",
+            teaser_text=teaser,
+        )
+    )
+
+    assert second.created is False
+    assert second.job_id == first.job_id
+    assert second.observation_job_id != first.job_id
+    with db.connect() as conn:
+        link = conn.execute(
+            "SELECT * FROM same_vacancy_links WHERE job_id=?",
+            (second.observation_job_id,),
+        ).fetchone()
+    assert link["primary_job_id"] == first.job_id
+    assert link["match_type"] == "strong_teaser"
+    assert "substantial teaser similarity 1.00" in json.loads(
+        link["matching_signals_json"]
+    )
+
+
 def test_ambiguous_repost_candidate_remains_separate(tmp_path, monkeypatch):
     ingest = _use_tmp_db(tmp_path, monkeypatch)
     ingest.ingest_card(

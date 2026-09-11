@@ -16,7 +16,7 @@
 **Reason:** Result cards can be collected at far higher throughput. JD acquisition is a separate on-demand enrichment step; when a neutral JD is obtained, JMM remains its canonical owner rather than a consumer storing a duplicate raw copy.
 
 ## ADR-004 — Evidence-based, non-destructive duplicate linking
-**Decision:** Stable source identity upserts deterministically. Rich cross-source/same-title evidence remains source-addressable; strong confirmed same-vacancy evidence assigns the newer row to the oldest primary for JD and downstream processing, while retaining both rows and an auditable relationship.
+**Decision:** Stable source identity upserts deterministically. Rich cross-source/same-title evidence remains source-addressable; confirmed same-vacancy evidence assigns the newer row to the oldest primary for JD and downstream processing, while retaining both rows and an auditable relationship. Normalized title and employer are mandatory. The deterministic assignment path accepts an exact rich-card fingerprint, or substantial teaser/intro similarity at the configured 0.90 minimum, or at least two agreeing secondary signals: location, workplace type, employment type, salary or classification. The teaser path does not require location; evidence that meets neither rule remains possible-duplicate evidence only. The existing possible-duplicate score threshold is separate and is not lowered by this rule.
 
 **Reason:** Capturing title, employer, location, employment/workplace type, salary, classification and teaser makes reposts highly detectable. Keeping both source rows prevents false merges from hiding source evidence, while the primary assignment stops agents reopening the same vacancy.
 

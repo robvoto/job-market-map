@@ -180,14 +180,41 @@
       "default": 0.92,
       "min": 0.75,
       "max": 1.0,
-      "help": "Minimum evidence score for recording strong duplicate evidence and assigning separately sourced postings to one same-vacancy processing primary."
+      "help": "Minimum evidence score for recording possible-duplicate evidence. This does not authorize or reject the separate deterministic same-vacancy rules."
+    },
+    {
+      "key": "dedupe.same_vacancy_teaser_min_similarity",
+      "category": "Duplicates",
+      "type": "number",
+      "default": 0.9,
+      "min": 0.9,
+      "max": 1.0,
+      "help": "Minimum normalized teaser/intro similarity for a same-vacancy assignment when both teasers meet the substantial-length setting."
+    },
+    {
+      "key": "dedupe.same_vacancy_teaser_min_chars",
+      "category": "Duplicates",
+      "type": "integer",
+      "default": 40,
+      "min": 40,
+      "max": 1000,
+      "help": "Minimum normalized teaser/intro length required on both postings before teaser similarity can authorize a same-vacancy assignment."
+    },
+    {
+      "key": "dedupe.same_vacancy_min_secondary_signals",
+      "category": "Duplicates",
+      "type": "integer",
+      "default": 2,
+      "min": 2,
+      "max": 5,
+      "help": "Minimum agreeing secondary signals required for same-vacancy assignment when exact rich-card and strong-teaser rules do not apply."
     },
     {
       "key": "dedupe.enable_near_match",
       "category": "Duplicates",
       "type": "boolean",
       "default": true,
-      "help": "Allow title/employer/location plus rich card evidence to create possible-duplicate links and same-vacancy primary assignments. Exact same-source IDs remain deterministic regardless of this setting."
+      "help": "Allow the explicit same-vacancy rules and possible-duplicate evidence to run. Exact same-source IDs remain deterministic regardless of this setting."
     },
     {
       "key": "api.default_page_size",
