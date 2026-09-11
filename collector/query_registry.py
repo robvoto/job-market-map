@@ -74,8 +74,6 @@ def load_registry(path: Path = REGISTRY_PATH) -> list[QuerySpec]:
 
 
 def _location_for(source: str, geography: dict) -> str:
-    if source == "seek":
-        return geography["seek_location"]
     if source == "linkedin":
         return geography["linkedin_location"]
     return geography["label"]
@@ -112,15 +110,19 @@ def sync_registry(path: Path = REGISTRY_PATH) -> int:
     count = 0
     desired_runs = expanded_runs(path)
     seeded_keys = {spec.key for spec in load_registry(path)}
+    desired_signatures = {
+        (run["registry_key"], run["source"], run["geography_code"])
+        for run in desired_runs
+    }
     with connect() as conn:
-        # One-time/ongoing migration: old seed rows had no geography_code and were Sydney-only.
-        # Do not delete them; deactivate so their history remains available without wasting searches.
-        if seeded_keys:
-            placeholders = ",".join("?" for _ in seeded_keys)
-            conn.execute(
-                f"UPDATE queries SET active=0 WHERE geography_code IS NULL AND registry_key IN ({placeholders})",
-                tuple(sorted(seeded_keys)),
-            )
+        # Preserve historical seeded rows, but deactivate source/geography variants that
+        # are no longer part of the registry (including retired SEEK keyword searches).
+        for row in conn.execute(
+            "SELECT id, registry_key, source, geography_code FROM queries WHERE registry_key IS NOT NULL"
+        ).fetchall():
+            signature = (row["registry_key"], row["source"], row["geography_code"])
+            if row["registry_key"] in seeded_keys and signature not in desired_signatures:
+                conn.execute("UPDATE queries SET active=0 WHERE id=?", (row["id"],))
         for run in desired_runs:
             conn.execute(
                 """

@@ -35,14 +35,6 @@ uv run python collector/db.py
 uv run python -m collector.query_registry
 ```
 
-## Run one exhaustive SEEK query
-
-```bash
-uv run python -m scripts.run_seek_query "technical implementation" --location "Sydney NSW" --days 7
-```
-
-The SEEK query should finish only on a verified terminal/no-new-result state. A safety-page limit is a failure, not completion.
-
 ## Run/resume one LinkedIn query through the production HTTP path
 
 ```bash

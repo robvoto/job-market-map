@@ -102,10 +102,6 @@ Consumers should not assume SEEK is complete when a state status is `FAILED` or 
 `NOT_RUN` means there is no current coverage workspace. This is normal immediately after an accepted/archived cycle is rolled over for the next fresh run. `/v3/coverage/seek` also returns `has_current_cycle` and the latest archived `previous` summary; Admin displays this state as **Waiting for next run**.
 
 
-## Keyword searches are supplemental
-
-The whole-state partitioner is the primary SEEK coverage mechanism. The 109-role query registry is retained for cross-source discovery and optional SEEK provenance, but `collection.seek_keyword_queries_enabled=false` by default prevents hundreds of redundant SEEK searches after the whole-state crawl exists. Rob can enable it in Admin if there is a specific reason to compare keyword-query behaviour.
-
 ## Live proof status — 10 September 2026
 
 ACT is the first whole-state proof run. Current persisted state after a browser-extension disconnect:

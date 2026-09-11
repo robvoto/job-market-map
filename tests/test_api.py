@@ -65,9 +65,9 @@ def test_admin_query_toggle_changes_operational_state(tmp_path, monkeypatch):
         created = client.post(
             "/v3/admin/queries",
             json={
-                "source": "seek",
+                "source": "linkedin",
                 "query_text": "admin only query",
-                "location": "Sydney NSW",
+                "location": "New South Wales, Australia",
             },
         )
         assert created.status_code == 200
@@ -75,6 +75,20 @@ def test_admin_query_toggle_changes_operational_state(tmp_path, monkeypatch):
         disabled = client.patch(f"/v3/admin/queries/{query_id}", json={"active": False})
         assert disabled.status_code == 200
         assert disabled.json()["active"] == 0
+
+
+def test_admin_rejects_retired_seek_keyword_query(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        response = client.post(
+            "/v3/admin/queries",
+            json={
+                "source": "seek",
+                "query_text": "business analyst",
+                "location": "Sydney NSW",
+            },
+        )
+        assert response.status_code == 400
+        assert "whole-state coverage" in response.json()["detail"]
 
 
 def test_neutral_feed_contains_no_user_activity_fields(tmp_path, monkeypatch):

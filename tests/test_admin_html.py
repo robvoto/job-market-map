@@ -10,7 +10,7 @@ def test_admin_page_exposes_helper_driven_settings_query_and_retention_controls(
     assert "run-retention" in html
     assert "add-query" in html
     assert "Optional source keyword queries (advanced)" in html
-    assert "Normal SEEK daily coverage uses whole-state partitioning" in html
+    assert "SEEK uses whole-state partition coverage instead" in html
 
 
 def test_admin_page_exposes_geography_and_seek_coverage_controls():

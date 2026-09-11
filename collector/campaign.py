@@ -11,7 +11,6 @@ from collector.run_logging import collection_logger
 from collector.settings import get_setting
 from collector.source_campaign import get_cycle, get_or_start_cycle, set_cycle_status
 from sources.linkedin_collector import collect_linkedin_chunk
-from sources.seek_collector import collect_seek_query
 
 
 @dataclass(frozen=True)
@@ -45,14 +44,9 @@ class LinkedInCampaignResult:
 
 def registry_runs(*, sources: set[str] | None = None) -> list[dict]:
     enabled_geographies = {row["code"] for row in list_geographies(enabled_only=True)}
-    seek_keyword_queries_enabled = bool(
-        get_setting("collection.seek_keyword_queries_enabled")
-    )
     runs = []
     for row in list_queries(active_only=True):
         if sources and row["source"] not in sources:
-            continue
-        if row["source"] == "seek" and not seek_keyword_queries_enabled:
             continue
         if (
             row.get("geography_code")
@@ -87,18 +81,6 @@ def run_one(
     resolved_days = int(
         days if days is not None else get_setting("collection.default_freshness_days")
     )
-    if source == "seek":
-        result = collect_seek_query(query_text, location, days=resolved_days)
-        return CampaignStep(
-            run["registry_key"],
-            source,
-            query_text,
-            location,
-            result.status,
-            result.cards_observed,
-            result.unique_new_jobs,
-            asdict(result),
-        )
     if source == "linkedin":
         if not linkedin_cycle_key:
             raise ValueError("linkedin_cycle_key is required for LinkedIn collection")

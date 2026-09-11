@@ -104,13 +104,6 @@
       "help": "Allowed shortfall between SEEK's first reported count and collected unique IDs before a leaf is marked incomplete. Small tolerance handles jobs appearing/disappearing during a live crawl."
     },
     {
-      "key": "collection.seek_keyword_queries_enabled",
-      "category": "Collection",
-      "type": "boolean",
-      "default": false,
-      "help": "Run role-keyword SEEK registry searches in addition to whole-state partition coverage. Off by default because whole-state NSW/ACT/QLD coverage already contains those SEEK jobs and repeated keyword searches add load without improving coverage."
-    },
-    {
       "key": "collection.seek_partition_max_results",
       "category": "Collection",
       "type": "integer",

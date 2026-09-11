@@ -32,27 +32,52 @@ def test_registry_sync_preserves_admin_disabled_query(tmp_path, monkeypatch):
     registry.sync_registry()
     with db.connect() as conn:
         conn.execute(
-            "UPDATE queries SET active=0 WHERE registry_key='normal-business-analyst' AND source='seek'"
+            "UPDATE queries SET active=0 WHERE registry_key='normal-business-analyst' AND source='linkedin'"
         )
     registry.sync_registry()
     with db.connect() as conn:
         active = conn.execute(
-            "SELECT active FROM queries WHERE registry_key='normal-business-analyst' AND source='seek'"
+            "SELECT active FROM queries WHERE registry_key='normal-business-analyst' AND source='linkedin'"
         ).fetchone()[0]
     assert active == 0
 
 
-def test_registry_expands_each_seed_query_across_nsw_act_qld():
+def test_registry_does_not_seed_seek_keyword_runs():
     runs = expanded_runs()
-    seek_ba = [
-        r
-        for r in runs
-        if r["source"] == "seek" and r["registry_key"] == "normal-business-analyst"
+    assert not any(run["source"] == "seek" for run in runs)
+    linkedin_ba = [
+        run
+        for run in runs
+        if run["source"] == "linkedin"
+        and run["registry_key"] == "normal-business-analyst"
     ]
-    assert {r["geography_code"] for r in seek_ba} == {"NSW", "ACT", "QLD"}
-    locations = {r["geography_code"]: r["location"] for r in seek_ba}
-    assert locations == {
-        "NSW": "New South Wales NSW",
-        "ACT": "Australian Capital Territory ACT",
-        "QLD": "Queensland QLD",
-    }
+    assert {run["geography_code"] for run in linkedin_ba} == {"NSW", "ACT", "QLD"}
+
+
+def test_registry_sync_deactivates_retired_seek_rows_without_deleting_history(
+    tmp_path, monkeypatch
+):
+    import collector.query_registry as registry
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(registry, "connect", db.connect)
+    monkeypatch.setattr(registry, "init_db", db.init_db)
+    db.init_db()
+    with db.connect() as conn:
+        conn.execute(
+            """
+            INSERT INTO queries(
+                source, query_text, location, geography_code, active, created_at,
+                registry_key, origins_json
+            ) VALUES ('seek', 'business analyst', 'New South Wales NSW', 'NSW', 1,
+                      datetime('now'), 'normal-business-analyst', '[]')
+            """
+        )
+    registry.sync_registry()
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT active FROM queries WHERE source='seek' AND registry_key='normal-business-analyst'"
+        ).fetchone()
+    assert row is not None
+    assert row["active"] == 0

@@ -526,6 +526,8 @@ def admin_toggle_query(query_id: int, update: QueryToggle):
         return set_query_active(query_id, update.active)
     except KeyError:
         raise HTTPException(404, "query not found") from None
+    except ValueError as exc:
+        raise HTTPException(400, str(exc)) from None
 
 
 @app.get(f"/{API_VERSION}/coverage/seek")

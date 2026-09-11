@@ -43,8 +43,8 @@ body{font-family:system-ui,sans-serif;max-width:1450px;margin:32px auto;padding:
 <div id="settings"></div>
 <details>
   <summary><strong>Optional source keyword queries (advanced)</strong></summary>
-  <p class="muted">These are extra keyword/location searches used for sources such as LinkedIn or APS, or for targeted discovery experiments. Normal SEEK daily coverage uses whole-state partitioning and does not require these queries. Disabling a query preserves existing history.</p>
-  <div class="row"><select id="new-source"><option>seek</option><option>linkedin</option><option>apsjobs</option></select><select id="new-geo"><option>NSW</option><option>ACT</option><option>QLD</option></select><input id="new-query" placeholder="New discovery query"><input id="new-location" value="New South Wales NSW" placeholder="Source location"><button id="add-query">Add query</button></div>
+  <p class="muted">These are extra keyword/location searches for LinkedIn or APS, or for targeted discovery experiments. SEEK uses whole-state partition coverage instead. Disabling a query preserves existing history.</p>
+  <div class="row"><select id="new-source"><option>linkedin</option><option>apsjobs</option></select><select id="new-geo"><option>NSW</option><option>ACT</option><option>QLD</option></select><input id="new-query" placeholder="New discovery query"><input id="new-location" value="New South Wales NSW" placeholder="Source location"><button id="add-query">Add query</button></div>
   <div id="queries"></div>
 </details>
 </main><aside class="stats-sidebar"><h2>Collection stats</h2><div id="stats-sidebar">Loading stats…</div></aside></div>

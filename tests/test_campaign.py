@@ -138,8 +138,6 @@ def test_linkedin_campaign_circuit_breaker_stops_source_outage(tmp_path, monkeyp
             return True
         if key == "collection.linkedin_max_consecutive_query_failures":
             return 6
-        if key == "collection.seek_keyword_queries_enabled":
-            return False
         raise AssertionError(key)
 
     monkeypatch.setattr(campaign, "get_setting", setting)
@@ -158,21 +156,3 @@ def test_linkedin_campaign_circuit_breaker_stops_source_outage(tmp_path, monkeyp
     assert result.status == "PARTIAL_FAILURE"
     assert result.failed_queries == 6
     assert len(calls) == 6
-
-
-def test_seek_keyword_registry_is_supplemental_and_off_by_default(
-    tmp_path, monkeypatch
-):
-    campaign, _ = _seed_isolated_registry(tmp_path, monkeypatch)
-    assert campaign.registry_runs(sources={"seek"}) == []
-
-
-def test_seek_keyword_registry_can_be_enabled_by_admin_setting(tmp_path, monkeypatch):
-    campaign, _ = _seed_isolated_registry(tmp_path, monkeypatch)
-    from collector import settings
-
-    monkeypatch.setattr(settings, "connect", db.connect)
-    monkeypatch.setattr(settings, "init_db", db.init_db)
-    settings.seed_settings()
-    settings.set_setting("collection.seek_keyword_queries_enabled", True, actor="test")
-    assert len(campaign.registry_runs(sources={"seek"})) == 327

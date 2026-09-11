@@ -9,6 +9,7 @@ from collector.db import ROOT, connect, init_db
 
 CATALOG_PATH = ROOT / "config" / "settings_catalog.json"
 OBSOLETE_SETTING_KEYS = {
+    "collection.seek_keyword_queries_enabled",
     "collection.linkedin_initial_wait_seconds",
     "collection.linkedin_parse_wait_seconds",
     "collection.linkedin_chunk_offsets",

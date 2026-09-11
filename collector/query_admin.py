@@ -13,9 +13,9 @@ def _now() -> str:
 
 def list_queries(*, active_only: bool = False) -> list[dict[str, Any]]:
     init_db()
-    sql = "SELECT * FROM queries"
+    sql = "SELECT * FROM queries WHERE source <> 'seek'"
     if active_only:
-        sql += " WHERE active=1"
+        sql += " AND active=1"
     sql += " ORDER BY source, query_text, location"
     with connect() as conn:
         return [dict(row) for row in conn.execute(sql)]
@@ -24,11 +24,12 @@ def list_queries(*, active_only: bool = False) -> list[dict[str, Any]]:
 def set_query_active(query_id: int, active: bool) -> dict[str, Any]:
     init_db()
     with connect() as conn:
-        result = conn.execute(
-            "UPDATE queries SET active=? WHERE id=?", (int(active), query_id)
-        )
-        if result.rowcount != 1:
+        row = conn.execute("SELECT * FROM queries WHERE id=?", (query_id,)).fetchone()
+        if row is None:
             raise KeyError(query_id)
+        if active and row["source"] == "seek":
+            raise ValueError("SEEK keyword queries are retired; SEEK uses whole-state coverage")
+        conn.execute("UPDATE queries SET active=? WHERE id=?", (int(active), query_id))
         row = conn.execute("SELECT * FROM queries WHERE id=?", (query_id,)).fetchone()
     return dict(row)
 
@@ -44,6 +45,8 @@ def add_query(
     active: bool = True,
 ) -> dict[str, Any]:
     source = " ".join(source.split()).casefold()
+    if source == "seek":
+        raise ValueError("SEEK keyword queries are retired; SEEK uses whole-state coverage")
     query_text = " ".join(query_text.split())
     location = " ".join(location.split())
     if not source or not query_text:
