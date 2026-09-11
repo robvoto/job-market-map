@@ -1,6 +1,7 @@
 from datetime import date
 
 from sources.linkedin import (
+    linkedin_geography_code,
     linkedin_identity_aliases,
     normalize_linkedin_source_job_id,
     observation_from_jobspy_row,
@@ -45,7 +46,15 @@ def test_jobspy_row_maps_only_neutral_discovery_fields():
     assert observation.salary_text == "AUD 800 - 900 day"
     assert observation.posted_at == "2026-09-11"
     assert observation.workplace_type == "Remote"
+    assert observation.geography_code == "NSW"
     # JobSpy's Easy Apply value is deliberately not canonicalised; the direct
     # vacancy response owns apply-method evidence.
     assert observation.easy_apply is None
     assert observation.card_tags is None
+
+
+def test_linkedin_explicit_card_location_overrides_search_geography():
+    assert linkedin_geography_code("Brisbane, Queensland, Australia", "NSW") == "QLD"
+    assert linkedin_geography_code("Canberra, ACT, Australia", "NSW") == "ACT"
+    assert linkedin_geography_code("Sydney, New South Wales, Australia", "QLD") == "NSW"
+    assert linkedin_geography_code("Australia", "NSW") == "NSW"

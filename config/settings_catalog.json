@@ -135,16 +135,7 @@
       "category": "Collection",
       "type": "boolean",
       "default": true,
-      "help": "Run resumable LinkedIn JobSpy/HTTP discovery after SEEK inside the same singleton collection process."
-    },
-    {
-      "key": "collection.linkedin_results_per_query",
-      "category": "Collection",
-      "type": "integer",
-      "default": 25,
-      "min": 1,
-      "max": 100,
-      "help": "LinkedIn JobSpy results requested per query chunk. A full daily campaign resumes query offsets until complete or the shared runtime limit is reached."
+      "help": "Run resumable LinkedIn geography-first JobSpy discovery after SEEK inside the same singleton collection process. Discovery is cards-only; JDs remain on-demand until cross-source matching chooses what needs detail."
     },
     {
       "key": "collection.linkedin_jobspy_stall_timeout_seconds",
@@ -153,7 +144,7 @@
       "default": 90,
       "min": 15,
       "max": 300,
-      "help": "Maximum time one LinkedIn JobSpy query may make no real pagination progress before that query fails retryably."
+      "help": "Maximum time one LinkedIn JobSpy geography chunk may make no real pagination progress before that chunk fails retryably."
     },
     {
       "key": "collection.linkedin_detail_timeout_seconds",
@@ -163,15 +154,6 @@
       "min": 5,
       "max": 60,
       "help": "Timeout for one direct public LinkedIn vacancy-page HTTP fetch used for neutral JD/apply/repost/closed/applicant evidence."
-    },
-    {
-      "key": "collection.linkedin_max_consecutive_query_failures",
-      "category": "Collection",
-      "type": "integer",
-      "default": 6,
-      "min": 1,
-      "max": 25,
-      "help": "Stop the current LinkedIn source stage after this many consecutive failed queries so a source outage does not hammer the remaining registry. Work stays resumable for the next run."
     },
     {
       "key": "dedupe.near_match_min_score",

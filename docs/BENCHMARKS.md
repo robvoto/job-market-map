@@ -42,4 +42,4 @@ Query: `business analyst`, New South Wales, last 1 day, diagnostic budget 2 resu
 - Existing naturally rediscovered job exposed an exact **114 applicants** count; another job's count stayed NULL because no exact number was present.
 - Browser/Playwright use: **none**.
 
-This was deliberately tiny to prove transport, exact-ID dedupe, detail reuse, write-once JD storage and cursor persistence before allowing the overnight campaign to process the full query registry. Normal scheduled chunks use the Admin-configured result budget (default 25), not this diagnostic value of 2.
+This was deliberately tiny to prove the original HTTP transport, exact-ID dedupe and shared detail helper. It is historical evidence only: production LinkedIn discovery was subsequently changed to geography-first, cards-only 20-job chunks. Direct detail/JD fetching remains available on demand through JMM-003 rather than being performed for every discovered LinkedIn card.

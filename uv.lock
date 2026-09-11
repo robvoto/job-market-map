@@ -408,7 +408,7 @@ requires-dist = [
     { name = "fastapi", specifier = ">=0.115" },
     { name = "playwright", specifier = ">=1.62.0" },
     { name = "pydantic", specifier = ">=2.8" },
-    { name = "python-jobspy", specifier = ">=1.1.82,<2" },
+    { name = "python-jobspy", specifier = "==1.1.82" },
     { name = "uvicorn", specifier = ">=0.30" },
 ]
 

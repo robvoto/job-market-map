@@ -4,6 +4,8 @@ from datetime import datetime
 
 from collector.db import connect, init_db
 
+TERMINAL_CYCLE_STATUSES = {"COMPLETE", "INCOMPLETE_CAP"}
+
 
 def now_local_cycle_key() -> str:
     return datetime.now().astimezone().date().isoformat()
@@ -37,7 +39,7 @@ def get_or_start_cycle(source: str, *, desired_cycle_key: str | None = None) -> 
                 "UPDATE source_campaign_state SET status='PARTIAL',updated_at=? WHERE source=?",
                 (_now(), source),
             )
-        elif str(row["status"]) == "COMPLETE" and str(row["cycle_key"]) != desired:
+        elif str(row["status"]) in TERMINAL_CYCLE_STATUSES and str(row["cycle_key"]) != desired:
             timestamp = _now()
             conn.execute(
                 """
@@ -58,7 +60,7 @@ def set_cycle_status(source: str, *, cycle_key: str, status: str) -> dict:
     source = str(source or "").strip().casefold()
     status = str(status or "").strip().upper()
     timestamp = _now()
-    completed_at = timestamp if status == "COMPLETE" else None
+    completed_at = timestamp if status in TERMINAL_CYCLE_STATUSES else None
     with connect() as conn:
         conn.execute(
             """

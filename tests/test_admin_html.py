@@ -56,13 +56,14 @@ def test_admin_page_exposes_side_stats_for_bootstrap_and_latest_run():
     assert "APSJobs" in html
     assert "Not run yet" in html
     assert "Accepted with small gap" in html
-    assert "Saved progress. The next daily run resumes this cycle." in html
+    assert "Saved geography progress. The next LinkedIn run resumes it." in html
     assert "/admin/stats" in html
     assert "JD attempts" in html
     assert "partitions" in html
-    assert "LinkedIn cycle" in html
-    assert "LinkedIn read" in html
-    assert "queries done" in html
+    assert "LinkedIn geography cycle" in html
+    assert "LinkedIn cards" in html
+    assert "geographies done" in html
+    assert "Cards-only discovery · no Chromium · no JD fetches." in html
     assert "await r.text()" in html
     assert "Stats unavailable" in html
     assert "Incremental SEEK window" in html

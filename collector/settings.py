@@ -13,6 +13,8 @@ OBSOLETE_SETTING_KEYS = {
     "collection.linkedin_initial_wait_seconds",
     "collection.linkedin_parse_wait_seconds",
     "collection.linkedin_chunk_offsets",
+    "collection.linkedin_results_per_query",
+    "collection.linkedin_max_consecutive_query_failures",
     "collection.campaign_query_chunk_size",
 }
 

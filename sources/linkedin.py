@@ -10,6 +10,18 @@ from collector.models import CardObservation
 LINKEDIN_ID_RE = re.compile(r"^(?:li-)?(\d{7,12})$", re.IGNORECASE)
 
 
+def linkedin_geography_code(location: str | None, fallback: str | None = None) -> str | None:
+    """Prefer an explicit state/territory named on the LinkedIn card over the search bucket."""
+    text = " ".join(str(location or "").split()).casefold()
+    if "new south wales" in text or re.search(r"\bnsw\b", text):
+        return "NSW"
+    if "queensland" in text or re.search(r"\bqld\b", text):
+        return "QLD"
+    if "australian capital territory" in text or re.search(r"\bact\b", text):
+        return "ACT"
+    return str(fallback or "").strip().upper() or None
+
+
 def linkedin_numeric_job_id(value: object) -> str | None:
     text = str(value or "").strip()
     match = LINKEDIN_ID_RE.fullmatch(text)
@@ -135,6 +147,7 @@ def observation_from_jobspy_row(
     title = _text(row, "title")
     employer = _text(row, "company") or _text(row, "company_name")
     location = _location_text(row)
+    resolved_geography_code = linkedin_geography_code(location, geography_code)
     salary = _salary_text(row)
     employment_type = _text(row, "job_type")
     is_remote = _value(row, "is_remote")
@@ -151,7 +164,7 @@ def observation_from_jobspy_row(
         title=title,
         employer=employer,
         location=location,
-        geography_code=geography_code,
+        geography_code=resolved_geography_code,
         salary_text=salary,
         employment_type=employment_type,
         workplace_type=workplace_type,

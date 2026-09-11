@@ -420,9 +420,10 @@ def test_admin_stats_exposes_current_bootstrap_and_latest(tmp_path, monkeypatch)
         linkedin_campaign = {
             "status": "PARTIAL",
             "cycle_key": "2026-09-11",
-            "queries_total": 327,
-            "queries_complete": 100,
-            "queries_remaining": 227,
+            "geographies_total": 3,
+            "geographies_complete": 1,
+            "geographies_capped": 0,
+            "geographies_remaining": 2,
         }
         monkeypatch.setattr(
             api_main, "linkedin_campaign_progress", lambda: linkedin_campaign

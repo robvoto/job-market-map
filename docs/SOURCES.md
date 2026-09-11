@@ -21,21 +21,22 @@ Extra fresh runs inside 24 hours use the exact ordered card timestamps to stop a
 
 ## LinkedIn
 
-Status: JobSpy/HTTP discovery, resumable daily campaign state and direct public-page detail/JD enrichment implemented and scheduled after SEEK.
+Status: geography-first HTTP cards-only discovery, resumable campaign state and direct public-page JMM-003 detail/JD enrichment implemented.
 
 Mechanics are based on Job Hunter's proven implementation:
 - discovery uses `python-jobspy` over HTTP, not Chromium/Playwright;
-- JobSpy runs in an isolated subprocess with pagination-progress reporting and a bounded no-progress watchdog;
-- six consecutive query failures open the default source circuit breaker so an outage does not hammer the remaining registry; the threshold is Admin-configurable;
-- discovery uses `linkedin_fetch_description=False` and deduplicates by native LinkedIn ID before detail work;
-- each genuinely new/unfetched canonical vacancy gets at most one bounded direct public-HTML fetch, and that same response supplies JD plus neutral detail facts;
+- production discovery uses a blank search term plus each enabled geography's LinkedIn location and native LinkedIn-ID dedupe;
+- JMM owns exact 10-position source offsets and uses bounded retry/terminal confirmation because LinkedIn can transiently return a short or empty page before later real results;
+- production discovery is cards-only. It does not fetch vacancy details or JDs; JMM-003 owns on-demand LinkedIn detail/JD enrichment through the shared public-page helper;
+- LinkedIn's public guest endpoint returns HTTP 400 at offset 1000. Reaching that ceiling is reported as `INCOMPLETE_CAP`, never as complete coverage;
+- a vacancy detail page is fetched only through explicit/on-demand enrichment, not merely because a card was discovered;
 - apply method uses the current public page's direct apply URL: trustworthy external URL -> `external_apply`; no external URL -> `easy_apply`; otherwise unknown;
 - explicit `Reposted` sets `reposted=true`; repost identity/merging remains JMM-008's responsibility;
 - explicit `No longer accepting applications` supplies the LinkedIn closed source status;
 - `applicant_count` is stored only for an exact numeric count such as `30 applicants` or `187 applicants`; threshold text such as `Be among the first 25 applicants` is not converted into a count;
 - personal/UI activity such as `Viewed` is never canonical JMM data. Low-value badges such as `Promoted`, `Actively reviewing applicants` and `Be an early applicant` are not promoted into structured canonical fields.
 
-Existing LinkedIn rows are not bulk re-fetched merely to fill these fields. Unknown stays unknown unless a vacancy is naturally fetched later for another valid reason.
+Existing LinkedIn rows are not bulk re-fetched merely to fill these fields. Unknown stays unknown unless a vacancy is fetched later for a valid enrichment reason.
 
 The old browser/snapshot LinkedIn path has been removed. LinkedIn has no Playwright/Chromium runtime dependency.
 

@@ -8,7 +8,7 @@ dependencies = [
   "uvicorn>=0.30",
   "pydantic>=2.8",
   "playwright>=1.62.0",
-  "python-jobspy>=1.1.82,<2",
+  "python-jobspy==1.1.82",
 ]
 
 [tool.pytest.ini_options]

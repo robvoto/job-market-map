@@ -71,13 +71,13 @@ The port itself is an admin setting and takes effect on the next API start.
 - duplicate fingerprints/evidence links: implemented
 - one-off JMM-006 bootstrap from trustworthy existing Job Hunter neutral job/JD evidence: implemented
 - opt-in retention controls with preserve-evidence defaults: implemented
-- 109 neutral query specs expanded across NSW/ACT/QLD (684 seeded source-geography searches)
+- geography-first LinkedIn discovery for NSW/ACT/QLD; old LinkedIn keyword runs are historical/admin only
 - SEEK recent-window discovery + recursive whole-state NSW/ACT/QLD coverage + write-once JD enrichment: implemented
-- LinkedIn resumable JobSpy/HTTP daily discovery + one-fetch neutral detail/JD enrichment: implemented
+- LinkedIn resumable HTTP cards-only discovery + on-demand JMM-003 detail/JD enrichment: implemented
 - APSJobs neutral collector: pending
 - permanent SEEK JD fetch memory: implemented; successfully fetched jobs are not reopened on later daily runs
 
-Measured 10 Sep 2026: one SEEK `technical implementation` search exposed **220 cards over seven populated pages**, with **0 individual JD opens**. LinkedIn uses per-query JobSpy offsets plus a durable daily campaign cycle so incomplete work resumes inside the shared runtime budget. See `docs/BENCHMARKS.md`.
+Measured 10 Sep 2026: one SEEK `technical implementation` search exposed **220 cards over seven populated pages**, with **0 individual JD opens**. LinkedIn production discovery is geography-first, cards-only and JMM-owned at exact source offsets; JMM-003 fetches detail only when explicitly needed. See `docs/BENCHMARKS.md`.
 
 ## Read first
 

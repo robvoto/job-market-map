@@ -60,9 +60,9 @@ Personal applied/rejected/presented state is not a retention exception here beca
 - default freshness horizon;
 - SEEK page settling, parser wait and safety-page guard;
 - `collection.seek_incremental_overlap_minutes` (default 120) for safe overlap on extra fresh runs inside the 1-day window; normal ~24-hour daily runs remain full reconciliation passes;
-- LinkedIn enable/disable, JobSpy results per query, no-progress timeout, direct-detail HTTP timeout and consecutive-query failure circuit breaker.
+- LinkedIn enable/disable, HTTP no-progress/timeout controls, and direct-detail HTTP timeout for JMM-003 on-demand enrichment. Production LinkedIn discovery is geography-first, cards-only, and JMM owns exact 10-position source offsets rather than configurable keyword-query chunks.
 
-The right-side stats panel shows current source totals (including APSJobs), the accepted 3-day bootstrap separately, the current LinkedIn cycle (queries complete/remaining), and after a normal run its duration, jobs/JDs added, SEEK work and LinkedIn cards/new/detail-fetched/failure counts.
+The right-side stats panel shows current source totals (including APSJobs), the accepted 3-day bootstrap separately, the current LinkedIn geography cycle (complete/capped/remaining), and after a normal run its duration, jobs/JDs added, SEEK work and LinkedIn cards/new/chunk counts. LinkedIn discovery itself is cards-only.
 
 ### Duplicate detection
 - near-match enable/disable;
@@ -73,7 +73,7 @@ The right-side stats panel shows current source totals (including APSJobs), the 
 - local API port.
 
 ### Optional source keyword queries (advanced)
-These are extra source/query/location searches for LinkedIn, APSJobs or targeted experiments. Normal SEEK daily coverage uses whole-state partitioning and does not depend on these keyword queries. Queries are operational DB data; Admin can enable/disable them, and registry sync does not silently re-enable a query Rob disabled.
+These are optional source/query/location searches for APSJobs or targeted experiments. Production SEEK and LinkedIn market discovery do not depend on keyword queries: SEEK uses whole-state partitioning and LinkedIn uses geography-only JobSpy discovery. Queries are operational DB data; Admin can enable/disable them, and registry sync does not silently re-enable a query Rob disabled.
 
 ## Safety semantics
 

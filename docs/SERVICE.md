@@ -103,4 +103,4 @@ The durable collection log is `logs/collection.log`. Admin links to `GET /v3/adm
 
 ## Current scheduled source scope
 
-The singleton scheduled runner performs **whole-state SEEK first**, then detaches from its SEEK browser pages and runs the resumable **LinkedIn JobSpy/HTTP campaign** inside the same collection lock, backup and wall-clock runtime budget. LinkedIn never uses the persistent JMM Chromium service. An unfinished LinkedIn cycle resumes on the next run; a new daily cycle starts only after the previous cycle completes.
+SEEK and LinkedIn both use the same scheduler service and singleton collection lock, so they cannot overlap unsafely. SEEK uses the persistent JMM Chromium service; LinkedIn is cards-only HTTP discovery and never uses Chromium. LinkedIn owns independent geography cursors with exact 10-position source offsets and reports the hard 1,000-result ceiling as `INCOMPLETE_CAP` rather than falsely complete.

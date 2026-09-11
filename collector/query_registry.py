@@ -109,7 +109,6 @@ def sync_registry(path: Path = REGISTRY_PATH) -> int:
     init_db()
     count = 0
     desired_runs = expanded_runs(path)
-    seeded_keys = {spec.key for spec in load_registry(path)}
     desired_signatures = {
         (run["registry_key"], run["source"], run["geography_code"])
         for run in desired_runs
@@ -121,7 +120,7 @@ def sync_registry(path: Path = REGISTRY_PATH) -> int:
             "SELECT id, registry_key, source, geography_code FROM queries WHERE registry_key IS NOT NULL"
         ).fetchall():
             signature = (row["registry_key"], row["source"], row["geography_code"])
-            if row["registry_key"] in seeded_keys and signature not in desired_signatures:
+            if signature not in desired_signatures:
                 conn.execute("UPDATE queries SET active=0 WHERE id=?", (row["id"],))
         for run in desired_runs:
             conn.execute(

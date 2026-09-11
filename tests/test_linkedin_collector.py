@@ -189,3 +189,209 @@ def test_failed_detail_is_not_retried_for_duplicate_query_hit_in_same_campaign(
     assert len(detail_calls) == 1
     with db.connect() as conn:
         assert conn.execute("SELECT full_description FROM jobs").fetchone()[0] is None
+
+
+def test_linkedin_cards_only_chunk_never_fetches_detail(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        linkedin_collector,
+        "_fetch_jobspy_isolated",
+        lambda params, should_stop: _row(),
+    )
+    monkeypatch.setattr(
+        linkedin_collector,
+        "fetch_linkedin_detail",
+        lambda _url: (_ for _ in ()).throw(AssertionError("detail fetch must not run")),
+    )
+
+    result = linkedin_collector.collect_linkedin_chunk(
+        "",
+        "New South Wales, Australia",
+        geography_code="NSW",
+        cycle_key="2026-09-11",
+        days=1,
+        results_wanted=20,
+        fetch_details=False,
+        max_results=1000,
+        should_stop=lambda: False,
+    )
+    assert result.detail_attempted == 0
+    assert result.detail_stored == 0
+    with db.connect() as conn:
+        job = conn.execute(
+            "SELECT full_description FROM jobs WHERE source='linkedin'"
+        ).fetchone()
+    assert job[0] is None
+
+
+def test_linkedin_chunk_marks_result_cap_incomplete(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    from collector.cursors import save_cursor
+
+    save_cursor(
+        "linkedin",
+        "",
+        "NSW",
+        980,
+        status="PARTIAL",
+        cycle_key="2026-09-11",
+    )
+    rows = pd.concat([_row(f"li-{4465000000 + i}") for i in range(20)], ignore_index=True)
+    monkeypatch.setattr(
+        linkedin_collector,
+        "_fetch_jobspy_isolated",
+        lambda params, should_stop: rows,
+    )
+
+    result = linkedin_collector.collect_linkedin_chunk(
+        "",
+        "NSW",
+        geography_code="NSW",
+        cycle_key="2026-09-11",
+        days=1,
+        results_wanted=20,
+        fetch_details=False,
+        max_results=1000,
+        should_stop=lambda: False,
+    )
+    assert result.start_offset == 980
+    assert result.next_offset == 1000
+    assert result.status == "INCOMPLETE_CAP"
+
+
+def test_linkedin_chunk_records_interrupt_as_stopped_not_failed(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        linkedin_collector,
+        "_fetch_jobspy_isolated",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(InterruptedError("stopped")),
+    )
+
+    import pytest
+
+    with pytest.raises(InterruptedError, match="stopped"):
+        linkedin_collector.collect_linkedin_chunk(
+            "",
+            "New South Wales, Australia",
+            geography_code="NSW",
+            cycle_key="2026-09-11",
+            days=1,
+            results_wanted=20,
+            fetch_details=False,
+            max_results=1000,
+            should_stop=lambda: False,
+        )
+
+    with db.connect() as conn:
+        run = conn.execute(
+            "SELECT status,error FROM collection_runs WHERE source='linkedin' ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+    assert run["status"] == "STOPPED"
+    assert run["error"] is None
+
+
+def test_geography_page_uses_fixed_source_offset_not_parsed_row_count(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    row = _row().iloc[0].to_dict()
+    monkeypatch.setattr(
+        linkedin_collector,
+        "_fetch_exact_page_resilient",
+        lambda **_kwargs: ([row], True, 2),
+    )
+
+    result = linkedin_collector.collect_linkedin_geography_page(
+        "New South Wales, Australia",
+        geography_code="NSW",
+        cycle_key="2026-09-11T20",
+        hours_old=5,
+        should_stop=lambda: False,
+    )
+
+    assert result.cards_observed == 1
+    assert result.next_offset == 10
+    assert result.status == "PARTIAL"
+    with db.connect() as conn:
+        cursor = conn.execute(
+            "SELECT cursor_value,status FROM collection_cursors WHERE source='linkedin' AND query_text=''"
+        ).fetchone()
+    assert tuple(cursor) == (10, "PARTIAL")
+
+
+def test_geography_short_page_with_later_rows_is_not_terminal(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    row = _row().iloc[0].to_dict()
+    calls = []
+
+    def fake_page(**kwargs):
+        calls.append(kwargs["offset"])
+        if kwargs["offset"] == 0:
+            return ([row], False, 3)
+        return ([row], True, 1)
+
+    monkeypatch.setattr(linkedin_collector, "_fetch_exact_page_resilient", fake_page)
+    result = linkedin_collector.collect_linkedin_geography_page(
+        "New South Wales, Australia",
+        geography_code="NSW",
+        cycle_key="2026-09-11T20",
+        hours_old=5,
+        should_stop=lambda: False,
+    )
+    assert calls == [0, 10]
+    assert result.status == "PARTIAL"
+    assert result.next_offset == 10
+
+
+def test_geography_short_page_requires_empty_forward_probes_before_complete(
+    tmp_path, monkeypatch
+):
+    _isolate(tmp_path, monkeypatch)
+    calls = []
+
+    def fake_page(**kwargs):
+        calls.append(kwargs["offset"])
+        return ([], False, 2)
+
+    monkeypatch.setattr(linkedin_collector, "_fetch_exact_page_resilient", fake_page)
+    result = linkedin_collector.collect_linkedin_geography_page(
+        "Australian Capital Territory, Australia",
+        geography_code="ACT",
+        cycle_key="2026-09-11T20",
+        hours_old=5,
+        should_stop=lambda: False,
+    )
+    assert calls == [0, 10, 20, 30]
+    assert result.status == "COMPLETE"
+    assert result.next_offset == 10
+
+
+def test_geography_full_last_page_marks_cap_incomplete(tmp_path, monkeypatch):
+    _isolate(tmp_path, monkeypatch)
+    from collector.cursors import save_cursor
+
+    save_cursor(
+        "linkedin",
+        "",
+        "New South Wales, Australia",
+        990,
+        status="PARTIAL",
+        cycle_key="2026-09-11T20",
+    )
+    rows = [
+        _row(f"li-{4465000000 + i}").iloc[0].to_dict()
+        for i in range(linkedin_collector.LINKEDIN_PAGE_SIZE)
+    ]
+    monkeypatch.setattr(
+        linkedin_collector,
+        "_fetch_exact_page_resilient",
+        lambda **_kwargs: (rows, True, 1),
+    )
+    result = linkedin_collector.collect_linkedin_geography_page(
+        "New South Wales, Australia",
+        geography_code="NSW",
+        cycle_key="2026-09-11T20",
+        hours_old=5,
+        should_stop=lambda: False,
+    )
+    assert result.start_offset == 990
+    assert result.next_offset == 1000
+    assert result.status == "INCOMPLETE_CAP"

@@ -35,14 +35,15 @@ uv run python collector/db.py
 uv run python -m collector.query_registry
 ```
 
-## Run/resume one LinkedIn query through the production HTTP path
+## Run LinkedIn market discovery by itself
 
 ```bash
-uv run python -m scripts.run_linkedin_chunk "business analyst" \
-  --location "New South Wales, Australia" --geography-code NSW --days 1
+uv run python -m scripts.run_linkedin_market --days 1
 ```
 
-This diagnostic command uses the same production JobSpy/HTTP collector as the scheduler. `--results-wanted N` may be used for a small one-query diagnostic only; normal scheduled collection uses the Admin setting and durable campaign/cursor state.
+This uses the production geography-first LinkedIn HTTP path for enabled ACT/NSW/QLD locations, takes a verified backup first, acquires the normal singleton collection lock, and does **not** run SEEK. Discovery is cards-only: it does not fetch LinkedIn vacancy pages or JDs. JMM owns exact 10-position source offsets, retries transient short pages and confirms apparent terminal pages. A geography that reaches LinkedIn's hard 1,000-result ceiling is reported as `INCOMPLETE_CAP`.
+
+`scripts.run_linkedin_chunk` remains a narrow diagnostic for explicitly testing one query/location; it is not the production geography collector.
 
 ## Start local API
 

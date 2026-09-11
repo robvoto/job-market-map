@@ -321,7 +321,7 @@ def main(argv: list[str] | None = None) -> int:
                 final_status = "PARTIAL_JD"
             elif linkedin_result is None or linkedin_result.status in {"COMPLETE", "DISABLED"}:
                 final_status = "COMPLETE"
-            elif linkedin_result.status == "PARTIAL_FAILURE":
+            elif linkedin_result.status in {"PARTIAL_FAILURE", "INCOMPLETE_CAP"}:
                 final_status = "PARTIAL_SOURCE"
             elif linkedin_result.status == "STOPPED":
                 final_status = "STOPPED"
@@ -343,10 +343,10 @@ def main(argv: list[str] | None = None) -> int:
             if linkedin_result is not None:
                 message += (
                     f" LinkedIn {linkedin_result.status.lower()}: "
-                    f"queries={linkedin_result.queries_complete}/{linkedin_result.queries_total}, "
+                    f"geographies={linkedin_result.geographies_complete}/{linkedin_result.geographies_total}, "
+                    f"capped={linkedin_result.capped_geographies}, "
                     f"observed={linkedin_result.cards_observed}, new={linkedin_result.unique_new_jobs}, "
-                    f"detail_stored={linkedin_result.detail_stored}, "
-                    f"detail_failed={linkedin_result.detail_failed}."
+                    f"chunks={linkedin_result.chunks_processed}."
                 )
             current_stats = population_stats(codes)
             run_stats = build_run_stats(
