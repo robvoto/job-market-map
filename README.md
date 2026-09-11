@@ -81,7 +81,7 @@ Measured 10 Sep 2026: one SEEK `technical implementation` search exposed **220 c
 
 ## Read first
 
-Agents: `.agents/skills/job-market-map/SKILL.md`
+Agents: `AGENTS.md`, then `.agents/skills/INDEX.md`
 
 Consumers: `docs/CONSUMER_CONTRACT.md`
 
