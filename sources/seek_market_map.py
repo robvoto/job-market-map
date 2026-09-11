@@ -469,7 +469,11 @@ def _collect_leaf(
             seen.add(source_id)
             existing = existing_by_source_id.get(source_id)
             if existing is None or _known_seek_card_changed(existing, card):
-                job_id = ingest_card(card).job_id
+                ingest_result = ingest_card(card)
+                # Partition membership is source coverage, so retain the SEEK
+                # observation row even when dedupe assigns it to another source's
+                # processing primary.
+                job_id = ingest_result.observation_job_id or ingest_result.job_id
             else:
                 # Daily scans only need to prove this known identity is still present.
                 # Avoid creating another raw card capture or rerunning duplicate work.

@@ -212,6 +212,29 @@ def test_seek_linkedin_identical_intro_reuses_primary_when_other_fields_missing(
     )
 
 
+def test_same_source_new_posting_id_reuses_oldest_primary(tmp_path, monkeypatch):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    first = ingest.ingest_card(
+        _rich_observation(
+            source="seek", source_job_id="123", teaser_text="Lead enterprise onboarding and API integration."
+        )
+    )
+    second = ingest.ingest_card(
+        _rich_observation(
+            source="seek", source_job_id="456", teaser_text="Lead enterprise onboarding and API integration."
+        )
+    )
+
+    assert second.created is False
+    assert second.job_id == first.job_id
+    assert second.observation_job_id != first.job_id
+    with db.connect() as conn:
+        source_rows = conn.execute(
+            "SELECT source_job_id, primary_job_id FROM jobs WHERE source='seek' ORDER BY id"
+        ).fetchall()
+    assert [(row[0], row[1]) for row in source_rows] == [("123", None), ("456", first.job_id)]
+
+
 def test_ambiguous_repost_candidate_remains_separate(tmp_path, monkeypatch):
     ingest = _use_tmp_db(tmp_path, monkeypatch)
     ingest.ingest_card(

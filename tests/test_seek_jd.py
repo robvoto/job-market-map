@@ -169,6 +169,124 @@ def test_enrichment_fetches_once_then_permanently_skips_same_job(tmp_path, monke
     assert second.remaining == 0
 
 
+def test_seek_alias_membership_can_supply_missing_primary_jd(tmp_path, monkeypatch):
+    import sources.seek_market_map as market
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    db.init_db()
+    primary = ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="linkedin-456",
+            canonical_url="https://linkedin.test/jobs/linkedin-456",
+            title="Implementation Consultant",
+            employer="Example Co",
+            teaser_text=(
+                "Lead enterprise customer onboarding, API integration, testing and "
+                "launch activities for strategic clients."
+            ),
+        )
+    )
+    with db.connect() as conn:
+        partition_id = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,reported_results,
+                collected_unique_jobs,max_results_threshold,first_seen_at,updated_at
+            ) VALUES('NSW',NULL,'work_type','All',
+                'https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1',
+                'PENDING',1,0,450,'x','x')"""
+        ).lastrowid
+
+    monkeypatch.setattr(market, "navigate", lambda *_a, **_k: None)
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        market,
+        "get_setting",
+        lambda key: 0 if key == "collection.seek_page_load_seconds" else 10,
+    )
+    monkeypatch.setattr(
+        market,
+        "_wait_snapshot",
+        lambda *_a, **_k: {"text": "1 job in New South Wales"},
+    )
+    monkeypatch.setattr(
+        market,
+        "seek_cards",
+        lambda *_a, **_k: type("Response", (), {"result": [{}]})(),
+    )
+    monkeypatch.setattr(
+        market,
+        "parse_seek_dom_cards",
+        lambda *_a, **_k: [
+            CardObservation(
+                source="seek",
+                source_job_id="seek-123",
+                canonical_url="https://seek.test/jobs/seek-123",
+                title="Implementation Consultant",
+                employer="Example Co",
+                teaser_text=(
+                    "Lead enterprise customer onboarding, API integration, testing and "
+                    "launch activities for strategic clients."
+                ),
+                geography_code="NSW",
+            )
+        ],
+    )
+
+    status, count = market._collect_leaf(
+        1,
+        partition_id=partition_id,
+        url="https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1",
+        geography_code="NSW",
+        reported=1,
+        tolerance=0,
+    )
+    assert (status, count) == ("COMPLETE", 1)
+
+    with db.connect() as conn:
+        seek_alias = conn.execute(
+            "SELECT id FROM jobs WHERE source='seek' AND source_job_id='seek-123'"
+        ).fetchone()
+        membership = conn.execute(
+            "SELECT job_id FROM seek_partition_jobs WHERE partition_id=?",
+            (partition_id,),
+        ).fetchone()
+        conn.execute("DELETE FROM seek_partition_jobs WHERE partition_id=?", (partition_id,))
+        # Existing databases may contain the old incorrect primary membership.
+        conn.execute(
+            "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+            (partition_id, primary.job_id, "x"),
+        )
+    assert membership[0] == seek_alias[0]
+
+    from collector import seek_jd
+
+    monkeypatch.setattr(seek_jd, "connect", db.connect)
+    calls = []
+
+    def fake_fetch(_page_id, url, *, expected_source_job_id):
+        calls.append((url, expected_source_job_id))
+        return seek_jd.SeekFetchedDetail(
+            full_description="A valid SEEK JD supplied by the newer source posting.",
+            facts={"source_job_id": expected_source_job_id},
+        )
+
+    monkeypatch.setattr(seek_jd, "fetch_seek_detail", fake_fetch)
+    result = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["NSW"],
+        days=1,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+    )
+
+    assert result.stored == 1
+    assert calls == [("https://seek.test/jobs/seek-123", "seek-123")]
+    assert db.get_job_jd(primary.job_id)["id"] == primary.job_id
+
+
 def test_known_seek_card_is_not_reingested_on_daily_coverage(tmp_path, monkeypatch):
     import sources.seek_market_map as market
 
