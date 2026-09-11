@@ -41,6 +41,10 @@ class SeekJDFetchError(RuntimeError):
     pass
 
 
+class SeekJDUnavailableError(SeekJDFetchError):
+    """SEEK explicitly says the source job is no longer advertised."""
+
+
 @dataclass(frozen=True)
 class SeekFetchedDetail:
     full_description: str
@@ -55,6 +59,7 @@ class SeekJDEnrichmentResult:
     stored: int
     failed: int
     remaining: int
+    unavailable: int = 0
 
 
 def _now() -> str:
@@ -307,6 +312,10 @@ def fetch_seek_detail(
                 continue
 
             actual_id = str(raw.get("source_job_id") or "").strip()
+            if bool(raw.get("terminal_unavailable")):
+                raise SeekJDUnavailableError(
+                    f"SEEK job {expected_id or actual_id or page_url} is no longer advertised"
+                )
             if expected_id and actual_id != expected_id:
                 raise SeekJDFetchError(
                     f"SEEK detail identity mismatch: expected {expected_id!r}, got {actual_id!r}"
@@ -367,14 +376,14 @@ def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT DISTINCT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,
+            SELECT DISTINCT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,j.source_status,
                             p.url AS partition_url,
                             CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
               JOIN seek_partition_jobs spj ON spj.job_id=j.id
               JOIN seek_partitions p ON p.id=spj.partition_id
               LEFT JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
-             WHERE j.source='seek' AND p.geography_code IN ({placeholders})
+             WHERE j.source='seek' AND COALESCE(j.source_status,'') <> 'no_longer_advertised' AND p.geography_code IN ({placeholders})
              ORDER BY j.id
             """,
             codes,
@@ -391,11 +400,11 @@ def all_unfetched_seek_jobs() -> list[dict]:
     with connect() as conn:
         rows = conn.execute(
             """
-            SELECT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,
+            SELECT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,j.source_status,
                    CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
               LEFT JOIN jd_fetch_registry r ON r.identity_key=j.identity_key
-             WHERE j.source='seek' AND r.identity_key IS NULL
+             WHERE j.source='seek' AND r.identity_key IS NULL AND COALESCE(j.source_status,'') <> 'no_longer_advertised'
              ORDER BY j.id
             """
         ).fetchall()
@@ -430,7 +439,8 @@ def enrich_seek_coverage_jds(
         int(row["id"]) for row in rows if int(row.get("jd_fetch_completed") or 0)
     }
     cached = len(completed_ids)
-    attempted = stored = failed = 0
+    attempted = stored = failed = unavailable = 0
+    unavailable_ids: set[int] = set()
 
     for row in rows:
         job_id = int(row["id"])
@@ -481,13 +491,22 @@ def enrich_seek_coverage_jds(
                 )
         except BrowserBrokerError:
             raise
+        except SeekJDUnavailableError:
+            update_job_source_facts(job_id, source_status="no_longer_advertised")
+            unavailable += 1
+            unavailable_ids.add(job_id)
+            collection_logger().info(
+                "SEEK JD unavailable job_id=%s source_job_id=%s status=no_longer_advertised",
+                job_id,
+                str(row["source_job_id"] or "").strip(),
+            )
         except SeekJDFetchError as exc:
             failed += 1
             collection_logger().warning(
                 "SEEK JD fetch failed job_id=%s error=%s", job_id, exc
             )
 
-    remaining = len(rows) - len(completed_ids)
+    remaining = len(rows) - len(completed_ids) - len(unavailable_ids)
     return SeekJDEnrichmentResult(
         candidates=len(rows),
         cached=cached,
@@ -495,4 +514,5 @@ def enrich_seek_coverage_jds(
         stored=stored,
         failed=failed,
         remaining=remaining,
+        unavailable=unavailable,
     )

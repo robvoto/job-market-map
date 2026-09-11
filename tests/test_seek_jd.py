@@ -368,3 +368,54 @@ def test_unreadable_detail_is_not_treated_as_human_verification(monkeypatch):
             timeout_seconds=1.0,
             human_wait_seconds=900.0,
         )
+
+
+def test_no_longer_advertised_is_terminal_not_failed(tmp_path, monkeypatch):
+    from collector import db, seek_jd
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(seek_jd, "connect", db.connect)
+    db.init_db()
+    with db.connect() as conn:
+        partition_id = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,max_results_threshold,first_seen_at,updated_at
+            ) VALUES('ACT',NULL,'state','ACT',
+                'https://au.seek.com/jobs/in-Australian-Capital-Territory-ACT?daterange=3',
+                'COMPLETE',450,'x','x')"""
+        ).lastrowid
+        job_id = conn.execute(
+            "INSERT INTO jobs(source,source_job_id,canonical_url,identity_key) VALUES('seek','94511500','https://au.seek.com/job/94511500','seek:id:94511500')"
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+            (partition_id, job_id, "x"),
+        )
+
+    monkeypatch.setattr(
+        seek_jd,
+        "fetch_seek_detail",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            seek_jd.SeekJDUnavailableError("no longer advertised")
+        ),
+    )
+
+    result = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+    )
+
+    assert result.attempted == 1
+    assert result.stored == 0
+    assert result.failed == 0
+    assert result.unavailable == 1
+    assert result.remaining == 0
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT source_status FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()
+        assert row["source_status"] == "no_longer_advertised"
+    assert seek_jd.coverage_seek_jobs(codes=["ACT"], days=3) == []

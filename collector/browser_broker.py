@@ -130,6 +130,7 @@ _SEEK_DETAIL_JS = r"""
   const sourceJobId = job?.id != null
     ? String(job.id)
     : (pageUrl.match(/\/job\/(\d+)/)?.[1] || '');
+  const noLongerAdvertised = low.includes('this job is no longer advertised');
   const title = job?.title || textOf(['[data-automation="job-detail-title"]', 'h1']);
   const employer = job?.advertiser?.name || textOf([
     '[data-automation="advertiser-name"]',
@@ -200,7 +201,8 @@ _SEEK_DETAIL_JS = r"""
     salary_text: salaryText,
     posted_at: job?.listedAt?.dateTimeUtc || '',
     expires_at: job?.expiresAt?.dateTimeUtc || '',
-    source_status: job?.status || '',
+    source_status: noLongerAdvertised ? 'no_longer_advertised' : (job?.status || ''),
+    terminal_unavailable: noLongerAdvertised,
     easy_apply: easyApply,
     apply_method: applyMethod,
     full_description: fullDescription,

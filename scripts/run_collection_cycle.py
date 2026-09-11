@@ -10,6 +10,7 @@ from collector.backup import create_backup
 from collector.browser_broker import close_browser, open_tab
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
+from collector.run_stats import log_run_summary, population_stats
 from collector.seek_cycle import (
     all_states_complete,
     enabled_state_codes,
@@ -60,6 +61,11 @@ def main(argv: list[str] | None = None) -> int:
         parser.error("--max-runtime-minutes must be >= 0")
 
     stop_event = Event()
+    run_started = time.monotonic()
+    baseline_stats = None
+    run_codes: list[str] = []
+    run_partitions_processed = 0
+    jd_totals = {"attempted": 0, "stored": 0, "failed": 0, "unavailable": 0}
 
     def request_stop(*_args) -> None:
         stop_event.set()
@@ -70,6 +76,8 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with collection_run_lock(args.trigger):
             codes = enabled_state_codes()
+            run_codes = list(codes)
+            baseline_stats = population_stats(codes)
             if not codes:
                 log.error("no enabled SEEK geographies")
                 return 2
@@ -116,12 +124,11 @@ def main(argv: list[str] | None = None) -> int:
                 if args.max_runtime_minutes is not None
                 else configured_limit
             )
-            started = time.monotonic()
 
             def deadline_reached() -> bool:
                 return (
                     bool(max_minutes)
-                    and (time.monotonic() - started) >= max_minutes * 60
+                    and (time.monotonic() - run_started) >= max_minutes * 60
                 )
 
             list_page_id = int(open_tab("about:blank", active=False).result["pageId"])
@@ -149,13 +156,18 @@ def main(argv: list[str] | None = None) -> int:
                     deadline_reached=deadline_reached,
                     include_existing_unfetched=include_existing_unfetched,
                 )
+                jd_totals["attempted"] += jd_result.attempted
+                jd_totals["stored"] += jd_result.stored
+                jd_totals["failed"] += jd_result.failed
+                jd_totals["unavailable"] += jd_result.unavailable
                 log.info(
-                    "JD sweep finished candidates=%s cached=%s attempted=%s stored=%s failed=%s remaining=%s",
+                    "JD sweep finished candidates=%s cached=%s attempted=%s stored=%s failed=%s unavailable=%s remaining=%s",
                     jd_result.candidates,
                     jd_result.cached,
                     jd_result.attempted,
                     jd_result.stored,
                     jd_result.failed,
+                    jd_result.unavailable,
                     jd_result.remaining,
                 )
 
@@ -186,6 +198,8 @@ def main(argv: list[str] | None = None) -> int:
                 after_progress=after_coverage_progress,
             )
 
+            run_partitions_processed = result.partitions_processed
+
             # Final sweep proves the pass has the required JDs. The one-off legacy
             # backfill is included only after current 3-day coverage is complete.
             if result.status == "COMPLETE":
@@ -212,7 +226,7 @@ def main(argv: list[str] | None = None) -> int:
                 message += (
                     f" JD candidates={jd_result.candidates}, cached={jd_result.cached}, "
                     f"stored={jd_result.stored}, failed={jd_result.failed}, "
-                    f"remaining={jd_result.remaining}."
+                    f"unavailable={jd_result.unavailable}, remaining={jd_result.remaining}."
                 )
             finish_market_run(run_id, status=final_status, message=message)
             if args.trigger == "scheduled":
@@ -229,6 +243,17 @@ def main(argv: list[str] | None = None) -> int:
                 asdict(jd_result) if jd_result is not None else None,
                 days,
             )
+            if baseline_stats is not None:
+                log_run_summary(
+                    log,
+                    run_id=run_id,
+                    status=final_status,
+                    duration_seconds=time.monotonic() - run_started,
+                    baseline=baseline_stats,
+                    current=population_stats(codes),
+                    partitions_processed=run_partitions_processed,
+                    jd_totals=jd_totals,
+                )
             return (
                 0
                 if final_status in {"COMPLETE", "PARTIAL_TIME_LIMIT", "STOPPED"}
@@ -254,6 +279,17 @@ def main(argv: list[str] | None = None) -> int:
                 )
         finally:
             log.exception("collection failed")
+            if "run_id" in locals() and baseline_stats is not None:
+                log_run_summary(
+                    log,
+                    run_id=run_id,
+                    status="FAILED",
+                    duration_seconds=time.monotonic() - run_started,
+                    baseline=baseline_stats,
+                    current=population_stats(run_codes),
+                    partitions_processed=run_partitions_processed,
+                    jd_totals=jd_totals,
+                )
         return 1
     finally:
         close_browser()
