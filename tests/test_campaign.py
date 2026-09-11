@@ -1,6 +1,9 @@
+import threading
+import time
+
 from collector import db
 from collector.cursors import save_cursor
-from sources.linkedin_collector import LinkedInChunkResult
+from sources.linkedin_collector import LinkedInChunkResult, LinkedInFetchedPage
 
 
 def _isolate(tmp_path, monkeypatch):
@@ -30,6 +33,19 @@ def _result(status="COMPLETE", observed=10, new=10, duplicates=0):
     )
 
 
+def _fetched(status="COMPLETE", start=0, next_offset=10):
+    return LinkedInFetchedPage(
+        start_offset=start,
+        next_offset=next_offset,
+        status=status,
+        rows=[],
+        full_page_seen=status != "COMPLETE",
+        later_rows_seen=False,
+        http_attempts=1,
+        elapsed_seconds=0.01,
+    )
+
+
 def test_production_linkedin_campaign_does_not_use_keyword_registry(tmp_path, monkeypatch):
     campaign, query_admin = _isolate(tmp_path, monkeypatch)
     row = query_admin.add_query(
@@ -49,24 +65,31 @@ def test_production_linkedin_campaign_does_not_use_keyword_registry(tmp_path, mo
         lambda: [{"geography_code": "NSW", "location": "New South Wales, Australia"}],
     )
     monkeypatch.setattr(campaign, "get_setting", lambda key: True)
-    calls = []
+    fetch_calls = []
+    ingest_calls = []
 
-    def fake_collect(location, **kwargs):
-        calls.append((location, kwargs))
+    def fake_fetch(location, **kwargs):
+        fetch_calls.append((location, kwargs))
+        return _fetched()
+
+    def fake_ingest(fetched, location, **kwargs):
+        ingest_calls.append((location, kwargs))
         save_cursor(
             "linkedin", "", location, 10, status="COMPLETE", cycle_key=kwargs["cycle_key"]
         )
         return _result()
 
-    monkeypatch.setattr(campaign, "collect_linkedin_geography_page", fake_collect)
+    monkeypatch.setattr(campaign, "fetch_linkedin_geography_page", fake_fetch)
+    monkeypatch.setattr(campaign, "ingest_linkedin_geography_page", fake_ingest)
     result = campaign.run_linkedin_campaign(
         days=1, should_stop=lambda: False, deadline_reached=lambda: False
     )
     assert result.status == "COMPLETE"
-    assert len(calls) == 1
-    assert calls[0][0] == "New South Wales, Australia"
-    assert calls[0][1]["hours_old"] == 24
-    assert calls[0][1]["max_results"] == 1000
+    assert len(fetch_calls) == 1
+    assert len(ingest_calls) == 1
+    assert fetch_calls[0][0] == "New South Wales, Australia"
+    assert fetch_calls[0][1]["hours_old"] == 24
+    assert fetch_calls[0][1]["max_results"] == 1000
 
 
 def test_linkedin_geography_campaign_resumes_same_cycle_after_runtime_limit(
@@ -84,14 +107,16 @@ def test_linkedin_geography_campaign_resumes_same_cycle_after_runtime_limit(
     )
     processed = []
 
-    def fake_collect(location, **kwargs):
+    monkeypatch.setattr(campaign, "fetch_linkedin_geography_page", lambda *_a, **_k: _fetched())
+
+    def fake_ingest(fetched, location, **kwargs):
         processed.append(location)
         save_cursor(
             "linkedin", "", location, 10, status="COMPLETE", cycle_key=kwargs["cycle_key"]
         )
         return _result()
 
-    monkeypatch.setattr(campaign, "collect_linkedin_geography_page", fake_collect)
+    monkeypatch.setattr(campaign, "ingest_linkedin_geography_page", fake_ingest)
     first = campaign.run_linkedin_campaign(
         days=1,
         should_stop=lambda: False,
@@ -122,7 +147,13 @@ def test_linkedin_geography_cap_is_reported_not_hidden(tmp_path, monkeypatch):
         lambda: [{"geography_code": "NSW", "location": "New South Wales, Australia"}],
     )
 
-    def fake_collect(location, **kwargs):
+    monkeypatch.setattr(
+        campaign,
+        "fetch_linkedin_geography_page",
+        lambda *_a, **_k: _fetched(status="INCOMPLETE_CAP", start=990, next_offset=1000),
+    )
+
+    def fake_ingest(fetched, location, **kwargs):
         save_cursor(
             "linkedin",
             "",
@@ -133,7 +164,7 @@ def test_linkedin_geography_cap_is_reported_not_hidden(tmp_path, monkeypatch):
         )
         return _result(status="INCOMPLETE_CAP")
 
-    monkeypatch.setattr(campaign, "collect_linkedin_geography_page", fake_collect)
+    monkeypatch.setattr(campaign, "ingest_linkedin_geography_page", fake_ingest)
     result = campaign.run_linkedin_campaign(
         days=1, should_stop=lambda: False, deadline_reached=lambda: False
     )
@@ -175,10 +206,58 @@ def test_linkedin_geography_failures_remain_retryable(tmp_path, monkeypatch):
         calls.append(location)
         raise RuntimeError("LinkedIn unavailable")
 
-    monkeypatch.setattr(campaign, "collect_linkedin_geography_page", fail)
+    monkeypatch.setattr(campaign, "fetch_linkedin_geography_page", fail)
     result = campaign.run_linkedin_campaign(
         days=1, should_stop=lambda: False, deadline_reached=lambda: False
     )
     assert result.status == "PARTIAL_FAILURE"
     assert result.failed_geographies == 3
     assert len(calls) == 3
+
+
+def test_linkedin_fetches_geographies_in_parallel_but_ingests_on_one_thread(
+    tmp_path, monkeypatch
+):
+    campaign, _ = _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(campaign, "get_setting", lambda key: True)
+    monkeypatch.setattr(
+        campaign,
+        "linkedin_geography_runs",
+        lambda: [
+            {"geography_code": "ACT", "location": "Australian Capital Territory, Australia"},
+            {"geography_code": "NSW", "location": "New South Wales, Australia"},
+            {"geography_code": "QLD", "location": "Queensland, Australia"},
+        ],
+    )
+    lock = threading.Lock()
+    active_fetches = 0
+    max_active_fetches = 0
+    ingest_threads = []
+
+    def fake_fetch(*_args, **_kwargs):
+        nonlocal active_fetches, max_active_fetches
+        with lock:
+            active_fetches += 1
+            max_active_fetches = max(max_active_fetches, active_fetches)
+        time.sleep(0.05)
+        with lock:
+            active_fetches -= 1
+        return _fetched()
+
+    def fake_ingest(fetched, location, **kwargs):
+        ingest_threads.append(threading.get_ident())
+        save_cursor(
+            "linkedin", "", location, 10, status="COMPLETE", cycle_key=kwargs["cycle_key"]
+        )
+        return _result()
+
+    monkeypatch.setattr(campaign, "fetch_linkedin_geography_page", fake_fetch)
+    monkeypatch.setattr(campaign, "ingest_linkedin_geography_page", fake_ingest)
+    result = campaign.run_linkedin_campaign(
+        days=1, should_stop=lambda: False, deadline_reached=lambda: False
+    )
+    assert result.status == "COMPLETE"
+    assert max_active_fetches >= 2
+    assert len(ingest_threads) == 3
+    assert len(set(ingest_threads)) == 1
+    assert ingest_threads[0] == threading.get_ident()

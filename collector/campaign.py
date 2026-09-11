@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 from collections.abc import Callable
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
 
 from collector.cursors import get_cursor
@@ -13,8 +14,10 @@ from collector.source_campaign import get_cycle, get_or_start_cycle, set_cycle_s
 from sources.linkedin_collector import (
     LINKEDIN_RESULT_CAP,
     LINKEDIN_TERMINAL_CURSOR_STATUSES,
+    LinkedInFetchedPage,
     collect_linkedin_chunk,
-    collect_linkedin_geography_page,
+    fetch_linkedin_geography_page,
+    ingest_linkedin_geography_page,
 )
 
 
@@ -240,44 +243,84 @@ def run_linkedin_campaign(
         ]
         if not pending:
             break
-        pending.sort(key=lambda run: (_geography_offset(run, cycle_key), run["geography_code"]))
-        run = pending[0]
-        try:
-            result = collect_linkedin_geography_page(
-                run["location"],
-                geography_code=run["geography_code"],
-                cycle_key=cycle_key,
-                hours_old=resolved_hours,
-                should_stop=should_stop,
-                max_results=LINKEDIN_RESULT_CAP,
-            )
-        except InterruptedError:
-            break
-        except Exception as exc:  # noqa: BLE001 - geography remains retryable next run.
-            failed_codes.add(run["geography_code"])
-            collection_logger().error(
-                "LinkedIn geography failed geography=%s location=%r error=%s",
-                run["geography_code"],
-                run["location"],
-                exc,
-            )
-            continue
+        pending.sort(key=lambda run: run["geography_code"])
+        abort_fetch = lambda: should_stop() or deadline_reached()
+        fetched_pages: list[tuple[dict, LinkedInFetchedPage]] = []
+        with ThreadPoolExecutor(max_workers=min(3, len(pending))) as executor:
+            future_to_run = {
+                executor.submit(
+                    fetch_linkedin_geography_page,
+                    run["location"],
+                    start_offset=_geography_offset(run, cycle_key),
+                    hours_old=resolved_hours,
+                    should_stop=abort_fetch,
+                    max_results=LINKEDIN_RESULT_CAP,
+                ): run
+                for run in pending
+            }
+            for future in as_completed(future_to_run):
+                run = future_to_run[future]
+                try:
+                    fetched_pages.append((run, future.result()))
+                except InterruptedError:
+                    continue
+                except Exception as exc:  # noqa: BLE001 - geography remains retryable next run.
+                    failed_codes.add(run["geography_code"])
+                    collection_logger().error(
+                        "LinkedIn geography fetch failed geography=%s location=%r error=%s",
+                        run["geography_code"],
+                        run["location"],
+                        exc,
+                    )
 
-        touched_codes.add(run["geography_code"])
-        chunks += 1
-        observed += result.cards_observed
-        new_jobs += result.unique_new_jobs
-        duplicates += result.duplicate_observations
-        collection_logger().info(
-            "LinkedIn geography progress cycle=%s geography=%s offset=%s status=%s observed=%s new=%s duplicates=%s",
-            cycle_key,
-            run["geography_code"],
-            result.next_offset,
-            result.status,
-            result.cards_observed,
-            result.unique_new_jobs,
-            result.duplicate_observations,
-        )
+        if should_stop() or deadline_reached():
+            break
+
+        # Network work above may run concurrently, but all ingestion/cursor/dedupe
+        # writes stay serialized in this coordinator thread.
+        for run, fetched in sorted(
+            fetched_pages, key=lambda item: item[0]["geography_code"]
+        ):
+            if should_stop() or deadline_reached():
+                break
+            try:
+                cursor = get_cursor("linkedin", "", run["location"])
+                result = ingest_linkedin_geography_page(
+                    fetched,
+                    run["location"],
+                    geography_code=run["geography_code"],
+                    cycle_key=cycle_key,
+                    hours_old=resolved_hours,
+                    should_stop=should_stop,
+                    last_job_id=cursor.get("last_job_id"),
+                )
+            except InterruptedError:
+                break
+            except Exception as exc:  # noqa: BLE001 - geography remains retryable next run.
+                failed_codes.add(run["geography_code"])
+                collection_logger().error(
+                    "LinkedIn geography ingest failed geography=%s location=%r error=%s",
+                    run["geography_code"],
+                    run["location"],
+                    exc,
+                )
+                continue
+
+            touched_codes.add(run["geography_code"])
+            chunks += 1
+            observed += result.cards_observed
+            new_jobs += result.unique_new_jobs
+            duplicates += result.duplicate_observations
+            collection_logger().info(
+                "LinkedIn geography progress cycle=%s geography=%s offset=%s status=%s observed=%s new=%s duplicates=%s",
+                cycle_key,
+                run["geography_code"],
+                result.next_offset,
+                result.status,
+                result.cards_observed,
+                result.unique_new_jobs,
+                result.duplicate_observations,
+            )
 
     complete, capped, terminal = _progress_counts(runs, cycle_key)
     if runs and complete == len(runs):

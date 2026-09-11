@@ -6,7 +6,7 @@
 ./scripts/service.sh start
 ```
 
-Then open `http://127.0.0.1:8770/admin`. The service runs in the background; the UI starts/stops collection, controls the overnight scheduler and shows current runtime health.
+Then open `http://127.0.0.1:8770/admin`. The service runs in the background; the UI starts/stops SEEK or LinkedIn collection, controls the shared scheduler and shows current runtime health.
 
 ```bash
 ./scripts/service.sh status
@@ -38,10 +38,10 @@ uv run python -m collector.query_registry
 ## Run LinkedIn market discovery by itself
 
 ```bash
-uv run python -m scripts.run_linkedin_market --days 1
+uv run python -m scripts.run_linkedin_market --hours-old 5
 ```
 
-This uses the production geography-first LinkedIn HTTP path for enabled ACT/NSW/QLD locations, takes a verified backup first, acquires the normal singleton collection lock, and does **not** run SEEK. Discovery is cards-only: it does not fetch LinkedIn vacancy pages or JDs. JMM owns exact 10-position source offsets, retries transient short pages and confirms apparent terminal pages. A geography that reaches LinkedIn's hard 1,000-result ceiling is reported as `INCOMPLETE_CAP`.
+This uses the production geography-first LinkedIn HTTP path for enabled ACT/NSW/QLD locations, takes a verified backup first, acquires the normal singleton collection lock, and does **not** run SEEK. The default scheduler uses this same 5-hour window every 4 hours. Geography network fetches run in parallel; ingestion/dedupe/cursor writes are serialized through one writer. Discovery is cards-only: it does not fetch LinkedIn vacancy pages or JDs. JMM owns exact 10-position source offsets, retries transient short pages and confirms apparent terminal pages. A geography that reaches LinkedIn's hard 1,000-result ceiling is reported as `INCOMPLETE_CAP`.
 
 `scripts.run_linkedin_chunk` remains a narrow diagnostic for explicitly testing one query/location; it is not the production geography collector.
 
@@ -59,7 +59,7 @@ uv run python -m collector.retention
 
 ## SEEK browser prerequisite
 
-JMM keeps one visible long-lived Chromium service using `data/playwright_jmm_seek_user_data` **for SEEK only**. `scripts/start_browser_service.sh` starts it only when it is not already running; later SEEK collection runs attach to the same browser over localhost CDP and detach without closing it. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, use Admin's **Open SEEK login browser** control, complete it in the visible JMM browser and let the run continue. The shared runner closes/detaches its SEEK pages before the LinkedIn HTTP stage starts.
+JMM keeps one visible long-lived Chromium service using `data/playwright_jmm_seek_user_data` **for SEEK only**. `scripts/start_browser_service.sh` starts it only when it is not already running; later SEEK collection runs attach to the same browser over localhost CDP and detach without closing it. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, use Admin's **Open SEEK login browser** control, complete it in the visible JMM browser and let the run continue. LinkedIn is a separate HTTP-only subprocess and never touches this browser.
 
 For a long-running/manual collection launched from MCP or another temporary shell, start the existing collection runner inside JMM's user-service scope so the visible Chromium process survives after the calling shell exits:
 
@@ -67,7 +67,7 @@ For a long-running/manual collection launched from MCP or another temporary shel
 scripts/start_collection_service.sh --trigger manual --days 3 --backfill-existing-jds --max-runtime-minutes 0
 ```
 
-This is only a durable launcher; `scripts.run_collection_cycle` remains the single collection runner.
+This launcher is for the SEEK runner. LinkedIn uses `scripts.run_linkedin_market`; both entrypoints still share the same singleton collection lock.
 
 ## Failure rule
 

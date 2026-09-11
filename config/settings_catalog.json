@@ -56,7 +56,7 @@
       "default": 1,
       "min": 1,
       "max": 30,
-      "help": "Normal freshness horizon for the shared daily market run. Keep at 1 day for SEEK and LinkedIn discovery; one-off bootstrap runs may explicitly request a wider window."
+      "help": "Normal freshness horizon for the daily SEEK market run. Keep at 1 day for ongoing SEEK reconciliation; LinkedIn uses its own rolling hourly window. One-off bootstrap runs may explicitly request a wider SEEK window."
     },
     {
       "key": "collection.seek_page_load_seconds",
@@ -135,7 +135,16 @@
       "category": "Collection",
       "type": "boolean",
       "default": true,
-      "help": "Run resumable LinkedIn geography-first JobSpy discovery after SEEK inside the same singleton collection process. Discovery is cards-only; JDs remain on-demand until cross-source matching chooses what needs detail."
+      "help": "Enable geography-first LinkedIn cards-only discovery. LinkedIn uses the same scheduler service and singleton collection lock as SEEK, but runs on its own short rolling window and never uses Chromium."
+    },
+    {
+      "key": "collection.linkedin_window_hours",
+      "category": "Collection",
+      "type": "integer",
+      "default": 5,
+      "min": 1,
+      "max": 12,
+      "help": "Rolling LinkedIn freshness window in hours. Default 5 hours was live-proven below LinkedIn's hard 1,000-result ceiling for ACT/NSW/QLD; keep this larger than scheduler.linkedin_interval_hours so adjacent scans overlap."
     },
     {
       "key": "collection.linkedin_jobspy_stall_timeout_seconds",
@@ -231,6 +240,15 @@
       "type": "boolean",
       "default": true,
       "help": "Run the neutral overnight collection scheduler while the Job Market Map API service is running. Pause this to stop automatic overnight starts; Run Now remains available."
+    },
+    {
+      "key": "scheduler.linkedin_interval_hours",
+      "category": "Scheduler",
+      "type": "integer",
+      "default": 4,
+      "min": 1,
+      "max": 12,
+      "help": "Cadence for LinkedIn-only geography refreshes. Default 4 hours with a 5-hour collection window gives one hour of overlap while staying comfortably below LinkedIn's 1,000-result ceiling in live NSW/QLD tests."
     },
     {
       "key": "scheduler.daily_hour",

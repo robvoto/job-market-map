@@ -22,6 +22,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hours-old", type=int, default=None)
     parser.add_argument("--cycle-key", default=None)
     parser.add_argument("--max-runtime-minutes", type=int, default=0)
+    parser.add_argument(
+        "--trigger",
+        choices=("linkedin-manual", "linkedin-scheduled"),
+        default="linkedin-manual",
+    )
     args = parser.parse_args(argv)
     if args.days is not None and args.days < 1:
         parser.error("--days must be >= 1")
@@ -51,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, request_stop)
 
     try:
-        with collection_run_lock("linkedin-manual"):
+        with collection_run_lock(args.trigger):
             log.info(
                 "LinkedIn standalone run started days=%s hours_old=%s cycle_key=%s",
                 days,

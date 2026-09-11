@@ -53,6 +53,18 @@ class LinkedInChunkResult:
     elapsed_seconds: float
 
 
+@dataclass(frozen=True)
+class LinkedInFetchedPage:
+    start_offset: int
+    next_offset: int
+    status: str
+    rows: list[dict]
+    full_page_seen: bool
+    later_rows_seen: bool
+    http_attempts: int
+    elapsed_seconds: float
+
+
 class _JobSpyNoticeHandler(logging.Handler):
     def __init__(self, sink: list[tuple[int, str]]) -> None:
         super().__init__(level=logging.WARNING)
@@ -288,6 +300,191 @@ def _fetch_exact_page_resilient(
     return list(by_id.values()), full_page_seen, attempts_made
 
 
+def fetch_linkedin_geography_page(
+    location: str,
+    *,
+    start_offset: int,
+    hours_old: int,
+    should_stop: Callable[[], bool],
+    max_results: int = LINKEDIN_RESULT_CAP,
+) -> LinkedInFetchedPage:
+    """Fetch one exact geography page without touching SQLite.
+
+    This is intentionally side-effect free so multiple geographies may perform
+    network work concurrently while JMM keeps one serialized ingestion writer.
+    """
+    started = time.perf_counter()
+    start_offset = int(start_offset)
+    max_results = int(max_results)
+    if start_offset >= max_results:
+        return LinkedInFetchedPage(
+            start_offset=start_offset,
+            next_offset=start_offset,
+            status="INCOMPLETE_CAP",
+            rows=[],
+            full_page_seen=False,
+            later_rows_seen=False,
+            http_attempts=0,
+            elapsed_seconds=time.perf_counter() - started,
+        )
+
+    rows, full_page_seen, http_attempts = _fetch_exact_page_resilient(
+        location=location,
+        offset=start_offset,
+        hours_old=hours_old,
+        should_stop=should_stop,
+    )
+    later_rows_seen = False
+    if not full_page_seen:
+        for page_delta in range(1, LINKEDIN_TERMINAL_PROBE_PAGES + 1):
+            probe_offset = start_offset + page_delta * LINKEDIN_PAGE_SIZE
+            if probe_offset >= max_results:
+                break
+            probe_rows, _, probe_attempts = _fetch_exact_page_resilient(
+                location=location,
+                offset=probe_offset,
+                hours_old=hours_old,
+                should_stop=should_stop,
+                attempts=2,
+            )
+            http_attempts += probe_attempts
+            if probe_rows:
+                later_rows_seen = True
+                break
+
+    next_offset = min(max_results, start_offset + LINKEDIN_PAGE_SIZE)
+    if full_page_seen or later_rows_seen:
+        status = "INCOMPLETE_CAP" if next_offset >= max_results else "PARTIAL"
+    else:
+        status = "COMPLETE"
+    return LinkedInFetchedPage(
+        start_offset=start_offset,
+        next_offset=next_offset,
+        status=status,
+        rows=rows,
+        full_page_seen=full_page_seen,
+        later_rows_seen=later_rows_seen,
+        http_attempts=http_attempts,
+        elapsed_seconds=time.perf_counter() - started,
+    )
+
+
+def ingest_linkedin_geography_page(
+    fetched: LinkedInFetchedPage,
+    location: str,
+    *,
+    geography_code: str,
+    cycle_key: str,
+    hours_old: int,
+    should_stop: Callable[[], bool],
+    last_job_id: str | None = None,
+) -> LinkedInChunkResult:
+    """Persist one already-fetched page through JMM's single writer path."""
+    started = time.perf_counter()
+    run_id = start_run("linkedin", "", location)
+    observed = unique_new = duplicates = 0
+    try:
+        for row_index, row in enumerate(fetched.rows, start=1):
+            if should_stop():
+                raise InterruptedError("LinkedIn geography ingestion stopped")
+            observation = observation_from_jobspy_row(
+                row,
+                query_text="",
+                query_location=location,
+                geography_code=geography_code,
+                rank=fetched.start_offset + row_index,
+                offset=fetched.start_offset,
+                page_size=LINKEDIN_PAGE_SIZE,
+            )
+            existing = _existing_job(observation.source_job_id or "")
+            if existing is not None:
+                observation.source_job_id = str(existing["source_job_id"])
+            ingest_result = ingest_card(observation)
+            observed += 1
+            unique_new += int(ingest_result.created)
+            duplicates += int(not ingest_result.created)
+            last_job_id = observation.source_job_id
+
+        save_cursor(
+            "linkedin",
+            "",
+            location,
+            fetched.next_offset,
+            status=fetched.status,
+            last_job_id=last_job_id,
+            cycle_key=cycle_key,
+        )
+        finish_run(
+            run_id,
+            status=fetched.status,
+            pages_requested=fetched.http_attempts,
+            pages_parsed=1 if fetched.rows else 0,
+            cards_observed=observed,
+            unique_new_jobs=unique_new,
+            duplicate_observations=duplicates,
+            metadata={
+                "cycle_key": cycle_key,
+                "start_offset": fetched.start_offset,
+                "next_offset": fetched.next_offset,
+                "hours_old": hours_old,
+                "exact_page_size": LINKEDIN_PAGE_SIZE,
+                "full_page_seen": fetched.full_page_seen,
+                "later_rows_seen": fetched.later_rows_seen,
+                "http_attempts": fetched.http_attempts,
+                "fetch_elapsed_seconds": fetched.elapsed_seconds,
+                "fetch_details": False,
+            },
+        )
+        return LinkedInChunkResult(
+            status=fetched.status,
+            cycle_key=cycle_key,
+            start_offset=fetched.start_offset,
+            next_offset=fetched.next_offset,
+            cards_observed=observed,
+            unique_new_jobs=unique_new,
+            duplicate_observations=duplicates,
+            detail_attempted=0,
+            detail_stored=0,
+            detail_failed=0,
+            elapsed_seconds=fetched.elapsed_seconds + (time.perf_counter() - started),
+        )
+    except InterruptedError:
+        finish_run(
+            run_id,
+            status="STOPPED",
+            pages_requested=fetched.http_attempts,
+            pages_parsed=0,
+            cards_observed=observed,
+            unique_new_jobs=unique_new,
+            duplicate_observations=duplicates,
+            metadata={
+                "cycle_key": cycle_key,
+                "start_offset": fetched.start_offset,
+                "hours_old": hours_old,
+                "fetch_details": False,
+            },
+        )
+        raise
+    except Exception as exc:
+        finish_run(
+            run_id,
+            status="FAILED",
+            pages_requested=fetched.http_attempts,
+            pages_parsed=0,
+            cards_observed=observed,
+            unique_new_jobs=unique_new,
+            duplicate_observations=duplicates,
+            error=str(exc),
+            metadata={
+                "cycle_key": cycle_key,
+                "start_offset": fetched.start_offset,
+                "hours_old": hours_old,
+                "fetch_details": False,
+            },
+        )
+        raise
+
+
 def collect_linkedin_geography_page(
     location: str,
     *,
@@ -346,140 +543,23 @@ def collect_linkedin_geography_page(
             elapsed_seconds=time.perf_counter() - started,
         )
 
-    run_id = start_run("linkedin", "", location)
-    observed = unique_new = duplicates = 0
     last_job_id = cursor.get("last_job_id") if same_cycle else None
-    http_attempts = 0
-    try:
-        rows, full_page_seen, attempts = _fetch_exact_page_resilient(
-            location=location,
-            offset=start_offset,
-            hours_old=hours_old,
-            should_stop=should_stop,
-        )
-        http_attempts += attempts
-
-        later_rows_seen = False
-        if not full_page_seen:
-            for page_delta in range(1, LINKEDIN_TERMINAL_PROBE_PAGES + 1):
-                probe_offset = start_offset + page_delta * LINKEDIN_PAGE_SIZE
-                if probe_offset >= int(max_results):
-                    break
-                probe_rows, _, probe_attempts = _fetch_exact_page_resilient(
-                    location=location,
-                    offset=probe_offset,
-                    hours_old=hours_old,
-                    should_stop=should_stop,
-                    attempts=2,
-                )
-                http_attempts += probe_attempts
-                if probe_rows:
-                    later_rows_seen = True
-                    break
-
-        for row_index, row in enumerate(rows, start=1):
-            if should_stop():
-                raise InterruptedError("LinkedIn geography fetch stopped")
-            observation = observation_from_jobspy_row(
-                row,
-                query_text="",
-                query_location=location,
-                geography_code=geography_code,
-                rank=start_offset + row_index,
-                offset=start_offset,
-                page_size=LINKEDIN_PAGE_SIZE,
-            )
-            existing = _existing_job(observation.source_job_id or "")
-            if existing is not None:
-                observation.source_job_id = str(existing["source_job_id"])
-            ingest_result = ingest_card(observation)
-            observed += 1
-            unique_new += int(ingest_result.created)
-            duplicates += int(not ingest_result.created)
-            last_job_id = observation.source_job_id
-
-        next_offset = min(int(max_results), start_offset + LINKEDIN_PAGE_SIZE)
-        if full_page_seen or later_rows_seen:
-            status = "INCOMPLETE_CAP" if next_offset >= int(max_results) else "PARTIAL"
-        else:
-            status = "COMPLETE"
-        save_cursor(
-            "linkedin",
-            "",
-            location,
-            next_offset,
-            status=status,
-            last_job_id=last_job_id,
-            cycle_key=cycle_key,
-        )
-        finish_run(
-            run_id,
-            status=status,
-            pages_requested=http_attempts,
-            pages_parsed=1 if rows else 0,
-            cards_observed=observed,
-            unique_new_jobs=unique_new,
-            duplicate_observations=duplicates,
-            metadata={
-                "cycle_key": cycle_key,
-                "start_offset": start_offset,
-                "next_offset": next_offset,
-                "hours_old": hours_old,
-                "exact_page_size": LINKEDIN_PAGE_SIZE,
-                "full_page_seen": full_page_seen,
-                "later_rows_seen": later_rows_seen,
-                "http_attempts": http_attempts,
-                "fetch_details": False,
-            },
-        )
-        return LinkedInChunkResult(
-            status=status,
-            cycle_key=cycle_key,
-            start_offset=start_offset,
-            next_offset=next_offset,
-            cards_observed=observed,
-            unique_new_jobs=unique_new,
-            duplicate_observations=duplicates,
-            detail_attempted=0,
-            detail_stored=0,
-            detail_failed=0,
-            elapsed_seconds=time.perf_counter() - started,
-        )
-    except InterruptedError:
-        finish_run(
-            run_id,
-            status="STOPPED",
-            pages_requested=http_attempts,
-            pages_parsed=0,
-            cards_observed=observed,
-            unique_new_jobs=unique_new,
-            duplicate_observations=duplicates,
-            metadata={
-                "cycle_key": cycle_key,
-                "start_offset": start_offset,
-                "hours_old": hours_old,
-                "fetch_details": False,
-            },
-        )
-        raise
-    except Exception as exc:
-        finish_run(
-            run_id,
-            status="FAILED",
-            pages_requested=http_attempts,
-            pages_parsed=0,
-            cards_observed=observed,
-            unique_new_jobs=unique_new,
-            duplicate_observations=duplicates,
-            error=str(exc),
-            metadata={
-                "cycle_key": cycle_key,
-                "start_offset": start_offset,
-                "hours_old": hours_old,
-                "fetch_details": False,
-            },
-        )
-        raise
+    fetched = fetch_linkedin_geography_page(
+        location,
+        start_offset=start_offset,
+        hours_old=hours_old,
+        should_stop=should_stop,
+        max_results=max_results,
+    )
+    return ingest_linkedin_geography_page(
+        fetched,
+        location,
+        geography_code=geography_code,
+        cycle_key=cycle_key,
+        hours_old=hours_old,
+        should_stop=should_stop,
+        last_job_id=last_job_id,
+    )
 
 
 def _existing_job(source_job_id: str) -> dict | None:

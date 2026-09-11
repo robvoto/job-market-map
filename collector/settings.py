@@ -167,6 +167,18 @@ def set_setting(key: str, value: Any, *, actor: str = "admin") -> dict[str, Any]
         default_size = int(get_setting("api.default_page_size"))
         if int(validated) < default_size:
             raise SettingError("max_page_size cannot be less than default_page_size")
+    if key == "collection.linkedin_window_hours":
+        interval = int(get_setting("scheduler.linkedin_interval_hours"))
+        if int(validated) <= interval:
+            raise SettingError(
+                "linkedin_window_hours must be greater than linkedin_interval_hours"
+            )
+    if key == "scheduler.linkedin_interval_hours":
+        window = int(get_setting("collection.linkedin_window_hours"))
+        if int(validated) >= window:
+            raise SettingError(
+                "linkedin_interval_hours must be less than linkedin_window_hours"
+            )
 
     with connect() as conn:
         conn.execute(

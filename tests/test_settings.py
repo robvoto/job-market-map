@@ -40,6 +40,10 @@ def test_setting_validation_and_cross_setting_order(tmp_path, monkeypatch):
         settings.set_setting("retention.remove_archived_after_days", 30)
     with pytest.raises(KeyError):
         settings.set_setting("does.not.exist", 1)
+    with pytest.raises(settings.SettingError, match="window_hours must be greater"):
+        settings.set_setting("collection.linkedin_window_hours", 4)
+    with pytest.raises(settings.SettingError, match="interval_hours must be less"):
+        settings.set_setting("scheduler.linkedin_interval_hours", 5)
 
 
 def test_hot_get_setting_does_not_reseed_existing_catalog(tmp_path, monkeypatch):
@@ -120,6 +124,8 @@ def test_scheduler_and_backup_settings_have_safe_defaults(tmp_path, monkeypatch)
     assert settings.get_setting("scheduler.enabled") is True
     assert settings.get_setting("scheduler.daily_hour") == 2
     assert settings.get_setting("scheduler.daily_minute") == 0
+    assert settings.get_setting("scheduler.linkedin_interval_hours") == 4
+    assert settings.get_setting("collection.linkedin_window_hours") == 5
     assert settings.get_setting("collection.seek_incremental_overlap_minutes") == 120
     assert settings.get_setting("backup.before_collection_enabled") is True
     assert settings.get_setting("backup.keep_count") == 14

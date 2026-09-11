@@ -39,7 +39,7 @@ from collector.query_registry import sync_registry
 from collector.retention import apply_retention
 from collector.run_logging import read_collection_log_tail
 from collector.run_stats import population_stats
-from collector.scheduler import SCHEDULER
+from collector.scheduler import SCHEDULER, SchedulerService
 from collector.seek_cycle import enabled_state_codes
 from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
 from collector.service_state import bootstrap_market_run, latest_market_run
@@ -651,6 +651,17 @@ def admin_collection_stats():
 def admin_start_collection():
     try:
         return PROCESS_MANAGER.start(trigger="manual")
+    except CollectionProcessError as exc:
+        raise HTTPException(409, str(exc)) from None
+
+
+@app.post(f"/{API_VERSION}/admin/linkedin/run")
+def admin_start_linkedin_collection():
+    try:
+        return PROCESS_MANAGER.start_linkedin(
+            hours_old=int(get_setting("collection.linkedin_window_hours")),
+            cycle_key=SchedulerService.linkedin_cycle_key(),
+        )
     except CollectionProcessError as exc:
         raise HTTPException(409, str(exc)) from None
 

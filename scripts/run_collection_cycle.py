@@ -9,7 +9,6 @@ from threading import Event
 
 from collector.backup import create_backup
 from collector.browser_broker import close_browser, close_tab, open_tab
-from collector.campaign import run_linkedin_campaign
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
 from collector.run_stats import build_run_stats, log_run_summary, population_stats
@@ -86,7 +85,7 @@ def _satisfy_manual_schedule_slot(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
-        description="Run one safe SEEK + LinkedIn market collection cycle."
+        description="Run one safe SEEK whole-state market collection cycle."
     )
     parser.add_argument("--trigger", choices=["manual", "scheduled"], default="manual")
     parser.add_argument(
@@ -125,7 +124,6 @@ def main(argv: list[str] | None = None) -> int:
     list_page_id: int | None = None
     detail_page_id: int | None = None
     jd_totals = {"attempted": 0, "stored": 0, "failed": 0, "unavailable": 0}
-    linkedin_result = None
 
     def request_stop(*_args) -> None:
         stop_event.set()
@@ -162,7 +160,7 @@ def main(argv: list[str] | None = None) -> int:
                 mode=mode,
                 states=codes,
                 backup_path=None,
-                source_scope="seek_whole_state+linkedin",
+                source_scope="seek_whole_state",
             )
             log.info(
                 "run started run_id=%s mode=%s days=%s states=%s backfill_existing_jds=%s max_runtime_minutes=%s seek_window=%s cutoff_at=%s",
@@ -281,8 +279,7 @@ def main(argv: list[str] | None = None) -> int:
                     include_existing_unfetched=args.backfill_existing_jds
                 )
 
-            # LinkedIn deliberately does not use Chromium. Release this process's
-            # SEEK-owned pages/CDP attachment before starting the HTTP-only stage.
+            # Release this process's SEEK-owned pages/CDP attachment before exit.
             for page_id in (detail_page_id, list_page_id):
                 if page_id is None:
                     continue
@@ -298,19 +295,6 @@ def main(argv: list[str] | None = None) -> int:
             list_page_id = None
             close_browser()
 
-            if (
-                not stop_event.is_set()
-                and not deadline_reached()
-                and result.status != "BLOCKED_HUMAN"
-            ):
-                log.info("LinkedIn campaign started days=%s", days)
-                linkedin_result = run_linkedin_campaign(
-                    days=days,
-                    should_stop=stop_event.is_set,
-                    deadline_reached=deadline_reached,
-                )
-                log.info("LinkedIn campaign finished result=%s", asdict(linkedin_result))
-
             if stop_event.is_set():
                 final_status = "STOPPED"
             elif deadline_reached():
@@ -319,16 +303,8 @@ def main(argv: list[str] | None = None) -> int:
                 final_status = result.status
             elif jd_result is None or jd_result.remaining:
                 final_status = "PARTIAL_JD"
-            elif linkedin_result is None or linkedin_result.status in {"COMPLETE", "DISABLED"}:
-                final_status = "COMPLETE"
-            elif linkedin_result.status in {"PARTIAL_FAILURE", "INCOMPLETE_CAP"}:
-                final_status = "PARTIAL_SOURCE"
-            elif linkedin_result.status == "STOPPED":
-                final_status = "STOPPED"
-            elif linkedin_result.status == "PARTIAL_TIME_LIMIT":
-                final_status = "PARTIAL_TIME_LIMIT"
             else:
-                final_status = "PARTIAL_LINKEDIN"
+                final_status = "COMPLETE"
 
             message = (
                 f"SEEK {mode} {days}d cycle {final_status.lower()}; "
@@ -339,14 +315,6 @@ def main(argv: list[str] | None = None) -> int:
                     f" JD candidates={jd_result.candidates}, cached={jd_result.cached}, "
                     f"stored={jd_result.stored}, failed={jd_result.failed}, "
                     f"unavailable={jd_result.unavailable}, remaining={jd_result.remaining}."
-                )
-            if linkedin_result is not None:
-                message += (
-                    f" LinkedIn {linkedin_result.status.lower()}: "
-                    f"geographies={linkedin_result.geographies_complete}/{linkedin_result.geographies_total}, "
-                    f"capped={linkedin_result.capped_geographies}, "
-                    f"observed={linkedin_result.cards_observed}, new={linkedin_result.unique_new_jobs}, "
-                    f"chunks={linkedin_result.chunks_processed}."
                 )
             current_stats = population_stats(codes)
             run_stats = build_run_stats(
@@ -363,8 +331,6 @@ def main(argv: list[str] | None = None) -> int:
                     get_setting("collection.seek_incremental_overlap_minutes")
                 ),
             }
-            if linkedin_result is not None:
-                run_stats["linkedin"] = asdict(linkedin_result)
             finish_market_run(
                 run_id,
                 status=final_status,

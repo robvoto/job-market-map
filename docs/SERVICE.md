@@ -2,7 +2,7 @@
 
 ## Why this exists
 
-Job Market Map uses an **in-app scheduler**, following the same basic pattern as Job Hunter: a small long-running service checks whether the daily local-time window is due and starts a bounded collection subprocess.
+Job Market Map uses one **in-app scheduler** for two source rhythms: a daily SEEK whole-state run and short rolling LinkedIn-only refreshes.
 
 The distinction is important:
 - the API/Admin service stays running;
@@ -37,9 +37,10 @@ This does not create operating-system startup persistence. After Windows/WSL res
 ## Admin collection controls
 
 The Admin page provides:
-- **Run collection now** — starts the same safe SEEK whole-state cycle used by the scheduler;
+- **Run SEEK now** — starts the same safe SEEK whole-state cycle used by the daily scheduler;
+- **Run LinkedIn now** — starts the current rolling LinkedIn geography slot without SEEK;
 - **Stop current collection** — requests a graceful stop after the current partition unit;
-- **Pause overnight schedule** / **Resume overnight schedule**;
+- **Pause scheduler** / **Resume scheduler** — controls both source schedules;
 - overnight local time control (default **02:00**);
 - current collector PID/state;
 - persistent JMM browser running/unavailable state (reachability only; not proof of SEEK sign-in);
@@ -61,9 +62,11 @@ A manual Run Now and a scheduled run cannot overlap. Starting the supported API/
 
 Do not remove these locks in favour of a UI-only `running=true` flag.
 
-## Overnight scheduling semantics
+## Scheduling semantics
 
-Default schedule: **02:00 local host time**. The time, start window, polling interval and maximum collection runtime are Admin settings.
+SEEK uses the configured daily local time (default **02:00**). LinkedIn defaults to a **5-hour rolling window every 4 hours**. The LinkedIn window must remain larger than its cadence so adjacent runs overlap. Both schedules share `data/collection.lock`, so they never mutate JMM concurrently.
+
+When LinkedIn and SEEK are both due, LinkedIn is started first. The daily SEEK slot remains due and starts after LinkedIn releases the singleton lock.
 
 The scheduler does not blindly restart collection every night:
 - if the current SEEK NSW/ACT/QLD coverage cycle is incomplete, the run **resumes it**;
@@ -103,4 +106,4 @@ The durable collection log is `logs/collection.log`. Admin links to `GET /v3/adm
 
 ## Current scheduled source scope
 
-SEEK and LinkedIn both use the same scheduler service and singleton collection lock, so they cannot overlap unsafely. SEEK uses the persistent JMM Chromium service; LinkedIn is cards-only HTTP discovery and never uses Chromium. LinkedIn owns independent geography cursors with exact 10-position source offsets and reports the hard 1,000-result ceiling as `INCOMPLETE_CAP` rather than falsely complete.
+SEEK and LinkedIn use separate subprocess entrypoints under the same scheduler and singleton lock. SEEK uses the persistent JMM Chromium service. LinkedIn is cards-only HTTP discovery, never uses Chromium, and fetches enabled geographies concurrently while all SQLite ingest/dedupe/cursor writes remain serialized in one coordinator thread. LinkedIn owns independent geography cursors with exact 10-position source offsets and reports the hard 1,000-result ceiling as `INCOMPLETE_CAP` rather than falsely complete.

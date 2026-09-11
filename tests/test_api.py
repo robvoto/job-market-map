@@ -405,6 +405,22 @@ def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
             "start",
             lambda trigger: {"started": True, "pid": 123, "trigger": trigger},
         )
+        monkeypatch.setattr(
+            api_main.PROCESS_MANAGER,
+            "start_linkedin",
+            lambda hours_old, cycle_key: {
+                "started": True,
+                "pid": 124,
+                "trigger": "linkedin-scheduled",
+                "hours_old": hours_old,
+                "cycle_key": cycle_key,
+            },
+        )
+        monkeypatch.setattr(
+            api_main.SchedulerService,
+            "linkedin_cycle_key",
+            staticmethod(lambda: "linkedin:test-slot"),
+        )
 
         status = client.get("/v3/admin/service/status")
         assert status.status_code == 200
@@ -415,6 +431,16 @@ def test_admin_service_status_and_manual_run_contract(tmp_path, monkeypatch):
         started = client.post("/v3/admin/collection/run")
         assert started.status_code == 200
         assert started.json() == {"started": True, "pid": 123, "trigger": "manual"}
+
+        linkedin = client.post("/v3/admin/linkedin/run")
+        assert linkedin.status_code == 200
+        assert linkedin.json() == {
+            "started": True,
+            "pid": 124,
+            "trigger": "linkedin-scheduled",
+            "hours_old": 5,
+            "cycle_key": "linkedin:test-slot",
+        }
 
 
 def test_admin_log_returns_durable_collection_log_tail(tmp_path, monkeypatch):

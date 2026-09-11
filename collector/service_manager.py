@@ -75,6 +75,41 @@ class CollectionProcessManager:
                 "log_path": str(LOG_PATH),
             }
 
+    def start_linkedin(self, *, hours_old: int, cycle_key: str) -> dict:
+        if hours_old < 1:
+            raise ValueError("hours_old must be >= 1")
+        if not str(cycle_key or "").strip():
+            raise ValueError("cycle_key is required")
+        with self._guard:
+            self._refresh()
+            current_lock = lock_status()
+            if self._process is not None or current_lock["active"]:
+                raise CollectionProcessError("A collection process is already running.")
+            process = subprocess.Popen(
+                [
+                    sys.executable,
+                    "-m",
+                    "scripts.run_linkedin_market",
+                    "--hours-old",
+                    str(int(hours_old)),
+                    "--cycle-key",
+                    str(cycle_key),
+                    "--trigger",
+                    "linkedin-scheduled",
+                ],
+                cwd=ROOT,
+                start_new_session=True,
+            )
+            self._process = process
+            return {
+                "started": True,
+                "pid": process.pid,
+                "trigger": "linkedin-scheduled",
+                "hours_old": int(hours_old),
+                "cycle_key": str(cycle_key),
+                "log_path": str(LOG_PATH),
+            }
+
     @staticmethod
     def _managed_pid(pid: int) -> bool:
         try:
@@ -86,7 +121,10 @@ class CollectionProcessManager:
             )
         except OSError:
             return False
-        return "scripts.run_collection_cycle" in cmdline
+        return (
+            "scripts.run_collection_cycle" in cmdline
+            or "scripts.run_linkedin_market" in cmdline
+        )
 
     def stop(self) -> dict:
         with self._guard:
@@ -111,7 +149,7 @@ class CollectionProcessManager:
             return {
                 "stop_requested": True,
                 "pid": pid,
-                "message": "Graceful stop requested. The current partition will finish safely before exit.",
+                "message": "Graceful stop requested. The current unit of collection work will finish safely before exit.",
             }
 
 

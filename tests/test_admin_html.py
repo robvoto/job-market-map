@@ -24,6 +24,7 @@ def test_admin_page_exposes_collection_scheduler_and_backup_controls():
     html = Path("api/admin.html").read_text(encoding="utf-8")
     for token in (
         "run-now",
+        "run-linkedin-now",
         "stop-collection",
         "pause-schedule",
         "resume-schedule",
@@ -31,6 +32,7 @@ def test_admin_page_exposes_collection_scheduler_and_backup_controls():
         "schedule-time",
         "/admin/service/status",
         "/admin/collection/run",
+        "/admin/linkedin/run",
         "/admin/collection/stop",
         "/admin/backup/run",
         "/admin/browser/seek",
@@ -74,5 +76,6 @@ def test_admin_daily_status_does_not_present_accepted_bootstrap_as_current_failu
     html = Path("api/admin.html").read_text(encoding="utf-8")
     assert "bootstrapOnly=last.run_kind==='bootstrap'" in html
     assert "Accepted 3-day bootstrap is shown in Collection stats" in html
-    assert "Last daily collection:" in html
-    assert "whole-state SEEK for enabled NSW / ACT / QLD first, then resumable LinkedIn HTTP discovery" in html
+    assert "Last daily SEEK collection:" in html
+    assert "LinkedIn cards-only geography refreshes every 4 hours" in html
+    assert "daily whole-state SEEK run" in html

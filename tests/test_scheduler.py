@@ -60,3 +60,52 @@ def test_manual_run_only_satisfies_schedule_when_it_overlaps_schedule_window(mon
         datetime(2026, 9, 12, 23, 30, tzinfo=tz),
         datetime(2026, 9, 13, 4, 30, tzinfo=tz),
     ) == "2026-09-13"
+
+
+def test_linkedin_uses_four_hour_slots_and_does_not_repeat_terminal_slot(monkeypatch):
+    from collector import scheduler
+
+    settings = {
+        "scheduler.enabled": True,
+        "scheduler.linkedin_interval_hours": 4,
+        "collection.linkedin_enabled": True,
+    }
+    monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
+    monkeypatch.setattr(scheduler, "get_cycle", lambda _source: None)
+    tz = ZoneInfo("Australia/Sydney")
+    now = datetime(2026, 9, 11, 22, 15, tzinfo=tz)
+
+    due, cycle_key, slot = scheduler.SchedulerService.linkedin_due_context(now)
+    assert due is True
+    assert slot == datetime(2026, 9, 11, 20, 0, tzinfo=tz)
+    assert cycle_key == "linkedin:2026-09-11T20:00+10:00"
+
+    monkeypatch.setattr(
+        scheduler,
+        "get_cycle",
+        lambda _source: {"cycle_key": cycle_key, "status": "COMPLETE"},
+    )
+    due, _, _ = scheduler.SchedulerService.linkedin_due_context(now)
+    assert due is False
+
+
+def test_linkedin_partial_cycle_is_resumed_before_new_slot(monkeypatch):
+    from collector import scheduler
+
+    settings = {
+        "scheduler.enabled": True,
+        "scheduler.linkedin_interval_hours": 4,
+        "collection.linkedin_enabled": True,
+    }
+    monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
+    monkeypatch.setattr(
+        scheduler,
+        "get_cycle",
+        lambda _source: {"cycle_key": "linkedin:2026-09-11T16:00+10:00", "status": "PARTIAL"},
+    )
+    tz = ZoneInfo("Australia/Sydney")
+    due, cycle_key, _ = scheduler.SchedulerService.linkedin_due_context(
+        datetime(2026, 9, 11, 22, 15, tzinfo=tz)
+    )
+    assert due is True
+    assert cycle_key == "linkedin:2026-09-11T16:00+10:00"
