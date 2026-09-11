@@ -8,9 +8,10 @@ Minimal always-loaded routing instructions. This file is not the project manual 
 2. Use `.agents/skills/INDEX.md` to choose the smallest relevant task skill or skill combination.
 3. Read local-only `docs/CURRENT_STATE.md` first, if present, for the latest verified crawl state, blocker, and exact resume point.
 4. Read the selected task skill before changing code, configuration, instructions, Git state, runtime behaviour, or the API contract.
-5. Inspect the current files/state before editing. Do not load the whole repository unless the task genuinely requires a broad audit.
-6. For any commit, push, or `main` integration action, use `.agents/skills/git-lifecycle/SKILL.md`.
-7. For canonical backlog work, use `.agents/skills/backlog-management/SKILL.md`.
+5. For executable-code implementation or review, also read `.agents/skills/code-quality/SKILL.md`.
+6. Inspect the current files/state before editing. Do not load the whole repository unless the task genuinely requires a broad audit.
+7. For any commit, push, or `main` integration action, use `.agents/skills/git-lifecycle/SKILL.md`.
+8. For canonical backlog work, use `.agents/skills/backlog-management/SKILL.md`.
 
 ## Durable rule placement
 
@@ -35,6 +36,7 @@ Use `.agents/skills/instruction-maintenance/SKILL.md` whenever changing agent in
 - Keep context and changes bounded to what the task requires.
 - Do not hardcode behaviour that belongs in admin settings, config, or another authoritative owner — see `.agents/skills/no-hardcoding/SKILL.md`.
 - Do not add hidden fallbacks, compatibility shims, dead paths, or broad exception swallowing unless explicitly approved.
+- Keep one canonical implementation per behaviour; implementation/review work must check for and remove confirmed duplicate or stale code — see `.agents/skills/code-quality/SKILL.md`.
 - Job Market Map is neutral/global market infrastructure only; it does not own personal activity/outcomes — see `.agents/skills/job-market-map/SKILL.md`.
 - Do not claim completion without validation evidence (tests, Ruff, `git diff --check`).
 - Preserve unrelated work when other agents or sessions may be active.

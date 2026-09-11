@@ -3,6 +3,7 @@
 Pick the smallest skill that matches the task. Do not load every skill. Detailed rules belong inside each skill, not in this index or in `AGENTS.md`.
 
 - `backlog-management/SKILL.md` — canonical `JMM-###` backlog rows: priorities, implementation state, evidence, human review flags.
+- `code-quality/SKILL.md` — implementation/review hygiene: one canonical code path, no duplicate logic, stale/dead code, or superseded implementations left behind.
 - `git-lifecycle/SKILL.md` — commit, push, and `main` integration for this repository.
 - `instruction-maintenance/SKILL.md` — AGENTS.md, adapter files, skills, and instruction docs.
 - `job-market-map/SKILL.md` — collection, source identity, JD ownership, API/consumer contract, retention, and the neutral/personal ownership boundary.
