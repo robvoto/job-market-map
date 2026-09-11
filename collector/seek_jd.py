@@ -19,6 +19,8 @@ from collector.run_logging import collection_logger
 from collector.settings import get_setting
 
 SYDNEY = ZoneInfo("Australia/Sydney")
+_TRANSIENT_SWEEP_COOLDOWN_SECONDS = 300.0
+_transient_sweep_cooldown_until = 0.0
 _CHALLENGE_MARKERS = (
     "help us keep seek secure",
     "confirm you are human",
@@ -501,6 +503,7 @@ def enrich_seek_coverage_jds(
     max_attempts: int | None = None,
     on_progress=None,
 ) -> SeekJDEnrichmentResult:
+    global _transient_sweep_cooldown_until
     rows = _merge_candidates(
         coverage_seek_jobs(codes=codes, days=days),
         include_existing_unfetched=include_existing_unfetched,
@@ -511,6 +514,24 @@ def enrich_seek_coverage_jds(
     cached = len(completed_ids)
     attempted = stored = failed = unavailable = 0
     unavailable_ids: set[int] = set()
+
+    cooldown_remaining = _transient_sweep_cooldown_until - time.monotonic()
+    if cooldown_remaining > 0:
+        remaining = len(rows) - len(completed_ids)
+        collection_logger().info(
+            "SEEK JD transient cooldown active; skipping browser sweep cooldown_remaining_s=%.0f remaining=%s",
+            cooldown_remaining,
+            remaining,
+        )
+        return SeekJDEnrichmentResult(
+            candidates=len(rows),
+            cached=cached,
+            attempted=0,
+            stored=0,
+            failed=0,
+            remaining=remaining,
+            unavailable=0,
+        )
 
     for row in rows:
         job_id = int(row["id"])
@@ -578,13 +599,17 @@ def enrich_seek_coverage_jds(
             raise
         except SeekJDTransientError as exc:
             failed += 1
+            _transient_sweep_cooldown_until = (
+                time.monotonic() + _TRANSIENT_SWEEP_COOLDOWN_SECONDS
+            )
             if on_progress is not None:
                 on_progress("failed")
             collection_logger().warning(
                 "SEEK JD transient source error after retry; leaving retryable and ending sweep "
-                "job_id=%s source_job_id=%s error=%s",
+                "job_id=%s source_job_id=%s cooldown_s=%.0f error=%s",
                 job_id,
                 str(row["source_job_id"] or "").strip(),
+                _TRANSIENT_SWEEP_COOLDOWN_SECONDS,
                 exc,
             )
             break

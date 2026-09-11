@@ -259,7 +259,8 @@ def main(argv: list[str] | None = None) -> int:
                 )
             return (
                 0
-                if final_status in {"COMPLETE", "PARTIAL_TIME_LIMIT", "STOPPED"}
+                if final_status
+                in {"COMPLETE", "PARTIAL_TIME_LIMIT", "STOPPED", "BLOCKED_HUMAN"}
                 else 1
             )
     except CollectionAlreadyRunning as exc:

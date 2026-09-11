@@ -531,3 +531,25 @@ def test_wait_snapshot_waits_through_cloudflare_challenge(monkeypatch):
 
     assert result["text"] == "25 jobs in New South Wales"
     assert selected == [(42, True)]
+
+
+def test_seek_navigation_retries_err_aborted_once(monkeypatch):
+    import sources.seek_market_map as market
+    from collector.browser_broker import BrowserBrokerError
+
+    calls = []
+
+    def fake_navigate(page_id, url):
+        calls.append((page_id, url))
+        if len(calls) == 1:
+            raise BrowserBrokerError("Page.goto: net::ERR_ABORTED at https://au.seek.com/jobs")
+
+    monkeypatch.setattr(market, "navigate", fake_navigate)
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+
+    market._navigate_seek(42, "https://au.seek.com/jobs")
+
+    assert calls == [
+        (42, "https://au.seek.com/jobs"),
+        (42, "https://au.seek.com/jobs"),
+    ]

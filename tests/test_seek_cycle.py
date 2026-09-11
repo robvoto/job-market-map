@@ -78,3 +78,28 @@ def test_cycle_invokes_full_evidence_callback_after_partition_progress(monkeypat
 
     assert result.status == "COMPLETE"
     assert callbacks == ["ACT"]
+
+
+def test_cycle_returns_blocked_human_without_failing_run(monkeypatch):
+    import collector.seek_cycle as cycle
+    from sources.seek_market_map import SeekHumanCheckRequired
+
+    monkeypatch.setattr(cycle, "all_states_complete", lambda _codes: False)
+    monkeypatch.setattr(
+        cycle,
+        "collect_seek_state",
+        lambda *_a, **_k: (_ for _ in ()).throw(
+            SeekHumanCheckRequired("SEEK human-check wait expired")
+        ),
+    )
+
+    result = cycle.run_seek_cycle(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+    )
+
+    assert result.status == "BLOCKED_HUMAN"
+    assert result.partitions_processed == 0

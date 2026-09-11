@@ -43,6 +43,29 @@ CHALLENGE_TEXT = (
 )
 
 
+class SeekHumanCheckRequired(BrowserBrokerError):
+    """SEEK is explicitly asking for human verification; leave work retryable."""
+
+
+def _navigate_seek(page_id: int, url: str) -> None:
+    """Navigate once, retrying only SEEK's transient net::ERR_ABORTED race."""
+    for attempt in range(2):
+        try:
+            navigate(page_id, url)
+            return
+        except BrowserBrokerError as exc:
+            if attempt == 0 and "net::err_aborted" in str(exc).casefold():
+                collection_logger().info(
+                    "SEEK navigation aborted; retrying once url=%s error=%s",
+                    url,
+                    exc,
+                )
+                time.sleep(1.0)
+                continue
+            raise
+    raise AssertionError("unreachable SEEK navigation retry state")
+
+
 @dataclass(frozen=True)
 class MarketMapResult:
     geography_code: str
@@ -136,7 +159,7 @@ def _wait_snapshot(
             if not brought_forward:
                 select_page(page_id, bring_to_front=True)
                 collection_logger().warning(
-                    "SEEK needs human confirmation; brought JMM tab to front expected_url=%s",
+                    "SEEK security challenge detected; waiting for browser/session clearance expected_url=%s",
                     expected_url,
                 )
                 brought_forward = True
@@ -144,9 +167,21 @@ def _wait_snapshot(
                     get_setting("collection.seek_human_check_wait_seconds")
                 )
             elif human_deadline is not None and time.monotonic() >= human_deadline:
-                raise BrowserBrokerError("SEEK human-check wait expired")
+                collection_logger().warning(
+                    "SEEK security challenge did not clear; human verification required expected_url=%s",
+                    expected_url,
+                )
+                raise SeekHumanCheckRequired("SEEK human-check wait expired")
             time.sleep(1.0)
             continue
+        if brought_forward:
+            collection_logger().info(
+                "SEEK human/security challenge cleared; cooling down briefly expected_url=%s",
+                expected_url,
+            )
+            time.sleep(5.0)
+            brought_forward = False
+            human_deadline = None
         if seek_result_count(text) is not None or any(
             marker in low for marker in TERMINAL_TEXT
         ):
@@ -296,7 +331,7 @@ def _collect_leaf(
     safety = int(get_setting("collection.seek_safety_page_limit"))
     while page <= safety:
         target_url = _page_url(url, page)
-        navigate(page_id, target_url)
+        _navigate_seek(page_id, target_url)
         time.sleep(float(get_setting("collection.seek_page_load_seconds")))
         snap = _wait_snapshot(page_id, expected_url=target_url)
         text = str(snap.get("text") or "")
@@ -505,7 +540,7 @@ def _process_partition(
             return
         if not budget.consume():
             return
-        navigate(page_id, url)
+        _navigate_seek(page_id, url)
         time.sleep(float(get_setting("collection.seek_page_load_seconds")))
         snap = _wait_snapshot(page_id, expected_url=url)
         text = str(snap.get("text") or "")
@@ -577,6 +612,9 @@ def _process_partition(
             collected=collected,
             child_count=child_count,
         )
+    except SeekHumanCheckRequired as exc:
+        _update_partition(partition_id, status="BLOCKED_HUMAN", error=str(exc))
+        raise
     except Exception as exc:
         _update_partition(partition_id, status="FAILED", error=str(exc))
         raise

@@ -6,7 +6,12 @@ from datetime import UTC, datetime
 
 from collector.db import connect, init_db
 from collector.geographies import list_geographies
-from sources.seek_market_map import MarketMapResult, collect_seek_state
+from collector.run_logging import collection_logger
+from sources.seek_market_map import (
+    MarketMapResult,
+    SeekHumanCheckRequired,
+    collect_seek_state,
+)
 
 
 @dataclass(frozen=True)
@@ -142,13 +147,23 @@ def run_seek_cycle(
         for code in codes:
             if should_stop() or deadline_reached():
                 break
-            result = collect_seek_state(
-                code,
-                page_id=page_id,
-                days=days,
-                max_partitions=1,
-                resume=True,
-            )
+            try:
+                result = collect_seek_state(
+                    code,
+                    page_id=page_id,
+                    days=days,
+                    max_partitions=1,
+                    resume=True,
+                )
+            except SeekHumanCheckRequired as exc:
+                collection_logger().warning(
+                    "SEEK coverage blocked by human verification; leaving retryable geography=%s error=%s",
+                    code,
+                    exc,
+                )
+                return SeekCycleResult(
+                    "BLOCKED_HUMAN", codes, total_processed, list(latest.values())
+                )
             latest[code] = result
             pass_progress += result.partitions_processed
             total_processed += result.partitions_processed

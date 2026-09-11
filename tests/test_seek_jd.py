@@ -462,6 +462,8 @@ def test_technical_error_retries_once_then_stays_retryable(monkeypatch):
 def test_transient_seek_error_ends_only_current_jd_sweep(monkeypatch):
     from collector import seek_jd
 
+    monkeypatch.setattr(seek_jd, "_transient_sweep_cooldown_until", 0.0)
+
     monkeypatch.setattr(
         seek_jd,
         "coverage_seek_jobs",
@@ -505,6 +507,55 @@ def test_transient_seek_error_ends_only_current_jd_sweep(monkeypatch):
     assert result.stored == 0
     assert result.remaining == 2
     assert events == ["attempted", "failed"]
+
+
+def test_transient_seek_error_cools_down_followup_sweep(monkeypatch):
+    from collector import seek_jd
+
+    monkeypatch.setattr(seek_jd, "_transient_sweep_cooldown_until", 0.0)
+    monkeypatch.setattr(seek_jd.time, "monotonic", lambda: 100.0)
+    monkeypatch.setattr(
+        seek_jd,
+        "coverage_seek_jobs",
+        lambda **_kwargs: [
+            {
+                "id": 1,
+                "identity_key": "seek:id:1",
+                "source_job_id": "1",
+                "canonical_url": "https://au.seek.com/job/1",
+                "jd_fetch_completed": 0,
+            }
+        ],
+    )
+    calls = []
+
+    def transient_fetch(*_args, **_kwargs):
+        calls.append(1)
+        raise seek_jd.SeekJDTransientError("technical error after retry")
+
+    monkeypatch.setattr(seek_jd, "fetch_seek_detail", transient_fetch)
+
+    first = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+    )
+    second = seek_jd.enrich_seek_coverage_jds(
+        page_id=1,
+        codes=["ACT"],
+        days=3,
+        should_stop=lambda: False,
+        deadline_reached=lambda: False,
+    )
+
+    assert calls == [1]
+    assert first.attempted == 1
+    assert first.failed == 1
+    assert second.attempted == 0
+    assert second.failed == 0
+    assert second.remaining == 1
 
 
 def test_no_longer_advertised_is_terminal_not_failed(tmp_path, monkeypatch):
