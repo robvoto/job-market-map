@@ -56,7 +56,7 @@
       "default": 1,
       "min": 1,
       "max": 30,
-      "help": "Normal ongoing SEEK freshness horizon. Keep at 1 day for fast daily discovery; one-off bootstrap runs may explicitly request a wider window."
+      "help": "Normal freshness horizon for the shared daily market run. Keep at 1 day for SEEK and LinkedIn discovery; one-off bootstrap runs may explicitly request a wider window."
     },
     {
       "key": "collection.seek_page_load_seconds",
@@ -264,7 +264,7 @@
       "default": 300,
       "min": 15,
       "max": 720,
-      "help": "Maximum wall-clock time for one manual or scheduled SEEK whole-state collection process. If reached, progress is preserved and the next run resumes it."
+      "help": "Maximum wall-clock time for one manual or scheduled market collection process across SEEK then LinkedIn. If reached, progress is preserved and the next run resumes it."
     },
     {
       "key": "backup.before_collection_enabled",

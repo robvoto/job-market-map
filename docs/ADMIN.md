@@ -20,7 +20,7 @@ The top Admin panel controls the running collector without killing the Admin API
 - set overnight time (default 02:00 local);
 - Backup DB now;
 - collector/JMM-browser/scheduler status dots;
-- latest run start/finish/duration and result;
+- latest normal daily-run start/finish/duration and result, without presenting the accepted bootstrap residual as a current failure;
 - next run using human-readable local date/time;
 - right-side current-market, accepted 3-day-bootstrap and latest-run statistics;
 - **Open SEEK login browser**, which focuses or opens SEEK in the persistent JMM Chrome;
@@ -38,6 +38,8 @@ Start the background Admin service with `./scripts/service.sh start`; it must re
 `NOT_RUN` is the raw API state when there is no current coverage workspace. In Admin this is shown as **Waiting for next run**, not as a failure. If archived coverage exists, Admin also shows the previous run's reported/covered totals and incomplete-partition count.
 
 After the accepted 3-day bootstrap, the temporary coverage workspace was intentionally cleared so the first normal 1-day run starts fresh. Canonical jobs and JDs are independent of that workspace.
+
+The historical bootstrap card is labelled **Accepted with small gap** in Admin rather than exposing its raw `BLOCKED_INCOMPLETE` implementation status. The underlying run record is unchanged; this is only clearer UI wording for the bootstrap Rob explicitly accepted. A partial LinkedIn cycle is likewise explained as saved resumable progress, not a current collector failure.
 
 ## What is configurable without code
 
@@ -57,7 +59,7 @@ Personal applied/rejected/presented state is not a retention exception here beca
 - SEEK page settling, parser wait and safety-page guard;
 - LinkedIn enable/disable, JobSpy results per query, no-progress timeout, direct-detail HTTP timeout and consecutive-query failure circuit breaker.
 
-The right-side stats panel also shows the current LinkedIn cycle (queries complete/remaining) and, after a normal run, LinkedIn cards read, new jobs, JDs stored and detail failures.
+The right-side stats panel shows current source totals (including APSJobs), the accepted 3-day bootstrap separately, the current LinkedIn cycle (queries complete/remaining), and after a normal run its duration, jobs/JDs added, SEEK work and LinkedIn cards/new/detail-fetched/failure counts.
 
 ### Duplicate detection
 - near-match enable/disable;

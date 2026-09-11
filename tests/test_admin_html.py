@@ -51,11 +51,23 @@ def test_admin_page_exposes_side_stats_for_bootstrap_and_latest_run():
     html = Path("api/admin.html").read_text(encoding="utf-8")
     assert "stats-sidebar" in html
     assert "3-day bootstrap" in html
-    assert "Latest run" in html
+    assert "Latest daily run" in html
     assert "Current market" in html
+    assert "APSJobs" in html
+    assert "Not run yet" in html
+    assert "Accepted with small gap" in html
+    assert "Saved progress. The next daily run resumes this cycle." in html
     assert "/admin/stats" in html
     assert "JD attempts" in html
     assert "partitions" in html
     assert "LinkedIn cycle" in html
     assert "LinkedIn read" in html
     assert "queries done" in html
+
+
+def test_admin_daily_status_does_not_present_accepted_bootstrap_as_current_failure():
+    html = Path("api/admin.html").read_text(encoding="utf-8")
+    assert "bootstrapOnly=last.run_kind==='bootstrap'" in html
+    assert "Accepted 3-day bootstrap is shown in Collection stats" in html
+    assert "Last daily collection:" in html
+    assert "whole-state SEEK for enabled NSW / ACT / QLD first, then resumable LinkedIn HTTP discovery" in html
