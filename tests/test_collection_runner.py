@@ -26,6 +26,7 @@ def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypa
 
     monkeypatch.setattr(runner, "configure_collection_logging", lambda: _TestLog())
     monkeypatch.setattr(runner, "enabled_state_codes", lambda: ["ACT"])
+    monkeypatch.setattr(runner, "state_root", lambda _code: {"id": 1})
     monkeypatch.setattr(runner, "all_states_complete", lambda _codes: False)
     monkeypatch.setattr(runner, "start_market_run", lambda **_kwargs: 1)
     monkeypatch.setattr(runner, "finish_market_run", lambda *_a, **_k: None)
@@ -94,3 +95,21 @@ def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypa
         ("jd", False),
         ("jd", True),
     ]
+
+
+def test_empty_coverage_workspace_starts_fresh(monkeypatch):
+    from scripts import run_collection_cycle as runner
+
+    monkeypatch.setattr(runner, "enabled_state_codes", lambda: ["ACT", "NSW"])
+    monkeypatch.setattr(runner, "state_root", lambda _code: None)
+    monkeypatch.setattr(runner, "all_states_complete", lambda _codes: False)
+
+    codes = runner.enabled_state_codes()
+    has_coverage_workspace = any(runner.state_root(code) is not None for code in codes)
+    mode = (
+        "fresh"
+        if not has_coverage_workspace or runner.all_states_complete(codes)
+        else "resume"
+    )
+
+    assert mode == "fresh"

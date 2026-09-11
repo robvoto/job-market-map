@@ -16,6 +16,7 @@ from collector.seek_cycle import (
     enabled_state_codes,
     run_seek_cycle,
     snapshot_and_reset_coverage,
+    state_root,
 )
 from collector.seek_jd import enrich_seek_coverage_jds
 from collector.service_state import (
@@ -89,7 +90,12 @@ def main(argv: list[str] | None = None) -> int:
                 if args.days is not None
                 else get_setting("collection.default_freshness_days")
             )
-            mode = "fresh" if all_states_complete(codes) else "resume"
+            has_coverage_workspace = any(state_root(code) is not None for code in codes)
+            mode = (
+                "fresh"
+                if not has_coverage_workspace or all_states_complete(codes)
+                else "resume"
+            )
             run_id = start_market_run(
                 trigger=args.trigger,
                 mode=mode,
