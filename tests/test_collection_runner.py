@@ -204,3 +204,33 @@ def test_empty_coverage_workspace_starts_fresh(monkeypatch):
     )
 
     assert mode == "fresh"
+
+
+def test_exhausted_normal_daily_coverage_rolls_over_but_other_partial_states_do_not():
+    from scripts.run_collection_cycle import _should_rollover_exhausted_daily_coverage
+
+    assert _should_rollover_exhausted_daily_coverage(
+        final_status="BLOCKED_INCOMPLETE",
+        days=1,
+        default_days=1,
+        backfill_existing_jds=False,
+    ) is True
+    for status in ("FAILED", "STOPPED", "BLOCKED_HUMAN", "PARTIAL_TIME_LIMIT"):
+        assert _should_rollover_exhausted_daily_coverage(
+            final_status=status,
+            days=1,
+            default_days=1,
+            backfill_existing_jds=False,
+        ) is False
+    assert _should_rollover_exhausted_daily_coverage(
+        final_status="BLOCKED_INCOMPLETE",
+        days=3,
+        default_days=1,
+        backfill_existing_jds=False,
+    ) is False
+    assert _should_rollover_exhausted_daily_coverage(
+        final_status="BLOCKED_INCOMPLETE",
+        days=1,
+        default_days=1,
+        backfill_existing_jds=True,
+    ) is False

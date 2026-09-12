@@ -58,6 +58,20 @@ def _seek_incremental_cutoff(
     return candidate if candidate > horizon_start else None
 
 
+def _should_rollover_exhausted_daily_coverage(
+    *,
+    final_status: str,
+    days: int,
+    default_days: int,
+    backfill_existing_jds: bool,
+) -> bool:
+    return (
+        final_status == "BLOCKED_INCOMPLETE"
+        and days == default_days
+        and not backfill_existing_jds
+    )
+
+
 def _satisfy_manual_schedule_slot(
     *,
     trigger: str,
@@ -333,6 +347,16 @@ def main(argv: list[str] | None = None) -> int:
                 message=message,
                 stats=run_stats,
             )
+            if _should_rollover_exhausted_daily_coverage(
+                final_status=final_status,
+                days=days,
+                default_days=default_days,
+                backfill_existing_jds=args.backfill_existing_jds,
+            ):
+                snapshot_and_reset_coverage(codes)
+                log.info(
+                    "archived exhausted incomplete daily SEEK coverage and reset workspace"
+                )
             _satisfy_manual_schedule_slot(
                 trigger=args.trigger,
                 final_status=final_status,
