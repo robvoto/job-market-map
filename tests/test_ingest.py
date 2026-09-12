@@ -168,6 +168,45 @@ def test_strong_cross_source_repost_keeps_source_rows_but_reuses_primary(tmp_pat
     assert json.loads(link["matching_signals_json"])
 
 
+
+def test_cross_source_alias_does_not_rewrite_primary_source_last_seen(tmp_path, monkeypatch):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    first = ingest.ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="123",
+            canonical_url="https://seek.test/jobs/123",
+            title="Implementation Consultant",
+            employer="Example Co",
+            location="Sydney NSW",
+            captured_at="2026-09-11T01:00:00+00:00",
+        )
+    )
+    second = ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="456",
+            canonical_url="https://linkedin.test/jobs/456",
+            title="Implementation Consultant",
+            employer="Example Co",
+            location="Sydney, New South Wales, Australia",
+            captured_at="2026-09-12T02:00:00+00:00",
+        )
+    )
+
+    assert second.job_id == first.job_id
+    with db.connect() as conn:
+        primary_state = conn.execute(
+            "SELECT last_seen_at FROM job_observation_state WHERE job_id=?", (first.job_id,)
+        ).fetchone()
+        alias_state = conn.execute(
+            "SELECT last_seen_at FROM job_observation_state WHERE job_id=?",
+            (second.observation_job_id,),
+        ).fetchone()
+    assert primary_state["last_seen_at"] == "2026-09-11T01:00:00+00:00"
+    assert alias_state["last_seen_at"] == "2026-09-12T02:00:00+00:00"
+
+
 def test_seek_linkedin_identical_intro_reuses_primary_when_other_fields_missing(
     tmp_path, monkeypatch
 ):

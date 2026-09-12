@@ -302,22 +302,9 @@ def ingest_card(obs: CardObservation) -> IngestResult:
     refresh_duplicate_links(observation_job_id)
     primary_job_id = get_primary_job_id(observation_job_id)
     if primary_job_id != observation_job_id:
-        # Keep the source posting's capture/history row, but keep the primary's
-        # lifecycle active so downstream feeds do not hide a live repost.
-        with connect() as conn:
-            state = conn.execute(
-                "SELECT first_seen_at FROM job_observation_state WHERE job_id=?",
-                (observation_job_id,),
-            ).fetchone()
-            if state is not None:
-                conn.execute(
-                    """
-                    UPDATE job_observation_state
-                       SET last_seen_at=?, archived=0, compacted_at=NULL
-                     WHERE job_id=?
-                    """,
-                    (captured_at, primary_job_id),
-                )
+        # Observation lifecycle is source-posting evidence. Never rewrite the
+        # primary row's source timestamp when an alias/repost is observed.
+        # Vacancy-level activity is derived across linked source rows by the API.
         if created and query_id is not None:
             # The source row is new, but it is not a new downstream vacancy.
             with connect() as conn:

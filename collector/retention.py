@@ -136,6 +136,13 @@ def apply_retention(
                   JOIN job_observation_state s ON s.job_id=j.id
                  WHERE s.archived=1
                    AND s.last_seen_at < ?
+                   AND NOT EXISTS (
+                       SELECT 1
+                         FROM jobs alias_job
+                         JOIN job_observation_state alias_state ON alias_state.job_id=alias_job.id
+                        WHERE alias_job.primary_job_id=j.id
+                          AND COALESCE(alias_state.archived,0)=0
+                   )
                  ORDER BY j.id
                 """,
                 (remove_cutoff,),

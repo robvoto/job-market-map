@@ -68,6 +68,48 @@ def test_archive_then_remove_to_neutral_tombstone(tmp_path, monkeypatch):
     assert forbidden.isdisjoint(tomb.keys())
 
 
+
+def test_active_linked_alias_prevents_primary_removal(tmp_path, monkeypatch):
+    retention, _ = _wire(tmp_path, monkeypatch)
+    db.init_db()
+    now = datetime(2026, 9, 10, tzinfo=UTC)
+    old = (now - timedelta(days=130)).isoformat(timespec="seconds")
+    fresh = now.isoformat(timespec="seconds")
+    with db.connect() as conn:
+        primary_id = conn.execute(
+            """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer)
+               VALUES('seek','old-primary','https://seek.test/old-primary','Role','Acme')"""
+        ).lastrowid
+        alias_id = conn.execute(
+            """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,primary_job_id)
+               VALUES('linkedin','live-alias','https://linkedin.test/live-alias','Role','Acme',?)""",
+            (primary_id,),
+        ).lastrowid
+        conn.execute(
+            "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,1)",
+            (primary_id, old, old),
+        )
+        conn.execute(
+            "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+            (alias_id, fresh, fresh),
+        )
+
+    result = retention.apply_retention(
+        raw_capture_days=30,
+        archive_after_days=30,
+        remove_archived_after_days=120,
+        prune_raw_captures_enabled=False,
+        archive_jobs_enabled=True,
+        remove_archived_jobs_enabled=True,
+        now=now,
+    )
+
+    assert result.jobs_removed == 0
+    with db.connect() as conn:
+        assert conn.execute("SELECT 1 FROM jobs WHERE id=?", (primary_id,)).fetchone() is not None
+        assert conn.execute("SELECT 1 FROM jobs WHERE id=?", (alias_id,)).fetchone() is not None
+
+
 def test_rediscovered_tombstone_is_resurrected_not_new(tmp_path, monkeypatch):
     retention, ingest = _wire(tmp_path, monkeypatch)
     from collector.models import CardObservation

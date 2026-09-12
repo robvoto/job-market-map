@@ -128,12 +128,38 @@ def _job_payload(row, *, include_raw: bool = True) -> dict:
         "reposted",
         "easy_apply",
         "archived",
+        "vacancy_archived",
     ):
         if item.get(key) is not None:
             item[key] = bool(item[key])
     if not include_raw:
         item.pop("raw_card_text", None)
     return item
+
+
+def _vacancy_active_clause(job_alias: str = "j") -> str:
+    """SQL predicate: primary vacancy is active when any linked source row is active."""
+    return f"""
+        EXISTS (
+            SELECT 1
+              FROM jobs vacancy_job
+              JOIN job_observation_state vacancy_state ON vacancy_state.job_id=vacancy_job.id
+             WHERE (vacancy_job.id={job_alias}.id OR vacancy_job.primary_job_id={job_alias}.id)
+               AND COALESCE(vacancy_state.archived,0)=0
+        )
+    """
+
+
+def _vacancy_lifecycle_select(job_alias: str = "j") -> str:
+    """Derived vacancy lifecycle while preserving source-row timestamps."""
+    return f"""
+        (SELECT MAX(vacancy_state.last_seen_at)
+           FROM jobs vacancy_job
+           JOIN job_observation_state vacancy_state ON vacancy_state.job_id=vacancy_job.id
+          WHERE vacancy_job.id={job_alias}.id OR vacancy_job.primary_job_id={job_alias}.id
+        ) AS vacancy_last_seen_at,
+        CASE WHEN {_vacancy_active_clause(job_alias)} THEN 0 ELSE 1 END AS vacancy_archived
+    """
 
 
 def _limit(requested: int | None) -> int:
@@ -226,13 +252,14 @@ def job_feed(
         clauses.append("j.geography_code=?")
         params.append(geography_code.upper())
     if not include_archived:
-        clauses.append("COALESCE(s.archived,0)=0")
+        clauses.append(_vacancy_active_clause("j"))
     where = " AND ".join(clauses)
     with connect() as conn:
         rows = conn.execute(
             f"""
             SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count,
                    s.archived, s.compacted_at,
+                   {_vacancy_lifecycle_select("j")},
                    (SELECT COUNT(*) FROM duplicate_links d
                      WHERE d.job_id_a=j.id OR d.job_id_b=j.id) AS duplicate_link_count
               FROM jobs j
@@ -331,12 +358,13 @@ def search_jobs(
         clauses.append("j.geography_code=?")
         params.append(geography_code.upper())
     if not include_archived:
-        clauses.append("COALESCE(s.archived,0)=0")
+        clauses.append(_vacancy_active_clause("j"))
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with connect() as conn:
         rows = conn.execute(
             f"""
-            SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at
+            SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at,
+                   {_vacancy_lifecycle_select("j")}
               FROM jobs j
               LEFT JOIN job_observation_state s ON s.job_id=j.id
               {where}

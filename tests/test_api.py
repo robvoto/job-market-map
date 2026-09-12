@@ -173,6 +173,43 @@ def test_feed_can_filter_by_normalized_geography(tmp_path, monkeypatch):
         assert [item["geography_code"] for item in payload["items"]] == ["ACT"]
 
 
+
+def test_feed_derives_vacancy_freshness_across_linked_sources(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            primary_id = conn.execute(
+                """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,geography_code)
+                   VALUES('seek','seek-1','https://seek.test/1','Analyst','Acme','NSW')"""
+            ).lastrowid
+            alias_id = conn.execute(
+                """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer,geography_code,primary_job_id)
+                   VALUES('linkedin','li-1','https://linkedin.test/1','Analyst','Acme','NSW',?)""",
+                (primary_id,),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,1)",
+                (primary_id, "2026-09-10T00:00:00+00:00", "2026-09-10T01:00:00+00:00"),
+            )
+            conn.execute(
+                "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                (alias_id, "2026-09-12T00:00:00+00:00", "2026-09-12T02:00:00+00:00"),
+            )
+            conn.execute(
+                """INSERT INTO same_vacancy_links(job_id,primary_job_id,confidence,match_type,matching_signals_json,detected_at)
+                   VALUES(?,?,0.96,'cross_source_locality','[]','2026-09-12T02:00:00+00:00')""",
+                (alias_id, primary_id),
+            )
+
+        payload = client.get("/v3/feed/jobs", params={"limit": 10}).json()
+        assert [item["id"] for item in payload["items"]] == [primary_id]
+        item = payload["items"][0]
+        assert item["source"] == "seek"
+        assert item["last_seen_at"] == "2026-09-10T01:00:00+00:00"
+        assert item["archived"] is True
+        assert item["vacancy_last_seen_at"] == "2026-09-12T02:00:00+00:00"
+        assert item["vacancy_archived"] is False
+
+
 def test_named_consumer_feed_uses_independent_api_checkpoint(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         insert_jobs(3)
