@@ -46,6 +46,8 @@ JH -> JMM   JOB_HUNTER_MARKET_MAP_BASE_URL=http://127.0.0.1:8770/v3
 
 JMM does not need a public listener. Keep `market.db`, backups and the SEEK Chromium profile on persistent storage. Do not move JMM to Lambda: the scheduler, SQLite state and long-lived SEEK browser/session are intentionally process-persistent. LinkedIn remains HTTP-only and does not use Chromium.
 
+On the current EC2 host, reuse the existing persistent EBS volume mounted at `/var/lib/job-hunter`; JMM owns `/var/lib/job-hunter/job-market-map/` beneath it. Code stays at `/home/ubuntu/job-market-map`. `scripts/ec2/install-job-market-map.sh` creates the persistent links/venv, installs JMM's own Playwright Chromium bundle there, and installs the two systemd units: `job-market-map.service` and `job-market-map-browser.service`.
+
 ## Admin collection controls
 
 The Admin page provides:

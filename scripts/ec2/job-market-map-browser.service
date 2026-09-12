@@ -1,0 +1,21 @@
+[Unit]
+Description=Job Market Map persistent SEEK Chromium
+Wants=job-hunter.service
+After=job-hunter.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/job-market-map
+Environment="PATH=/home/ubuntu/job-market-map/.venv/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="TZ=Australia/Sydney"
+Environment="DISPLAY=:99"
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+Environment="PLAYWRIGHT_BROWSERS_PATH=/var/lib/job-hunter/job-market-map/playwright-browsers"
+Environment="JMM_BROWSER_CDP_PORT=9223"
+ExecStart=/home/ubuntu/job-market-map/scripts/run_browser_service.sh
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

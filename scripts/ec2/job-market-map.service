@@ -1,0 +1,21 @@
+[Unit]
+Description=Job Market Map API and scheduler
+Wants=network-online.target job-market-map-browser.service
+After=network-online.target job-market-map-browser.service
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/job-market-map
+Environment="PATH=/home/ubuntu/job-market-map/.venv/bin:/home/ubuntu/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin"
+Environment="TZ=Australia/Sydney"
+Environment="DISPLAY=:99"
+Environment="XDG_RUNTIME_DIR=/run/user/1000"
+Environment="PLAYWRIGHT_BROWSERS_PATH=/var/lib/job-hunter/job-market-map/playwright-browsers"
+Environment="JOB_MARKET_MAP_SCHEDULER_SERVICE=1"
+ExecStart=/home/ubuntu/job-market-map/.venv/bin/uvicorn api.main:app --host 127.0.0.1 --port 8770
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
