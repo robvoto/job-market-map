@@ -1,4 +1,5 @@
 import pandas as pd
+from bs4 import BeautifulSoup
 
 from collector import db
 from collector.ingest import ingest_card
@@ -22,6 +23,25 @@ def _row(job_id: str = "li-4464190406") -> pd.DataFrame:
             }
         ]
     )
+
+
+
+def test_linkedin_card_date_fallback_uses_explicit_time_datetime():
+    card = BeautifulSoup(
+        '<div class="base-search-card"><time class="job-search-card__listdate" datetime="2026-09-09">3 days ago</time></div>',
+        "html.parser",
+    ).find("div")
+
+    assert linkedin_collector._card_posted_at(card) == "2026-09-09"
+
+
+def test_linkedin_card_date_fallback_does_not_infer_relative_text():
+    card = BeautifulSoup(
+        '<div class="base-search-card"><time class="job-search-card__listdate">3 days ago</time></div>',
+        "html.parser",
+    ).find("div")
+
+    assert linkedin_collector._card_posted_at(card) is None
 
 
 def _detail(*, description: str | None = None) -> LinkedInDetailEvidence:

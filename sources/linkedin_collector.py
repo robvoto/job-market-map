@@ -95,6 +95,15 @@ class _JobSpyProgressSession:
         return self._session.get(*args, **kwargs)
 
 
+def _card_posted_at(card) -> str | None:
+    """Read LinkedIn's explicit card date when JobSpy leaves date_posted empty."""
+    time_tag = card.find("time")
+    if time_tag is None:
+        return None
+    value = str(time_tag.get("datetime") or "").strip()
+    return value or None
+
+
 def _jobpost_to_row(job) -> dict:
     compensation = getattr(job, "compensation", None)
     interval = getattr(compensation, "interval", None) if compensation else None
@@ -155,7 +164,10 @@ def _fetch_exact_linkedin_page(search_params: dict, progress_send_conn) -> list[
         seen_ids.add(job_id)
         job = scraper._process_job(card, job_id, False)
         if job is not None:
-            rows.append(_jobpost_to_row(job))
+            row = _jobpost_to_row(job)
+            if not row.get("date_posted"):
+                row["date_posted"] = _card_posted_at(card)
+            rows.append(row)
     return rows
 
 
