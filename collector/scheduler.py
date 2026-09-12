@@ -4,8 +4,13 @@ import os
 import threading
 from datetime import datetime, timedelta
 
+from collector.db import connect
 from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
-from collector.service_state import scheduler_state, update_scheduler_state
+from collector.service_state import (
+    latest_market_run,
+    scheduler_state,
+    update_scheduler_state,
+)
 from collector.settings import get_setting
 from collector.source_campaign import get_cycle
 
@@ -57,6 +62,52 @@ class SchedulerService:
                 return start.date().isoformat()
         return None
 
+    @staticmethod
+    def _seek_retry_at(current: datetime, state: dict) -> datetime | None:
+        if str(state.get("last_status") or "") != "FAILED":
+            return None
+        latest = latest_market_run() or {}
+        if (
+            str(latest.get("trigger") or "") != "scheduled"
+            or not str(latest.get("source_scope") or "").startswith("seek")
+            or str(latest.get("status") or "") != "FAILED"
+        ):
+            return None
+        latest_id = int(latest.get("id") or 0)
+        if latest_id <= 0:
+            return None
+        with connect() as conn:
+            rows = conn.execute(
+                """
+                SELECT started_at FROM market_collection_runs
+                 WHERE trigger='scheduled'
+                   AND source_scope LIKE 'seek%'
+                   AND id <= ?
+                 ORDER BY id DESC LIMIT 2
+                """,
+                (latest_id,),
+            ).fetchall()
+        attempts_today = 0
+        for row in rows:
+            try:
+                started = datetime.fromisoformat(str(row[0])).astimezone(current.tzinfo)
+            except (TypeError, ValueError):
+                continue
+            if started.date() == current.date():
+                attempts_today += 1
+        if attempts_today >= 2:
+            return None
+        finished_raw = str(
+            state.get("last_finished_at") or latest.get("finished_at") or ""
+        )
+        try:
+            finished = datetime.fromisoformat(finished_raw).astimezone(current.tzinfo)
+        except ValueError:
+            return None
+        return finished + timedelta(
+            minutes=int(get_setting("scheduler.seek_failure_retry_minutes"))
+        )
+
     def due_now(self, now: datetime | None = None) -> bool:
         current = now or datetime.now().astimezone()
         if not bool(get_setting("scheduler.enabled")) or not bool(
@@ -67,7 +118,11 @@ class SchedulerService:
         if not (start <= current <= end):
             return False
         state = scheduler_state()
-        return str(state.get("last_attempt_local_date") or "") != current.date().isoformat()
+        today = current.date().isoformat()
+        if str(state.get("last_attempt_local_date") or "") != today:
+            return True
+        retry_at = self._seek_retry_at(current, state)
+        return retry_at is not None and current >= retry_at
 
     @staticmethod
     def linkedin_slot(now: datetime | None = None) -> datetime:
@@ -112,7 +167,15 @@ class SchedulerService:
         state = scheduler_state()
         last_attempt = str(state.get("last_attempt_local_date") or "")
         next_run = start
-        if now > start or last_attempt == now.date().isoformat():
+        if last_attempt == now.date().isoformat():
+            retry_at = self._seek_retry_at(now, state)
+            _, window_end = self.schedule_window(now)
+            next_run = (
+                retry_at
+                if retry_at is not None and retry_at <= window_end
+                else start + timedelta(days=1)
+            )
+        elif now > start:
             next_run = start + timedelta(days=1)
         linkedin_due, linkedin_cycle, linkedin_slot = self.linkedin_due_context(now)
         linkedin_next = (

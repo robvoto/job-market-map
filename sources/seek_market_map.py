@@ -277,6 +277,31 @@ def _wait_snapshot(
         time.sleep(0.5)
 
 
+def _navigate_and_wait_snapshot(
+    page_id: int,
+    url: str,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> dict:
+    """Navigate to a SEEK result page and retry once if it never reaches a result state."""
+    for attempt in range(2):
+        _navigate_seek(page_id, url)
+        time.sleep(float(get_setting("collection.seek_page_load_seconds")))
+        try:
+            return _wait_snapshot(
+                page_id,
+                expected_url=url,
+                should_stop=should_stop,
+            )
+        except SeekParseError:
+            if attempt:
+                raise
+            collection_logger().warning(
+                "SEEK result page did not settle; reloading once expected_url=%s", url
+            )
+    raise AssertionError("unreachable")
+
+
 def _ensure_partition(
     *,
     geography_code: str,
@@ -691,11 +716,9 @@ def _process_partition(
             return
         if not budget.consume():
             return
-        _navigate_seek(page_id, url)
-        time.sleep(float(get_setting("collection.seek_page_load_seconds")))
-        snap = _wait_snapshot(
+        snap = _navigate_and_wait_snapshot(
             page_id,
-            expected_url=url,
+            url,
             should_stop=should_stop,
         )
         text = str(snap.get("text") or "")

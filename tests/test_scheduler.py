@@ -165,3 +165,106 @@ def test_scheduler_prioritises_due_linkedin_before_seek(monkeypatch):
             },
         )
     ]
+
+
+def test_failed_seek_run_gets_one_same_day_retry_after_cooldown(monkeypatch):
+    from collector import scheduler
+
+    settings = {
+        "scheduler.enabled": True,
+        "scheduler.seek_enabled": True,
+        "scheduler.daily_hour": 0,
+        "scheduler.daily_minute": 0,
+        "scheduler.run_window_minutes": 240,
+        "scheduler.seek_failure_retry_minutes": 15,
+    }
+    monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
+    monkeypatch.setattr(
+        scheduler,
+        "scheduler_state",
+        lambda: {
+            "last_attempt_local_date": "2026-09-13",
+            "last_status": "FAILED",
+            "last_finished_at": "2026-09-12T14:02:22+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "latest_market_run",
+        lambda: {
+            "id": 26,
+            "trigger": "scheduled",
+            "source_scope": "seek_whole_state",
+            "status": "FAILED",
+            "finished_at": "2026-09-12T14:02:22+00:00",
+        },
+    )
+
+    class _Conn:
+        def execute(self, *_a, **_k):
+            return self
+        def fetchall(self):
+            return [("2026-09-12T14:01:48+00:00",)]
+        def __enter__(self):
+            return self
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(scheduler, "connect", lambda: _Conn())
+    service = scheduler.SchedulerService()
+    tz = ZoneInfo("Australia/Sydney")
+
+    assert service.due_now(datetime(2026, 9, 13, 0, 10, tzinfo=tz)) is False
+    assert service.due_now(datetime(2026, 9, 13, 0, 18, tzinfo=tz)) is True
+
+
+def test_failed_seek_run_does_not_retry_more_than_once_same_day(monkeypatch):
+    from collector import scheduler
+
+    settings = {
+        "scheduler.enabled": True,
+        "scheduler.seek_enabled": True,
+        "scheduler.daily_hour": 0,
+        "scheduler.daily_minute": 0,
+        "scheduler.run_window_minutes": 240,
+        "scheduler.seek_failure_retry_minutes": 15,
+    }
+    monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
+    monkeypatch.setattr(
+        scheduler,
+        "scheduler_state",
+        lambda: {
+            "last_attempt_local_date": "2026-09-13",
+            "last_status": "FAILED",
+            "last_finished_at": "2026-09-12T14:40:00+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "latest_market_run",
+        lambda: {
+            "id": 27,
+            "trigger": "scheduled",
+            "source_scope": "seek_whole_state",
+            "status": "FAILED",
+            "finished_at": "2026-09-12T14:40:00+00:00",
+        },
+    )
+
+    class _Conn:
+        def execute(self, *_a, **_k):
+            return self
+        def fetchall(self):
+            return [
+                ("2026-09-12T14:30:00+00:00",),
+                ("2026-09-12T14:01:48+00:00",),
+            ]
+        def __enter__(self):
+            return self
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(scheduler, "connect", lambda: _Conn())
+    service = scheduler.SchedulerService()
+    tz = ZoneInfo("Australia/Sydney")
+    assert service.due_now(datetime(2026, 9, 13, 1, 0, tzinfo=tz)) is False

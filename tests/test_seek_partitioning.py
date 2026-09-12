@@ -756,3 +756,58 @@ def test_incremental_child_completion_propagates_to_parent(tmp_path, monkeypatch
 
     status, collected, children = market._aggregate_parent(parent, reported=1000, tolerance=0)
     assert (status, collected, children) == ("COMPLETE_INCREMENTAL", 1, 1)
+
+
+def test_seek_result_page_reloads_once_when_first_load_never_settles(monkeypatch):
+    from sources import seek_market_map as market
+    from sources.seek import SeekParseError
+
+    navigations = []
+    waits = []
+    monkeypatch.setattr(market, "_navigate_seek", lambda page_id, url: navigations.append((page_id, url)))
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        market,
+        "get_setting",
+        lambda key: 0 if key == "collection.seek_page_load_seconds" else 1,
+    )
+
+    def wait(page_id, *, expected_url=None, should_stop=None, timeout=None):
+        waits.append((page_id, expected_url))
+        if len(waits) == 1:
+            raise SeekParseError("did not reach a result state")
+        return {"url": expected_url, "text": "12 jobs in Queensland"}
+
+    monkeypatch.setattr(market, "_wait_snapshot", wait)
+    url = "https://au.seek.com/jobs-in-trades-services/in-Queensland-QLD?daterange=1"
+    result = market._navigate_and_wait_snapshot(42, url)
+
+    assert result["text"] == "12 jobs in Queensland"
+    assert navigations == [(42, url), (42, url)]
+    assert waits == [(42, url), (42, url)]
+
+
+def test_seek_result_page_raises_after_single_reload_retry(monkeypatch):
+    import pytest
+
+    from sources import seek_market_map as market
+    from sources.seek import SeekParseError
+
+    navigations = []
+    monkeypatch.setattr(market, "_navigate_seek", lambda page_id, url: navigations.append((page_id, url)))
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        market,
+        "get_setting",
+        lambda key: 0 if key == "collection.seek_page_load_seconds" else 1,
+    )
+    monkeypatch.setattr(
+        market,
+        "_wait_snapshot",
+        lambda *_a, **_k: (_ for _ in ()).throw(SeekParseError("still invalid")),
+    )
+    url = "https://au.seek.com/jobs-in-trades-services/in-Queensland-QLD?daterange=1"
+
+    with pytest.raises(SeekParseError, match="still invalid"):
+        market._navigate_and_wait_snapshot(42, url)
+    assert navigations == [(42, url), (42, url)]
