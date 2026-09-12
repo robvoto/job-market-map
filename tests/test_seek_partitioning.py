@@ -586,6 +586,40 @@ def test_wait_snapshot_waits_through_cloudflare_challenge(monkeypatch):
     assert selected == [(42, True)]
 
 
+
+def test_wait_snapshot_stops_promptly_during_security_challenge(monkeypatch):
+    import pytest
+
+    import sources.seek_market_map as market
+    from collector.browser_broker import BrokerResponse
+
+    snapshots = []
+
+    def challenge(*_args, **_kwargs):
+        snapshots.append(True)
+        return BrokerResponse(
+            result={
+                "url": "https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1",
+                "text": "Just a moment...\nPerforming security verification",
+            },
+            elapsed_seconds=0.1,
+        )
+
+    monkeypatch.setattr(market, "snapshot", challenge)
+    monkeypatch.setattr(market, "select_page", lambda *_a, **_k: None)
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+
+    with pytest.raises(InterruptedError, match="SEEK collection stopped"):
+        market._wait_snapshot(
+            42,
+            expected_url="https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1",
+            timeout=60,
+            should_stop=lambda: bool(snapshots),
+        )
+
+    assert len(snapshots) == 1
+
+
 def test_seek_navigation_retries_err_aborted_once(monkeypatch):
     import sources.seek_market_map as market
     from collector.browser_broker import BrowserBrokerError

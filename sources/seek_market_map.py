@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import time
 import unicodedata
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
@@ -208,7 +209,11 @@ def _same_seek_page(actual_url: str, expected_url: str) -> bool:
 
 
 def _wait_snapshot(
-    page_id: int, *, expected_url: str | None = None, timeout: float | None = None
+    page_id: int,
+    *,
+    expected_url: str | None = None,
+    timeout: float | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> dict:
     timeout = float(
         timeout
@@ -220,6 +225,8 @@ def _wait_snapshot(
     brought_forward = False
     last = {}
     while True:
+        if should_stop is not None and should_stop():
+            raise InterruptedError("SEEK collection stopped")
         last = snapshot(page_id, verbose=True).result or {}
         actual_url = str(last.get("url") or "")
         if (
@@ -333,8 +340,13 @@ def _update_partition(
         )
 
 
-def _expand_refinement(page_id: int, *, aria_label: str) -> dict:
-    snap = _wait_snapshot(page_id)
+def _expand_refinement(
+    page_id: int,
+    *,
+    aria_label: str,
+    should_stop: Callable[[], bool] | None = None,
+) -> dict:
+    snap = _wait_snapshot(page_id, should_stop=should_stop)
     target = next(
         (
             e
@@ -351,12 +363,25 @@ def _expand_refinement(page_id: int, *, aria_label: str) -> dict:
 
 
 def _discover_children(
-    page_id: int, *, geography: dict, level: str, current_url: str
+    page_id: int,
+    *,
+    geography: dict,
+    level: str,
+    current_url: str,
+    should_stop: Callable[[], bool] | None = None,
 ) -> list[dict[str, str]]:
     if level in {"state", "classification"}:
-        expanded = _expand_refinement(page_id, aria_label="refine by classifications")
+        expanded = _expand_refinement(
+            page_id,
+            aria_label="refine by classifications",
+            should_stop=should_stop,
+        )
     elif level == "subclassification":
-        expanded = _expand_refinement(page_id, aria_label="refine by work type")
+        expanded = _expand_refinement(
+            page_id,
+            aria_label="refine by work type",
+            should_stop=should_stop,
+        )
     else:
         return []
     return seek_refinement_links(
@@ -402,6 +427,7 @@ def _collect_leaf(
     reported: int,
     tolerance: int,
     cutoff_at: datetime | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> tuple[str, int]:
     seen = _partition_source_ids(partition_id)
     previous_page_ids: set[str] | None = None
@@ -413,7 +439,11 @@ def _collect_leaf(
         target_url = _page_url(url, page)
         _navigate_seek(page_id, target_url)
         time.sleep(float(get_setting("collection.seek_page_load_seconds")))
-        snap = _wait_snapshot(page_id, expected_url=target_url)
+        snap = _wait_snapshot(
+            page_id,
+            expected_url=target_url,
+            should_stop=should_stop,
+        )
         text = str(snap.get("text") or "")
         if any(marker in text.casefold() for marker in TERMINAL_TEXT):
             break
@@ -580,6 +610,7 @@ def _resume_existing_children(
     resume: bool,
     children: list[dict],
     cutoff_at: datetime | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
     for child in children:
         _process_partition(
@@ -594,6 +625,7 @@ def _resume_existing_children(
             budget=budget,
             resume=resume,
             cutoff_at=cutoff_at,
+            should_stop=should_stop,
         )
     status, collected, child_count = _aggregate_parent(
         partition_id, reported, tolerance
@@ -620,8 +652,11 @@ def _process_partition(
     budget: PartitionBudget,
     resume: bool = True,
     cutoff_at: datetime | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> None:
     try:
+        if should_stop is not None and should_stop():
+            raise InterruptedError("SEEK collection stopped")
         current, existing_children = _partition_state(partition_id)
         current_status = str(current["status"])
         if resume and current_status.startswith("COMPLETE"):
@@ -651,13 +686,18 @@ def _process_partition(
                 resume=resume,
                 children=existing_children,
                 cutoff_at=cutoff_at,
+                should_stop=should_stop,
             )
             return
         if not budget.consume():
             return
         _navigate_seek(page_id, url)
         time.sleep(float(get_setting("collection.seek_page_load_seconds")))
-        snap = _wait_snapshot(page_id, expected_url=url)
+        snap = _wait_snapshot(
+            page_id,
+            expected_url=url,
+            should_stop=should_stop,
+        )
         text = str(snap.get("text") or "")
         if any(marker in text.casefold() for marker in TERMINAL_TEXT):
             _update_partition(partition_id, status="COMPLETE", reported=0, collected=0)
@@ -680,6 +720,7 @@ def _process_partition(
                 reported=reported,
                 tolerance=tolerance,
                 cutoff_at=cutoff_at,
+                should_stop=should_stop,
             )
             _update_partition(
                 partition_id, status=status, reported=reported, collected=collected
@@ -687,7 +728,11 @@ def _process_partition(
             return
         _update_partition(partition_id, status="INCOMPLETE_OVERSIZE", reported=reported)
         children = _discover_children(
-            page_id, geography=geography, level=level, current_url=url
+            page_id,
+            geography=geography,
+            level=level,
+            current_url=url,
+            should_stop=should_stop,
         )
         if not children:
             _update_partition(
@@ -718,6 +763,7 @@ def _process_partition(
                 budget=budget,
                 resume=resume,
                 cutoff_at=cutoff_at,
+                should_stop=should_stop,
             )
         status, collected, child_count = _aggregate_parent(
             partition_id, reported, tolerance
@@ -732,6 +778,8 @@ def _process_partition(
     except SeekHumanCheckRequired as exc:
         _update_partition(partition_id, status="BLOCKED_HUMAN", error=str(exc))
         raise
+    except InterruptedError:
+        raise
     except Exception as exc:
         _update_partition(partition_id, status="FAILED", error=str(exc))
         raise
@@ -745,6 +793,7 @@ def collect_seek_state(
     max_partitions: int | None = None,
     resume: bool = True,
     cutoff_at: datetime | None = None,
+    should_stop: Callable[[], bool] | None = None,
 ) -> MarketMapResult:
     geography = get_geography(geography_code)
     days = int(
@@ -780,6 +829,7 @@ def collect_seek_state(
         budget=budget,
         resume=resume,
         cutoff_at=cutoff_at,
+        should_stop=should_stop,
     )
     with connect() as conn:
         root = conn.execute(

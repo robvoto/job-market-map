@@ -156,6 +156,11 @@ def run_seek_cycle(
                     max_partitions=1,
                     resume=True,
                     cutoff_at=cutoff_at,
+                    should_stop=should_stop,
+                )
+            except InterruptedError:
+                return SeekCycleResult(
+                    "STOPPED", codes, total_processed, list(latest.values())
                 )
             except SeekHumanCheckRequired as exc:
                 collection_logger().warning(
