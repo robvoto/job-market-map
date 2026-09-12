@@ -125,3 +125,28 @@ The durable collection log is `logs/collection.log`. Admin links to `GET /v3/adm
 ## Current scheduled source scope
 
 SEEK and LinkedIn use separate subprocess entrypoints under the same scheduler and singleton lock. SEEK uses the persistent JMM Chromium service. LinkedIn is cards-only HTTP discovery, never uses Chromium, and fetches enabled geographies concurrently while all SQLite ingest/dedupe/cursor writes remain serialized in one coordinator thread. LinkedIn owns independent geography cursors with exact 10-position source offsets and reports the hard 1,000-result ceiling as `INCOMPLETE_CAP` rather than falsely complete.
+
+## Pre-live local-to-AWS database promotion (JMM-012)
+
+Until JMM is explicitly promoted, the **local JMM database is authoritative** and AWS JMM stays disabled. Installing the EC2 units does not enable them by default.
+
+Use the promotion workflow from the local JMM repo:
+
+```bash
+export JMM_AWS_INSTANCE_ID=i-xxxxxxxxxxxxxxxxx
+export JMM_AWS_TRANSFER_BUCKET=<approved-private-transfer-bucket>
+uv run python -m scripts.promote_to_aws stage
+```
+
+`stage` refuses to run while local collection or the local scheduler is active and requires a clean `main` exactly synced with `origin/main`. It creates a transactionally consistent SQLite backup, verifies `PRAGMA integrity_check`, records source/job/JD/checkpoint counts and SHA-256 in an ignored local manifest, uploads the snapshot as an AES-256-encrypted temporary S3 object, and restores/verifies it on the persistent AWS JMM EBS volume. It starts the AWS API only long enough to prove `/v3` health and a real Job Hunter client read, then stops it again. The temporary S3 object is deleted. A failed stage restores the previous AWS DB, or removes the failed first-stage DB if no previous DB existed. **Stage does not enable AWS JMM or configure Job Hunter to depend on it.**
+
+When a staged manifest has been reviewed and Rob explicitly approves production cutover, go-live is a separate command:
+
+```bash
+uv run python -m scripts.promote_to_aws \
+  --instance-id "$JMM_AWS_INSTANCE_ID" \
+  go-live --manifest exports/aws-promotion/<promotion-id>.json \
+  --confirm GO-LIVE-JMM
+```
+
+Go-live re-verifies the staged DB and code commit before enabling the JMM API/browser/scheduler and then configuring Job Hunter to use `http://127.0.0.1:8770/v3`. Local automatic collection must remain off. The pre-promotion AWS DB backup and the local source DB are retained for rollback.

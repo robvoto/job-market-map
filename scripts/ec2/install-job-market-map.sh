@@ -57,7 +57,16 @@ sudo -u ubuntu env \
 install -m 0644 "$APP_DIR/scripts/ec2/job-market-map.service" /etc/systemd/system/job-market-map.service
 install -m 0644 "$APP_DIR/scripts/ec2/job-market-map-browser.service" /etc/systemd/system/job-market-map-browser.service
 systemctl daemon-reload
-systemctl enable job-market-map-browser.service job-market-map.service >/dev/null
+
+# Installation/staging must not implicitly make JMM live. An operator may opt in
+# explicitly for an already-approved environment; normal promotion uses
+# scripts/promote_to_aws.py go-live after DB verification.
+if [[ "${JMM_ENABLE_SERVICES:-0}" == "1" ]]; then
+  systemctl enable job-market-map-browser.service job-market-map.service >/dev/null
+  echo "JMM_AWS_INSTALL_SERVICES_ENABLED"
+else
+  echo "JMM_AWS_INSTALL_STAGED services_not_enabled"
+fi
 
 echo "JMM_AWS_INSTALL_READY app=$APP_DIR persistent=$PERSIST_ROOT"
 echo "Seed $PERSIST_ROOT/data/market.db before starting job-market-map.service."
