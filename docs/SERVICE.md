@@ -96,6 +96,8 @@ Fresh extra runs within the same 24-hour freshness period use exact SEEK `listin
 
 A daily refresh therefore cannot inherit yesterday's partition memberships and falsely claim current completeness.
 
+Operating cadence is source-specific rather than symmetric. LinkedIn runs every 4 hours with a 5-hour lookback because its 1,000-result ceiling makes wider whole-state rolling windows unsafe; it remains enabled on weekends. SEEK runs once daily over one day because it is browser-backed and can encounter human/security challenges. If both are due at midnight, the scheduler evaluates LinkedIn first; after that short HTTP pass releases the singleton collection lock, SEEK may start. Normal collection on both sources is card-only; JDs are demand-driven after dedupe.
+
 The scheduler only starts when the API was launched in service mode (`start-api.sh` / `service.sh`). Direct test imports do not create background collection.
 
 ## SQLite backup policy

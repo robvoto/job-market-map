@@ -121,3 +121,47 @@ def test_linkedin_partial_cycle_is_resumed_before_new_slot(monkeypatch):
     )
     assert due is True
     assert cycle_key == "linkedin:2026-09-11T16:00+10:00"
+
+
+def test_scheduler_prioritises_due_linkedin_before_seek(monkeypatch):
+    from collector import scheduler
+
+    service = scheduler.SchedulerService()
+    calls = []
+    monkeypatch.setattr(scheduler, "update_scheduler_state", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "linkedin_due_context",
+        lambda _now=None: (True, "linkedin:2026-09-13T00:00+10:00", _now),
+    )
+    monkeypatch.setattr(service, "due_now", lambda _now=None: True)
+    monkeypatch.setattr(
+        scheduler,
+        "get_setting",
+        lambda key: 5 if key == "collection.linkedin_window_hours" else 1,
+    )
+
+    def start_linkedin(**kwargs):
+        calls.append(("linkedin", kwargs))
+        service._stop.set()
+
+    monkeypatch.setattr(scheduler.PROCESS_MANAGER, "start_linkedin", start_linkedin)
+    monkeypatch.setattr(
+        scheduler.PROCESS_MANAGER,
+        "start",
+        lambda **_kwargs: (_ for _ in ()).throw(
+            AssertionError("SEEK must not start in the same scheduler tick as due LinkedIn")
+        ),
+    )
+
+    service._loop()
+
+    assert calls == [
+        (
+            "linkedin",
+            {
+                "hours_old": 5,
+                "cycle_key": "linkedin:2026-09-13T00:00+10:00",
+            },
+        )
+    ]
