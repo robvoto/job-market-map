@@ -106,13 +106,16 @@ Consumers should not assume SEEK is complete when a state status is `FAILED` or 
 `NOT_RUN` means there is no current coverage workspace. This is normal immediately after an accepted/archived cycle is rolled over for the next fresh run. `/v3/coverage/seek` also returns `has_current_cycle` and the latest archived `previous` summary; Admin displays this state as **Waiting for next run**.
 
 
-## Live proof status — 10 September 2026
+## Bootstrap residual conclusion — JMM-010
 
-ACT is the first whole-state proof run. Current persisted state after a browser-extension disconnect:
-- SEEK root count: **917**;
-- **29/30** classifications complete;
-- direct-child union: **859** distinct jobs;
-- only unfinished classification: Trades & Services, **89** reported / **32** memberships persisted;
-- ACT root remains `FAILED` until that classification and parent aggregation finish.
+The accepted 3-day bootstrap closed with three `INCOMPLETE_CHILD_COVERAGE` roots:
 
-Do not call ACT exhaustive/complete yet. See local-only `docs/CURRENT_STATE.md` if present for the exact recovery point; the handoff is intentionally not tracked in Git.
+- ACT: 498 covered / 517 reported, 1 incomplete partition;
+- NSW: 6,905 / 6,958, 59 incomplete partitions;
+- QLD: 6,248 / 6,338, 33 incomplete partitions.
+
+That is **93 residual partition rows** and a 162-count reported-versus-covered delta. Treat 162 as a source-count shortfall, not as proof of exactly 162 missing distinct vacancies. The individual old partition rows are no longer reconstructable: rollover retained only the three summary rows and the pre-rollover DB copy was later pruned by normal backup retention. Do not invent row-level detail.
+
+This coverage residual is separate from JD completeness. At bootstrap close there were 15,020 SEEK jobs, 10,267 with JDs and 4,753 without; the final active JD sweep had 13,633 candidates, 9,938 cached and 3,695 remaining. Bulk JD completion is not required: JMM-003 fetches a missing JD on demand when a consumer actually needs it.
+
+The first normal 1-day cycle started from **0 SEEK partitions and 0 partition memberships** while retaining the three archived summaries and all canonical jobs/JDs, proving the daily workspace was isolated from the accepted 3-day bootstrap. No JMM-010 runtime change is required.

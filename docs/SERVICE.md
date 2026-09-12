@@ -34,6 +34,18 @@ The UI intentionally does not contain a button that kills its own web service, b
 
 This does not create operating-system startup persistence. After Windows/WSL restarts, run `./scripts/service.sh start` again.
 
+## AWS deployment target
+
+When JMM is deployed with Job Hunter, keep it as a **separate long-running Python service on the same EC2 host**:
+
+```text
+Job Hunter  127.0.0.1:8765
+JMM         127.0.0.1:8770
+JH -> JMM   JOB_HUNTER_MARKET_MAP_BASE_URL=http://127.0.0.1:8770/v3
+```
+
+JMM does not need a public listener. Keep `market.db`, backups and the SEEK Chromium profile on persistent storage. Do not move JMM to Lambda: the scheduler, SQLite state and long-lived SEEK browser/session are intentionally process-persistent. LinkedIn remains HTTP-only and does not use Chromium.
+
 ## Admin collection controls
 
 The Admin page provides:
