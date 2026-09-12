@@ -170,11 +170,10 @@ class SchedulerService:
         if last_attempt == now.date().isoformat():
             retry_at = self._seek_retry_at(now, state)
             _, window_end = self.schedule_window(now)
-            next_run = (
-                retry_at
-                if retry_at is not None and retry_at <= window_end
-                else start + timedelta(days=1)
-            )
+            if retry_at is not None and now <= window_end and retry_at <= window_end:
+                next_run = max(retry_at, now)
+            else:
+                next_run = start + timedelta(days=1)
         elif now > start:
             next_run = start + timedelta(days=1)
         linkedin_due, linkedin_cycle, linkedin_slot = self.linkedin_due_context(now)

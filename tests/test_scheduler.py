@@ -268,3 +268,61 @@ def test_failed_seek_run_does_not_retry_more_than_once_same_day(monkeypatch):
     service = scheduler.SchedulerService()
     tz = ZoneInfo("Australia/Sydney")
     assert service.due_now(datetime(2026, 9, 13, 1, 0, tzinfo=tz)) is False
+
+
+def test_scheduler_status_does_not_show_expired_same_day_retry(monkeypatch):
+    from collector import scheduler
+
+    settings = {
+        "scheduler.enabled": True,
+        "scheduler.seek_enabled": True,
+        "scheduler.linkedin_enabled": False,
+        "collection.linkedin_enabled": False,
+        "scheduler.daily_hour": 0,
+        "scheduler.daily_minute": 0,
+        "scheduler.run_window_minutes": 240,
+        "scheduler.seek_failure_retry_minutes": 15,
+        "scheduler.linkedin_interval_hours": 4,
+        "collection.linkedin_window_hours": 5,
+    }
+    monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
+    monkeypatch.setattr(
+        scheduler,
+        "scheduler_state",
+        lambda: {
+            "last_attempt_local_date": "2026-09-13",
+            "last_status": "FAILED",
+            "last_finished_at": "2026-09-12T14:02:22+00:00",
+        },
+    )
+    monkeypatch.setattr(
+        scheduler,
+        "latest_market_run",
+        lambda: {
+            "id": 26,
+            "trigger": "scheduled",
+            "source_scope": "seek_whole_state",
+            "status": "FAILED",
+            "finished_at": "2026-09-12T14:02:22+00:00",
+        },
+    )
+
+    class _Conn:
+        def execute(self, *_a, **_k):
+            return self
+        def fetchall(self):
+            return [("2026-09-12T14:01:48+00:00",)]
+        def __enter__(self):
+            return self
+        def __exit__(self, *_a):
+            return False
+
+    monkeypatch.setattr(scheduler, "connect", lambda: _Conn())
+    monkeypatch.setattr(scheduler, "get_cycle", lambda _source: None)
+    service = scheduler.SchedulerService()
+    tz = ZoneInfo("Australia/Sydney")
+    now = datetime(2026, 9, 13, 9, 43, tzinfo=tz)
+    monkeypatch.setattr(scheduler, "datetime", type("FixedDateTime", (datetime,), {"now": classmethod(lambda cls: now)}))
+
+    status = service.status()
+    assert status["next_run_at"] == "2026-09-14T00:00:00+10:00"
