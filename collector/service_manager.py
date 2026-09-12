@@ -10,7 +10,7 @@ from pathlib import Path
 from collector.db import ROOT
 from collector.run_lock import lock_status
 from collector.run_logging import LOG_PATH
-from collector.service_state import latest_market_run
+from collector.service_state import latest_market_run, latest_seek_market_run
 
 
 class CollectionProcessError(RuntimeError):
@@ -41,7 +41,9 @@ class CollectionProcessManager:
                 "active": bool(lock["active"] or self._process is not None),
                 "pid": pid,
                 "lock": lock,
+                "active_source": (lock.get("metadata") or {}).get("source") if lock["active"] else None,
                 "latest_run": latest_market_run(),
+                "latest_seek_run": latest_seek_market_run(),
                 "log_path": str(LOG_PATH),
             }
 

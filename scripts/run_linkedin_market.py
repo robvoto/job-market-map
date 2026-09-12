@@ -56,7 +56,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, request_stop)
 
     try:
-        with collection_run_lock(args.trigger):
+        with collection_run_lock(args.trigger, source="linkedin"):
             log.info(
                 "LinkedIn standalone run started days=%s hours_old=%s cycle_key=%s",
                 days,

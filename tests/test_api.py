@@ -555,6 +555,7 @@ def test_admin_stats_exposes_current_bootstrap_and_latest(tmp_path, monkeypatch)
         latest = {"id": 25, "run_kind": "normal", "stats": {"jobs_total": 200}}
         monkeypatch.setattr(api_main, "bootstrap_market_run", lambda: bootstrap)
         monkeypatch.setattr(api_main, "latest_market_run", lambda: latest)
+        monkeypatch.setattr(api_main, "latest_seek_market_run", lambda: latest)
         linkedin_campaign = {
             "status": "PARTIAL",
             "cycle_key": "2026-09-11",
@@ -577,5 +578,6 @@ def test_admin_stats_exposes_current_bootstrap_and_latest(tmp_path, monkeypatch)
             },
             "bootstrap": bootstrap,
             "latest": latest,
+            "latest_seek": latest,
             "linkedin_campaign": linkedin_campaign,
         }

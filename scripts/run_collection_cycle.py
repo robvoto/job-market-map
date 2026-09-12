@@ -132,7 +132,7 @@ def main(argv: list[str] | None = None) -> int:
     signal.signal(signal.SIGINT, request_stop)
 
     try:
-        with collection_run_lock(args.trigger):
+        with collection_run_lock(args.trigger, source="seek"):
             codes = enabled_state_codes()
             run_codes = list(codes)
             baseline_stats = population_stats(codes)

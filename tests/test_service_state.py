@@ -89,3 +89,27 @@ def test_latest_complete_fresh_seek_started_at_ignores_partial_and_resume_runs(
         service_state.latest_complete_fresh_seek_started_at(["NSW", "ACT"])
         == "2026-09-11T00:00:00+00:00"
     )
+
+
+def test_latest_seek_market_run_excludes_bootstrap_and_other_sources(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(service_state, "connect", db.connect)
+    monkeypatch.setattr(service_state, "init_db", db.init_db)
+
+    service_state.start_market_run(
+        trigger="manual", mode="bootstrap", states=["NSW"], backup_path=None,
+        source_scope="seek_whole_state", run_kind="bootstrap",
+    )
+    seek_id = service_state.start_market_run(
+        trigger="manual", mode="fresh", states=["NSW"], backup_path=None,
+        source_scope="seek_whole_state", run_kind="normal",
+    )
+    service_state.start_market_run(
+        trigger="linkedin-manual", mode="rolling", states=["NSW"], backup_path=None,
+        source_scope="linkedin_geography", run_kind="normal",
+    )
+
+    latest_seek = service_state.latest_seek_market_run()
+    assert latest_seek is not None
+    assert latest_seek["id"] == seek_id
+    assert latest_seek["source_scope"] == "seek_whole_state"

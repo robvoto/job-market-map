@@ -42,7 +42,11 @@ from collector.run_stats import population_stats
 from collector.scheduler import SCHEDULER, SchedulerService
 from collector.seek_cycle import enabled_state_codes
 from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
-from collector.service_state import bootstrap_market_run, latest_market_run
+from collector.service_state import (
+    bootstrap_market_run,
+    latest_market_run,
+    latest_seek_market_run,
+)
 from collector.settings import (
     SettingError,
     get_setting,
@@ -671,6 +675,7 @@ def admin_collection_stats():
         "current": population_stats(enabled_state_codes()),
         "bootstrap": bootstrap_market_run(),
         "latest": latest_market_run(),
+        "latest_seek": latest_seek_market_run(),
         "linkedin_campaign": linkedin_campaign_progress(),
     }
 

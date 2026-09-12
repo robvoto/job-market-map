@@ -102,7 +102,8 @@ def test_explicit_legacy_jd_backfill_runs_once_after_card_coverage(monkeypatch):
     events = []
 
     @contextmanager
-    def fake_lock(_trigger):
+    def fake_lock(_trigger, *, source=None):
+        assert source == "seek"
         yield
 
     monkeypatch.setattr(runner, "collection_run_lock", fake_lock)

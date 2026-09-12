@@ -106,6 +106,20 @@ def latest_market_run() -> dict | None:
     return _decode_market_run(row)
 
 
+def latest_seek_market_run() -> dict | None:
+    init_db()
+    with connect() as conn:
+        row = conn.execute(
+            """
+            SELECT * FROM market_collection_runs
+             WHERE run_kind='normal'
+               AND source_scope LIKE 'seek%'
+             ORDER BY id DESC LIMIT 1
+            """
+        ).fetchone()
+    return _decode_market_run(row)
+
+
 def bootstrap_market_run() -> dict | None:
     init_db()
     with connect() as conn:

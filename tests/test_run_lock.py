@@ -10,10 +10,11 @@ from collector.run_lock import (
 def test_collection_lock_blocks_second_process_path(tmp_path):
     path = tmp_path / "collection.lock"
     assert lock_status(path)["active"] is False
-    with collection_run_lock("manual", path=path):
+    with collection_run_lock("manual", source="seek", path=path):
         status = lock_status(path)
         assert status["active"] is True
         assert status["metadata"]["trigger"] == "manual"
+        assert status["metadata"]["source"] == "seek"
         with pytest.raises(CollectionAlreadyRunning), collection_run_lock("scheduled", path=path):
             pass
     assert lock_status(path)["active"] is False

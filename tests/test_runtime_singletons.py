@@ -10,4 +10,4 @@ def test_supported_runtime_entrypoints_are_single_instance_guarded():
     assert "flock -n 9" in api
     assert "browser-service.lock" in browser
     assert "flock -n 8" in browser
-    assert "collection_run_lock(args.trigger)" in collector
+    assert 'collection_run_lock(args.trigger, source="seek")' in collector

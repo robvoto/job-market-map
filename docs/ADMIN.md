@@ -42,7 +42,7 @@ Start the background Admin service with `./scripts/service.sh start`; it must re
 
 After the accepted 3-day bootstrap, the temporary coverage workspace was intentionally cleared so the first normal 1-day run starts fresh. Canonical jobs and JDs are independent of that workspace.
 
-The historical bootstrap card is labelled **Accepted with small gap** in Admin rather than exposing its raw `BLOCKED_INCOMPLETE` implementation status. The underlying run record is unchanged; this is only clearer UI wording for the bootstrap Rob explicitly accepted. A partial LinkedIn cycle is likewise explained as saved resumable progress, not a current collector failure.
+The accepted 3-day bootstrap remains historical/audit evidence only and is no longer shown as a live operations card. A partial LinkedIn cycle is explained as saved resumable progress, not a current collector failure.
 
 ## What is configurable without code
 
@@ -63,7 +63,7 @@ Personal applied/rejected/presented state is not a retention exception here beca
 - `collection.seek_incremental_overlap_minutes` (default 120) for safe overlap on extra fresh runs inside the 1-day window; normal ~24-hour daily runs remain full reconciliation passes;
 - LinkedIn enable/disable, `collection.linkedin_window_hours` (default 5), `scheduler.linkedin_interval_hours` (default 4), HTTP no-progress/timeout controls, and direct-detail HTTP timeout for JMM-003 on-demand enrichment. The LinkedIn window must be larger than the cadence. Production LinkedIn discovery is geography-first, cards-only, parallel on network fetches, and serialized for SQLite writes.
 
-The right-side stats panel shows current source totals (including APSJobs), the accepted 3-day bootstrap separately, the current LinkedIn geography cycle (complete/capped/remaining), and the latest daily SEEK run. LinkedIn discovery itself is cards-only and its next refresh time is shown in Service status.
+The right-side stats panel shows current source totals (including APSJobs), the current LinkedIn geography cycle (complete/capped/remaining), and the latest SEEK run. LinkedIn discovery itself is cards-only and its next refresh time is shown in Service status.
 
 ### Duplicate detection
 - near-match enable/disable;
@@ -73,8 +73,8 @@ The right-side stats panel shows current source totals (including APSJobs), the 
 - default/max API page sizes;
 - local API port.
 
-### Optional source keyword queries (advanced)
-These are optional source/query/location searches for APSJobs or targeted experiments. Production SEEK and LinkedIn market discovery do not depend on keyword queries: SEEK uses whole-state partitioning and LinkedIn uses geography-only JobSpy discovery. Queries are operational DB data; Admin can enable/disable them, and registry sync does not silently re-enable a query Rob disabled.
+### Optional source keyword queries
+These remain backend capability for APSJobs or targeted experiments but are intentionally hidden from the normal Admin operations screen. Production SEEK and LinkedIn discovery do not use them.
 
 ## Safety semantics
 
