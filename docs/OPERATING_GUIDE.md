@@ -85,7 +85,7 @@ When a source DOM changes:
 - add a regression fixture/test;
 - do not silently fill missing card fields during bulk mapping by opening JDs or switching to fit inference.
 
-JD enrichment is a distinct source-detail operation, but for JMM-007 it is part of the same full-evidence pass rather than an optional later phase. On resume, existing discovered SEEK jobs are brought up to JD completeness before more coverage is collected; each completed coverage partition triggers JD catch-up; and the pass cannot be COMPLETE while any required SEEK JD remains unfetched. When a job page is deliberately opened for JD enrichment, capture the full source JD and any additional neutral structured source facts exposed by that same detail page. Never infer missing canonical facts from relative labels or prose when the source does not provide them explicitly.
+JD enrichment is a distinct source-detail operation. Normal SEEK and LinkedIn market collection is card-only: collect, dedupe and preserve source evidence first. A JD is opened later only when a consumer such as Job Hunter passes its card-level gate and explicitly requests enrichment through JMM-003. The optional `--backfill-existing-jds` flag is maintenance-only and is never part of scheduled collection. When a job page is deliberately opened, capture the full source JD and any additional neutral structured facts from that same source posting. Never infer missing canonical facts from relative labels or prose.
 
 ## Browser rule
 
@@ -105,7 +105,7 @@ Successful JD fetches remain permanently cached in `jd_fetch_registry`, so a rep
 
 Extra fresh SEEK runs inside the normal 1-day window are incremental. SEEK's embedded search state supplies an exact UTC `listingDate` for each result card; when a previous **fresh** SEEK cycle completed recently, JMM scans newest-first back to two hours before that prior run started and stops once an exact, correctly ordered result page crosses that cutoff. If exact timestamps are missing/out of order, the cutoff is disabled and the collector continues as a full pass. A normal run roughly 24 hours after the previous run remains a full 1-day reconciliation, so incremental runs do not replace the daily safety net.
 
-The one-off first full-evidence load is explicitly wider and does not change the normal default:
+A one-off wider SEEK market pass can be run explicitly without changing the normal default:
 
 ```bash
 uv run python -m scripts.run_collection_cycle --trigger manual --days 3 --max-runtime-minutes 0

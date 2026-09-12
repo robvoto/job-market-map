@@ -202,7 +202,11 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             list_page_id = int(open_tab("about:blank", active=False).result["pageId"])
-            detail_page_id = int(open_tab("about:blank", active=False).result["pageId"])
+            detail_page_id = (
+                int(open_tab("about:blank", active=False).result["pageId"])
+                if args.backfill_existing_jds
+                else None
+            )
             log.info(
                 "browser pages ready list_page_id=%s detail_page_id=%s",
                 list_page_id,
@@ -242,10 +246,6 @@ def main(argv: list[str] | None = None) -> int:
                     jd_result.remaining,
                 )
 
-            # A JMM-007 pass is full-evidence, not card-only. Catch up any jobs
-            # already discovered by an interrupted/resumed pass before collecting more.
-            sweep_required_jds()
-
             def after_coverage_progress(progress) -> None:
                 log.info(
                     "coverage progress geography=%s status=%s reported=%s covered=%s incomplete=%s partitions_processed=%s",
@@ -256,9 +256,6 @@ def main(argv: list[str] | None = None) -> int:
                     progress.incomplete_partitions,
                     progress.partitions_processed,
                 )
-                # Do not let coverage run thousands of jobs ahead of JD acquisition.
-                # Every completed partition is followed by a write-once JD catch-up.
-                sweep_required_jds()
 
             result = run_seek_cycle(
                 page_id=list_page_id,
@@ -272,12 +269,11 @@ def main(argv: list[str] | None = None) -> int:
 
             run_partitions_processed = result.partitions_processed
 
-            # Final sweep proves the pass has the required JDs. The one-off legacy
-            # backfill is included only after current 3-day coverage is complete.
-            if result.status == "COMPLETE":
-                sweep_required_jds(
-                    include_existing_unfetched=args.backfill_existing_jds
-                )
+            # Normal market collection is card-only. Historical bulk JD acquisition
+            # is an explicit maintenance action; normal consumers use JMM-003 on demand
+            # after card-level dedupe and filtering decide that a JD is actually needed.
+            if result.status == "COMPLETE" and args.backfill_existing_jds:
+                sweep_required_jds(include_existing_unfetched=True)
 
             # Release this process's SEEK-owned pages/CDP attachment before exit.
             for page_id in (detail_page_id, list_page_id):
@@ -301,7 +297,7 @@ def main(argv: list[str] | None = None) -> int:
                 final_status = "PARTIAL_TIME_LIMIT"
             elif result.status != "COMPLETE":
                 final_status = result.status
-            elif jd_result is None or jd_result.remaining:
+            elif args.backfill_existing_jds and (jd_result is None or jd_result.remaining):
                 final_status = "PARTIAL_JD"
             else:
                 final_status = "COMPLETE"

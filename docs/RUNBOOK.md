@@ -90,7 +90,7 @@ Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; 
 
 ### Collection logging
 
-Every collection runner writes timestamped progress to `logs/collection.log` and to stdout. The file rotates at 10 MB and keeps five previous files. Important events include run configuration/start/end, backup path, browser page setup, JD sweep start/end, JD progress every 25 successful stores, failed JD attempts, coverage progress, genuine human-verification waits, browser loss/recovery, and full exception tracebacks.
+Every collection runner writes timestamped progress to `logs/collection.log` and to stdout. The file rotates at 10 MB and keeps five previous files. Normal scheduled collection is card-only. JD sweep events appear only for an explicit maintenance run using `--backfill-existing-jds`; ordinary JD acquisition is on demand through JMM-003.
 
 Admin's **View collection log** link opens the bounded tail of this same durable file at `/v3/admin/log`.
 

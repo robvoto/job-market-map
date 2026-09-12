@@ -7,6 +7,7 @@ def _wire(tmp_path, monkeypatch):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
     from collector import jd_enrichment
 
+    monkeypatch.setattr(jd_enrichment, "connect", db.connect)
     monkeypatch.setattr(jd_enrichment, "get_job_by_id", db.get_job_by_id)
     monkeypatch.setattr(jd_enrichment, "get_job_jd", db.get_job_jd)
     monkeypatch.setattr(jd_enrichment, "store_job_jd_once", db.store_job_jd_once)
@@ -107,3 +108,67 @@ def test_unsupported_source_fails_explicitly(tmp_path, monkeypatch):
 
     with pytest.raises(enrichment.UnsupportedJDSourceError, match="apsjobs"):
         enrichment.get_or_enrich_job_jd(job_id)
+
+
+def test_linked_vacancy_prefers_linkedin_http_then_falls_back_to_seek(tmp_path, monkeypatch):
+    enrichment = _wire(tmp_path, monkeypatch)
+    seek_id = _insert_job(source="seek", source_job_id="seek-1")
+    linkedin_id = _insert_job(source="linkedin", source_job_id="li-1")
+    with db.connect() as conn:
+        conn.execute("UPDATE jobs SET primary_job_id=? WHERE id=?", (seek_id, linkedin_id))
+
+    calls = []
+
+    def linkedin_fail(job):
+        calls.append(("linkedin", job["id"]))
+        raise enrichment.JDSourceFetchError("public page unavailable")
+
+    def seek_fetch(job):
+        calls.append(("seek", job["id"]))
+        return enrichment.FetchedJD(
+            full_description="Validated SEEK fallback JD for the linked vacancy.",
+            jd_source="seek_job_page",
+            facts={"location": "Sydney NSW"},
+        )
+
+    monkeypatch.setitem(enrichment._SOURCE_FETCHERS, "linkedin", linkedin_fail)
+    monkeypatch.setitem(enrichment._SOURCE_FETCHERS, "seek", seek_fetch)
+
+    result = enrichment.get_or_enrich_job_jd(seek_id)
+    assert result["status"] == "enriched"
+    assert calls == [("linkedin", linkedin_id), ("seek", seek_id)]
+    with db.connect() as conn:
+        primary = conn.execute("SELECT * FROM jobs WHERE id=?", (seek_id,)).fetchone()
+        alias = conn.execute("SELECT * FROM jobs WHERE id=?", (linkedin_id,)).fetchone()
+    assert primary["full_description"] == result["full_description"]
+    assert primary["location"] == "Sydney NSW"
+    assert alias["full_description"] is None
+
+
+def test_linked_vacancy_updates_facts_on_source_that_supplied_jd(tmp_path, monkeypatch):
+    enrichment = _wire(tmp_path, monkeypatch)
+    seek_id = _insert_job(source="seek", source_job_id="seek-1")
+    linkedin_id = _insert_job(source="linkedin", source_job_id="li-1")
+    with db.connect() as conn:
+        conn.execute("UPDATE jobs SET primary_job_id=? WHERE id=?", (seek_id, linkedin_id))
+
+    def linkedin_fetch(job):
+        return enrichment.FetchedJD(
+            full_description="Validated LinkedIn JD for the linked vacancy.",
+            jd_source="linkedin_public_job_page",
+            facts={"applicant_count": 17},
+        )
+
+    monkeypatch.setitem(enrichment._SOURCE_FETCHERS, "linkedin", linkedin_fetch)
+    monkeypatch.setitem(
+        enrichment._SOURCE_FETCHERS,
+        "seek",
+        lambda _job: (_ for _ in ()).throw(AssertionError("SEEK fallback must not run")),
+    )
+
+    enrichment.get_or_enrich_job_jd(seek_id)
+    with db.connect() as conn:
+        primary = conn.execute("SELECT * FROM jobs WHERE id=?", (seek_id,)).fetchone()
+        alias = conn.execute("SELECT * FROM jobs WHERE id=?", (linkedin_id,)).fetchone()
+    assert primary["applicant_count"] is None
+    assert alias["applicant_count"] == 17

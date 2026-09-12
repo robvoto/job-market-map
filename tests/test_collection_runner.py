@@ -94,7 +94,7 @@ def test_successful_manual_default_run_marks_only_overlapping_schedule_slot(monk
     assert updates == []
 
 
-def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypatch):
+def test_explicit_legacy_jd_backfill_runs_once_after_card_coverage(monkeypatch):
     from collector.seek_cycle import SeekCycleResult
     from collector.seek_jd import SeekJDEnrichmentResult
     from scripts import run_collection_cycle as runner
@@ -182,9 +182,7 @@ def test_full_evidence_pass_sweeps_jds_before_during_and_after_coverage(monkeypa
         == 0
     )
     assert events == [
-        ("jd", False),
         ("coverage", False),
-        ("jd", False),
         ("jd", True),
     ]
 
