@@ -238,6 +238,11 @@ def job_feed(
         ge=0,
         description="Stable cursor: return current job rows with id greater than this value.",
     ),
+    through_id: int | None = Query(
+        None,
+        ge=0,
+        description="Optional fixed high-water job id for a stable multi-page market snapshot.",
+    ),
     limit: int | None = Query(None, ge=1),
     source: str | None = None,
     geography_code: str | None = None,
@@ -245,10 +250,16 @@ def job_feed(
     include_raw: bool = True,
 ):
     resolved_limit = _limit(limit)
+    with connect() as conn:
+        snapshot_max_id = (
+            int(conn.execute("SELECT COALESCE(MAX(id),0) FROM jobs").fetchone()[0])
+            if through_id is None
+            else int(through_id)
+        )
     # Confirmed same-vacancy source postings remain lookup-addressable, but only
     # their oldest deterministic primary enters downstream processing feeds.
-    clauses = ["j.id > ?", "j.primary_job_id IS NULL"]
-    params: list[object] = [after_id]
+    clauses = ["j.id > ?", "j.id <= ?", "j.primary_job_id IS NULL"]
+    params: list[object] = [after_id, snapshot_max_id]
     if source:
         clauses.append("j.source=?")
         params.append(source.casefold())
@@ -282,6 +293,7 @@ def job_feed(
         "api_version": API_VERSION,
         "schema_version": SCHEMA_VERSION,
         "generated_at": _now(),
+        "snapshot_max_id": snapshot_max_id,
         "items": items,
         "next_cursor": next_cursor,
         "has_more": has_more,
@@ -304,6 +316,7 @@ def consumer_feed(
     checkpoint = get_checkpoint(consumer_key)
     return job_feed(
         after_id=int(checkpoint["last_job_id"]),
+        through_id=None,
         limit=limit,
         source=source,
         geography_code=geography_code,

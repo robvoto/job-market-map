@@ -38,6 +38,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         payload = first.json()
         assert payload["api_version"] == "v3"
         assert payload["schema_version"] == 8
+        assert payload["snapshot_max_id"] == 3
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
         assert "raw_card_text" not in payload["items"][0]
@@ -45,6 +46,39 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
             "/v3/feed/jobs", params={"after_id": payload["next_cursor"], "limit": 2}
         )
         assert [item["title"] for item in second.json()["items"]] == ["Role 3"]
+
+
+def test_v3_feed_fixed_high_water_excludes_jobs_arriving_mid_scan(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(2)
+        first = client.get("/v3/feed/jobs", params={"after_id": 0, "limit": 1}).json()
+        assert first["snapshot_max_id"] == 2
+        assert [item["id"] for item in first["items"]] == [1]
+
+        with db.connect() as conn:
+            newest = conn.execute(
+                """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer)
+                   VALUES('seek','3','https://seek.test/3','Role 3','Acme')"""
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO job_observation_state(
+                    job_id,first_seen_at,last_seen_at,capture_count,archived
+                ) VALUES(?,?,?,1,0)""",
+                (newest, "2026-09-10T00:00:00+00:00", "2026-09-10T00:00:00+00:00"),
+            )
+        assert newest == 3
+
+        second = client.get(
+            "/v3/feed/jobs",
+            params={
+                "after_id": first["next_cursor"],
+                "through_id": first["snapshot_max_id"],
+                "limit": 10,
+            },
+        ).json()
+        assert second["snapshot_max_id"] == 2
+        assert [item["id"] for item in second["items"]] == [2]
+        assert second["has_more"] is False
 
 
 def test_admin_setting_api_returns_helper_text_and_updates_value(tmp_path, monkeypatch):
