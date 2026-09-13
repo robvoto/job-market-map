@@ -144,7 +144,7 @@ def stage(args: argparse.Namespace) -> int:
         "for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8770/v3/health && break; sleep 1; done",
         "curl -fsS http://127.0.0.1:8770/v3/health | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['ok'] and d['schema_version']==8; print('JMM_HEALTH_OK',d)\"",
         "curl -fsS http://127.0.0.1:8770/v3/admin/service/status | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['scheduler']['enabled'] is False; assert d['collection']['active'] is False; print('JMM_STAGE_SCHEDULER_OFF')\"",
-        f"sudo -u ubuntu env JOB_HUNTER_MARKET_MAP_BASE_URL={shlex.quote(DEFAULT_JMM_URL)} {shlex.quote(args.jh_dir + '/.venv/bin/python')} -c \"from job_hunter_agent.job_market_map_client import JobMarketMapClient; c=JobMarketMapClient.from_environment(); p=c.feed_page(after_id=0,limit=1); assert p['items']; print('JH_CLIENT_READ_OK', p['items'][0]['id'], p['items'][0]['source'])\"",
+        f"sudo -u ubuntu env --chdir={shlex.quote(args.jh_dir)} JOB_HUNTER_MARKET_MAP_BASE_URL={shlex.quote(DEFAULT_JMM_URL)} {shlex.quote(args.jh_dir + '/.venv/bin/python')} -c \"from job_hunter_agent.job_market_map_client import JobMarketMapClient; c=JobMarketMapClient.from_environment(); p=c.feed_page(after_id=0,limit=1); assert p['items']; print('JH_CLIENT_READ_OK', p['items'][0]['id'], p['items'][0]['source'])\"",
         "systemctl stop job-market-map.service",
         "test \"$(systemctl is-active job-market-map.service 2>/dev/null || true)\" = inactive",
         "test \"$(systemctl is-active job-market-map-browser.service 2>/dev/null || true)\" = inactive",
@@ -267,7 +267,7 @@ def go_live(args: argparse.Namespace) -> int:
         "sleep 3",
         "test \"$(systemctl is-active job-hunter.service)\" = active",
         "curl -sS -o /dev/null -w '%{http_code}' http://127.0.0.1:8765/start | grep -Eq '^(200|302)$'",
-        f"sudo -u ubuntu env JOB_HUNTER_MARKET_MAP_BASE_URL={shlex.quote(DEFAULT_JMM_URL)} {shlex.quote(args.jh_dir + '/.venv/bin/python')} -c \"from job_hunter_agent.job_market_map_client import JobMarketMapClient; c=JobMarketMapClient.from_environment(); p=c.feed_page(after_id=0,limit=1); assert p['items']; print('JH_TO_JMM_GO_LIVE_OK',p['items'][0]['id'])\"",
+        f"sudo -u ubuntu env --chdir={shlex.quote(args.jh_dir)} JOB_HUNTER_MARKET_MAP_BASE_URL={shlex.quote(DEFAULT_JMM_URL)} {shlex.quote(args.jh_dir + '/.venv/bin/python')} -c \"from job_hunter_agent.job_market_map_client import JobMarketMapClient; c=JobMarketMapClient.from_environment(); p=c.feed_page(after_id=0,limit=1); assert p['items']; print('JH_TO_JMM_GO_LIVE_OK',p['items'][0]['id'])\"",
         "trap - ERR",
         "echo JMM_GO_LIVE_COMPLETE",
     ]
