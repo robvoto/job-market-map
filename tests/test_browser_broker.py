@@ -131,6 +131,17 @@ def test_browser_lost_classifies_only_recoverable_transport_failures():
     )
 
 
+def test_playwright_driver_lost_detects_dead_driver_pipe():
+    import collector.browser_broker as broker
+
+    assert broker._playwright_driver_lost(
+        broker.BrowserBrokerError("Connection closed while reading from the driver")
+    )
+    assert not broker._playwright_driver_lost(
+        broker.BrowserBrokerError("Target page, context or browser has been closed")
+    )
+
+
 def test_recover_browser_pages_preserves_page_ids_and_reuses_matching_tabs(monkeypatch):
     import collector.browser_broker as broker
 
@@ -275,6 +286,36 @@ def test_browser_command_recovers_from_playwright_browser_loss(monkeypatch):
     )
 
     result = broker.browser_command("snapshot", page_id=88)
+
+    assert result.result == {"ok": True}
+    assert recoveries == [True]
+    assert calls == ["snapshot", "snapshot"]
+
+
+def test_browser_command_restarts_playwright_driver_after_driver_pipe_loss(monkeypatch):
+    import collector.browser_broker as broker
+
+    class FakePlaywrightError(Exception):
+        pass
+
+    calls = []
+    recoveries = []
+
+    def fake_execute(command, payload, *, page_id, timeout_seconds):
+        calls.append(command)
+        if len(calls) == 1:
+            raise FakePlaywrightError("Connection closed while reading from the driver")
+        return {"ok": True}
+
+    def fake_recover(*, restart_playwright=False):
+        recoveries.append(restart_playwright)
+
+    monkeypatch.setattr(broker, "PlaywrightError", FakePlaywrightError)
+    monkeypatch.setattr(broker, "start_browser", lambda: None)
+    monkeypatch.setattr(broker, "_execute_browser_command", fake_execute)
+    monkeypatch.setattr(broker, "_recover_browser_pages", fake_recover)
+
+    result = broker.browser_command("snapshot", page_id=89)
 
     assert result.result == {"ok": True}
     assert recoveries == [True]

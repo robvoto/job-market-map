@@ -456,19 +456,28 @@ def _browser_lost(exc: Exception) -> bool:
     )
 
 
-def _recover_browser_pages() -> None:
-    global _browser, _context
+def _playwright_driver_lost(exc: Exception) -> bool:
+    """Return True when the Python client lost its Playwright driver process."""
+    return "connection closed while reading from the driver" in str(exc).casefold()
+
+
+def _recover_browser_pages(*, restart_playwright: bool = False) -> None:
+    global _pw_manager, _pw, _browser, _context
     targets = dict(_page_targets)
     _pages.clear()
     _browser = None
     _context = None
 
-    # Keep the existing Playwright driver alive. Starting another Sync API runtime
-    # while handling an in-flight Playwright exception is invalid.
-    if _pw is None:
-        raise BrowserBrokerError(
-            "persistent JMM browser recovery has no Playwright driver"
-        )
+    # The persistent Chrome service is independent from Playwright's Python driver.
+    # If the driver pipe itself died, reconnecting through the dead _pw object can
+    # hang the single browser worker forever. Restart only the Playwright client,
+    # then reconnect to the same persistent Chrome and restore registered page IDs.
+    if restart_playwright or _pw is None:
+        if _pw_manager is not None:
+            with suppress(Exception):
+                _pw_manager.stop()
+        _pw_manager = sync_playwright()
+        _pw = _pw_manager.start()
 
     deadline = time.monotonic() + 20.0
     last: Exception | None = None
@@ -627,7 +636,10 @@ def _browser_command_local(
                 command,
                 page_id,
             )
-            _recover_browser_pages()
+            if _playwright_driver_lost(exc):
+                _recover_browser_pages(restart_playwright=True)
+            else:
+                _recover_browser_pages()
             collection_logger().info(
                 "browser recovery completed command=%s page_id=%s", command, page_id
             )
@@ -647,7 +659,10 @@ def _browser_command_local(
                 command,
                 page_id,
             )
-            _recover_browser_pages()
+            if _playwright_driver_lost(wrapped):
+                _recover_browser_pages(restart_playwright=True)
+            else:
+                _recover_browser_pages()
             collection_logger().info(
                 "browser recovery completed command=%s page_id=%s", command, page_id
             )
