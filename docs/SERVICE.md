@@ -96,6 +96,10 @@ Fresh extra runs within the same 24-hour freshness period use exact SEEK `listin
 
 A daily refresh therefore cannot inherit yesterday's partition memberships and falsely claim current completeness.
 
+When SEEK failure hardening (JMM-014) exhausts a normal daily cycle without full completion (`BLOCKED_INCOMPLETE`), the run is archived and reset the same way rather than left resuming an unresolvable workspace; a scheduled SEEK failure gets at most one same-window retry after `scheduler.seek_failure_retry_minutes` (default 15 minutes), and a second same-day scheduled failure does not loop again.
+
+Rollover (`snapshot_and_reset_coverage`, JMM-015) archives each geography's current root summary into `seek_coverage_history`, then deletes every child/grandchild partition for that geography and resets only the reused state-root row (matched by URL) to PENDING. Earlier rollover code reset root fields without deleting children, so a later same-day root completion — for example a narrower incremental pass reporting fewer results than the split threshold — could mark the root COMPLETE while a prior cycle's orphaned classification/subclassification/work-type rows still counted as incomplete. Because children are now deleted rather than left PENDING, COMPLETE always implies `incomplete_partitions=0` for that geography. Canonical jobs/JDs are never touched by rollover.
+
 Operating cadence is source-specific rather than symmetric. LinkedIn runs every 4 hours with a 5-hour lookback because its 1,000-result ceiling makes wider whole-state rolling windows unsafe; it remains enabled on weekends. SEEK runs once daily over one day because it is browser-backed and can encounter human/security challenges. If both are due at midnight, the scheduler evaluates LinkedIn first; after that short HTTP pass releases the singleton collection lock, SEEK may start. Normal collection on both sources is card-only; JDs are demand-driven after dedupe.
 
 The scheduler only starts when the API was launched in service mode (`start-api.sh` / `service.sh`). Direct test imports do not create background collection.

@@ -107,6 +107,8 @@ JD acquisition is deliberately independent of collection order. Cross-source mat
 
 Extra fresh SEEK runs inside the normal 1-day window are incremental. SEEK's embedded search state supplies an exact UTC `listingDate` for each result card; when a previous **fresh** SEEK cycle completed recently, JMM scans newest-first back to two hours before that prior run started and stops once an exact, correctly ordered result page crosses that cutoff. If exact timestamps are missing/out of order, the cutoff is disabled and the collector continues as a full pass. A normal run roughly 24 hours after the previous run remains a full 1-day reconciliation, so incremental runs do not replace the daily safety net.
 
+SEEK failure hardening (JMM-014) gives a result page one exact reload/retry before treating it as a parse failure; a scheduled run that ends `BLOCKED_INCOMPLETE` may retry once later in the same run window after `scheduler.seek_failure_retry_minutes` (default 15 minutes), and does not retry a second time the same day. When a cycle completes or is rolled over into a fresh one, JMM-015 deletes the prior cycle's classification/subclassification/work-type partitions rather than leaving them PENDING, keeping only the reused state-root row. This guarantees a COMPLETE state root never coexists with leftover incomplete partitions from an earlier cycle.
+
 A one-off wider SEEK market pass can be run explicitly without changing the normal default:
 
 ```bash

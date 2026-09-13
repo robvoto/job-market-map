@@ -57,8 +57,15 @@ def all_states_complete(codes: list[str]) -> bool:
 def snapshot_and_reset_coverage(codes: list[str]) -> None:
     """Archive summary evidence, then reset only the current SEEK coverage workspace.
 
-    Canonical jobs remain untouched. This reset exists so a new daily coverage cycle
-    cannot inherit yesterday's partition memberships and falsely look complete.
+    Canonical jobs remain untouched. Only the state-level root partitions are kept
+    and reused (the next cycle re-matches them by URL); every child/grandchild
+    partition from the prior cycle is deleted rather than left PENDING. Leaving
+    a prior cycle's classification/subclassification/work-type rows in place let
+    a later same-day root completion (for example a narrower incremental pass
+    that finishes below the partition threshold without needing to split) report
+    root status COMPLETE while those orphaned rows still counted as incomplete,
+    breaking the invariant that COMPLETE implies zero incomplete partitions for
+    that geography (JMM-015).
     """
     if not codes:
         return
@@ -100,9 +107,17 @@ def snapshot_and_reset_coverage(codes: list[str]) -> None:
                 )
         conn.execute(
             f"""
+            DELETE FROM seek_partitions
+             WHERE geography_code IN ({placeholders}) AND parent_id IS NOT NULL
+            """,
+            codes,
+        )
+        conn.execute(
+            f"""
             DELETE FROM seek_partition_jobs
              WHERE partition_id IN (
-                 SELECT id FROM seek_partitions WHERE geography_code IN ({placeholders})
+                 SELECT id FROM seek_partitions
+                  WHERE geography_code IN ({placeholders}) AND parent_id IS NULL
              )
             """,
             codes,
@@ -112,7 +127,7 @@ def snapshot_and_reset_coverage(codes: list[str]) -> None:
             UPDATE seek_partitions
                SET status='PENDING', reported_results=NULL, collected_unique_jobs=0,
                    child_count=0, completed_at=NULL, last_error=NULL, updated_at=?
-             WHERE geography_code IN ({placeholders})
+             WHERE geography_code IN ({placeholders}) AND parent_id IS NULL
             """,
             (captured_at, *codes),
         )
