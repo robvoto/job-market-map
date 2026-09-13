@@ -78,6 +78,8 @@ A parent is complete only when all children are complete and their deduplicated 
 ## Browser/collection infrastructure
 SEEK uses one JMM-owned visible long-lived Chromium service/profile (`data/playwright_jmm_seek_user_data`), isolated from Rob's normal Chrome and Job Hunter's SEEK profile. SEEK runs attach/detach over localhost CDP and must not close/relaunch the browser between retries. **Do not use that browser for LinkedIn.** LinkedIn uses python-jobspy HTTP discovery plus a bounded direct public-HTML vacancy fetch after exact LinkedIn-ID dedupe. SQLite WAL is enabled and normal consumers use HTTP, so many agents may consume the API concurrently even while collection runs.
 
+All Playwright Sync API access must go through `collector/browser_broker.py`, which owns one dedicated Playwright thread. API, scheduler and collection callers may originate on different threads or an asyncio loop; do not move Playwright calls into FastAPI async handlers or create another Playwright runtime as a thread-affinity workaround.
+
 ## Admin/settings
 Operational knobs belong in settings/admin with helper text and validation, not scattered constants — see `.agents/skills/no-hardcoding/SKILL.md`. Retention, collection timing, partition thresholds, API page sizes, geography enablement and query enablement are admin-manageable where practical.
 

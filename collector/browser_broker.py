@@ -4,8 +4,10 @@ import atexit
 import itertools
 import os
 import subprocess
+import threading
 import time
 import urllib.request
+from concurrent.futures import ThreadPoolExecutor
 from contextlib import suppress
 from dataclasses import dataclass
 from pathlib import Path
@@ -57,6 +59,21 @@ _context = None
 _pages: dict[int, Page] = {}
 _page_targets: dict[int, str] = {}
 _page_ids = itertools.count(1)
+_browser_executor = ThreadPoolExecutor(max_workers=1, thread_name_prefix="jmm-browser")
+_browser_thread_id: int | None = None
+
+
+def _run_on_browser_thread(func, /, *args, **kwargs):
+    """Marshal synchronous Playwright work onto one dedicated worker thread."""
+    if threading.get_ident() == _browser_thread_id:
+        return func(*args, **kwargs)
+
+    def invoke():
+        global _browser_thread_id
+        _browser_thread_id = threading.get_ident()
+        return func(*args, **kwargs)
+
+    return _browser_executor.submit(invoke).result()
 
 
 def persistent_browser_ready(timeout: float = 0.5) -> bool:
@@ -397,12 +414,18 @@ def _detach_playwright(*, clear_targets: bool) -> None:
     _pw_manager = None
 
 
-def close_browser() -> None:
+def _close_browser_local() -> None:
     """Detach this client only; the JMM Chrome service intentionally stays open."""
     _detach_playwright(clear_targets=True)
 
 
-atexit.register(close_browser)
+def close_browser() -> None:
+    _run_on_browser_thread(_close_browser_local)
+
+
+# ThreadPoolExecutor shuts down before normal atexit handlers. Clearing the
+# references directly is safe here; driver-stop errors are already suppressed.
+atexit.register(_detach_playwright, clear_targets=True)
 
 
 def _page(page_id: int) -> Page:
@@ -575,7 +598,7 @@ def _execute_browser_command(
     raise BrowserBrokerError(f"unknown JMM browser command: {command}")
 
 
-def browser_command(
+def _browser_command_local(
     command: str,
     payload: dict[str, Any] | None = None,
     *,
@@ -584,7 +607,7 @@ def browser_command(
     profile: str = "jmm",
     _allow_recovery: bool = True,
 ) -> BrokerResponse:
-    """Compatibility dispatcher backed by JMM's persistent browser service."""
+    """Execute one broker command on the dedicated Playwright thread."""
     del profile
     payload = payload or {}
     started = time.perf_counter()
@@ -641,6 +664,27 @@ def browser_command(
     return BrokerResponse(result=result, elapsed_seconds=time.perf_counter() - started)
 
 
+def browser_command(
+    command: str,
+    payload: dict[str, Any] | None = None,
+    *,
+    page_id: int | None = None,
+    timeout_seconds: int = 30,
+    profile: str = "jmm",
+    _allow_recovery: bool = True,
+) -> BrokerResponse:
+    """Thread-safe public dispatcher for JMM's synchronous Playwright broker."""
+    return _run_on_browser_thread(
+        _browser_command_local,
+        command,
+        payload,
+        page_id=page_id,
+        timeout_seconds=timeout_seconds,
+        profile=profile,
+        _allow_recovery=_allow_recovery,
+    )
+
+
 def list_pages() -> BrokerResponse:
     return browser_command("list_pages")
 
@@ -649,7 +693,7 @@ def open_tab(url: str, *, active: bool = False) -> BrokerResponse:
     return browser_command("open_tab", {"url": url, "active": active})
 
 
-def focus_or_open_tab(url: str, *, host_suffix: str) -> BrokerResponse:
+def _focus_or_open_tab_local(url: str, *, host_suffix: str) -> BrokerResponse:
     """Bring an existing persistent-browser tab forward, or open it once if absent."""
     started = time.perf_counter()
     try:
@@ -677,6 +721,14 @@ def focus_or_open_tab(url: str, *, host_suffix: str) -> BrokerResponse:
         raise
     except Exception as exc:
         raise BrowserBrokerError(f"failed to focus/open persistent JMM browser tab: {exc}") from exc
+
+
+def focus_or_open_tab(url: str, *, host_suffix: str) -> BrokerResponse:
+    return _run_on_browser_thread(
+        _focus_or_open_tab_local,
+        url,
+        host_suffix=host_suffix,
+    )
 
 
 def close_tab(page_id: int) -> BrokerResponse:

@@ -1,3 +1,6 @@
+import threading
+from concurrent.futures import ThreadPoolExecutor
+
 import pytest
 
 from collector.browser_broker import BrowserBrokerError
@@ -5,6 +8,33 @@ from collector.browser_broker import BrowserBrokerError
 
 def test_browser_broker_error_is_runtime_error():
     assert issubclass(BrowserBrokerError, RuntimeError)
+
+
+def test_browser_commands_from_multiple_callers_share_one_playwright_thread(monkeypatch):
+    import collector.browser_broker as broker
+
+    caller_threads = []
+    browser_threads = []
+
+    monkeypatch.setattr(broker, "start_browser", lambda: None)
+
+    def fake_execute(command, payload, *, page_id, timeout_seconds):
+        del command, payload, page_id, timeout_seconds
+        browser_threads.append(threading.get_ident())
+        return {"thread_id": threading.get_ident()}
+
+    monkeypatch.setattr(broker, "_execute_browser_command", fake_execute)
+
+    def call_broker():
+        caller_threads.append(threading.get_ident())
+        return broker.browser_command("snapshot", page_id=1).result["thread_id"]
+
+    with ThreadPoolExecutor(max_workers=3) as callers:
+        results = list(callers.map(lambda _: call_broker(), range(6)))
+
+    assert len(set(results)) == 1
+    assert len(set(browser_threads)) == 1
+    assert results[0] not in set(caller_threads)
 
 
 def test_browser_attaches_to_long_lived_jmm_chrome():
