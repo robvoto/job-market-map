@@ -117,6 +117,7 @@ def stage(args: argparse.Namespace) -> int:
         "else echo STAGE_ROLLBACK_REMOVED_FAILED_FIRST_STAGE_DB; fi; fi; exit $rc; }; trap stage_rollback ERR"
     )
     commands = [
+        "#!/bin/bash",
         "set -euo pipefail",
         "STAGE_REPLACED=0",
         stage_rollback,
@@ -242,6 +243,7 @@ def go_live(args: argparse.Namespace) -> int:
         )
     )
     commands = [
+        "#!/bin/bash",
         "set -euo pipefail",
         go_live_rollback,
         "if systemctl is-active --quiet job-market-map.service || systemctl is-active --quiet job-market-map-browser.service; then echo 'JMM must be off before go-live' >&2; exit 30; fi",
