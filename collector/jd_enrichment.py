@@ -12,6 +12,7 @@ from collector.db import (
     store_job_jd_once,
     update_job_source_facts,
 )
+from collector.seek_jd import SeekJDUnavailableError
 
 
 class JDEnrichmentError(RuntimeError):
@@ -24,6 +25,10 @@ class UnsupportedJDSourceError(JDEnrichmentError):
 
 class JDSourceFetchError(JDEnrichmentError):
     """The source adapter could not obtain a validated JD."""
+
+
+class JDSourceUnavailableError(JDSourceFetchError):
+    """Every supported source explicitly says this vacancy is unavailable."""
 
 
 class FetchedJD:
@@ -119,6 +124,7 @@ def get_or_enrich_job_jd(job_id: int) -> dict[str, object]:
             )
 
         failures: list[str] = []
+        unavailable_failures = 0
         for candidate in supported:
             source = str(candidate.get("source") or "").strip().casefold()
             fetcher = _SOURCE_FETCHERS[source]
@@ -128,6 +134,15 @@ def get_or_enrich_job_jd(job_id: int) -> dict[str, object]:
                     raise JDSourceFetchError("source adapter returned an empty JD")
                 if not fetched.jd_source:
                     raise JDSourceFetchError("source adapter returned no JD provenance")
+            except SeekJDUnavailableError as exc:
+                # A terminal source response is market evidence. Persist it on
+                # that source row so consumers stop offering a dead vacancy.
+                update_job_source_facts(
+                    int(candidate["id"]), source_status=exc.source_status
+                )
+                unavailable_failures += 1
+                failures.append(f"{source}: {exc}")
+                continue
             except JDSourceFetchError as exc:
                 failures.append(f"{source}: {exc}")
                 continue
@@ -145,4 +160,7 @@ def get_or_enrich_job_jd(job_id: int) -> dict[str, object]:
             )
             return {"status": "enriched", **stored}
 
-        raise JDSourceFetchError("all linked JD sources failed: " + " | ".join(failures))
+        message = "all linked JD sources failed: " + " | ".join(failures)
+        if unavailable_failures == len(supported):
+            raise JDSourceUnavailableError(message)
+        raise JDSourceFetchError(message)

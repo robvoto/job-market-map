@@ -102,6 +102,26 @@ def test_fetch_failure_creates_no_jd_or_success_marker(tmp_path, monkeypatch):
         assert conn.execute("SELECT COUNT(*) FROM jd_fetch_registry").fetchone()[0] == 0
 
 
+def test_terminal_seek_unavailable_marks_source_and_is_not_retryable(tmp_path, monkeypatch):
+    enrichment = _wire(tmp_path, monkeypatch)
+    job_id = _insert_job()
+
+    from collector.seek_jd import SeekJDUnavailableError
+
+    def unavailable(_job):
+        raise SeekJDUnavailableError("SEEK listing is gone", source_status="not_found")
+
+    monkeypatch.setitem(enrichment._SOURCE_FETCHERS, "seek", unavailable)
+
+    with pytest.raises(enrichment.JDSourceUnavailableError, match="SEEK listing is gone"):
+        enrichment.get_or_enrich_job_jd(job_id)
+
+    with db.connect() as conn:
+        row = conn.execute("SELECT source_status FROM jobs WHERE id=?", (job_id,)).fetchone()
+        assert row["source_status"] == "not_found"
+        assert conn.execute("SELECT COUNT(*) FROM jd_fetch_registry").fetchone()[0] == 0
+
+
 def test_unsupported_source_fails_explicitly(tmp_path, monkeypatch):
     enrichment = _wire(tmp_path, monkeypatch)
     job_id = _insert_job(source="apsjobs", source_job_id="abc")

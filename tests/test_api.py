@@ -145,6 +145,16 @@ def test_neutral_feed_contains_no_user_activity_fields(tmp_path, monkeypatch):
         assert item["identity_key"].startswith("seek:id:")
 
 
+def test_feed_excludes_terminal_source_postings(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(2)
+        with db.connect() as conn:
+            conn.execute("UPDATE jobs SET source_status='not_found' WHERE id=1")
+
+        payload = client.get("/v3/feed/jobs", params={"limit": 10}).json()
+        assert [item["id"] for item in payload["items"]] == [2]
+
+
 def test_geography_admin_and_seek_coverage_api(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         geos = client.get("/v3/admin/geographies").json()["geographies"]
@@ -348,6 +358,22 @@ def test_v3_job_jd_endpoint_returns_get_or_enrich_result(tmp_path, monkeypatch):
         assert response.status_code == 200
         assert response.json()["status"] == "cached"
         assert response.json()["full_description"] == "Canonical JD"
+
+
+def test_v3_job_jd_returns_gone_when_all_sources_are_terminal(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        from api import main as api_main
+        from collector.jd_enrichment import JDSourceUnavailableError
+
+        def unavailable(_job_id):
+            raise JDSourceUnavailableError("all linked JD sources are unavailable")
+
+        monkeypatch.setattr(api_main, "get_or_enrich_job_jd", unavailable)
+        response = client.post("/v3/jobs/1/jd")
+
+        assert response.status_code == 410
+        assert response.json()["detail"] == "all linked JD sources are unavailable"
 
 
 def test_lookup_resolves_exact_source_and_source_job_id(tmp_path, monkeypatch):

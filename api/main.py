@@ -30,6 +30,7 @@ from collector.geographies import (
 )
 from collector.jd_enrichment import (
     JDSourceFetchError,
+    JDSourceUnavailableError,
     UnsupportedJDSourceError,
     get_or_enrich_job_jd,
 )
@@ -55,6 +56,7 @@ from collector.settings import (
     seed_settings,
     set_setting,
 )
+from collector.source_status import source_status_is_active_sql
 
 API_VERSION = "v3"
 SCHEMA_VERSION = 8
@@ -150,6 +152,7 @@ def _vacancy_active_clause(job_alias: str = "j") -> str:
               JOIN job_observation_state vacancy_state ON vacancy_state.job_id=vacancy_job.id
              WHERE (vacancy_job.id={job_alias}.id OR vacancy_job.primary_job_id={job_alias}.id)
                AND COALESCE(vacancy_state.archived,0)=0
+               AND {source_status_is_active_sql('vacancy_job.source_status')}
         )
     """
 
@@ -406,6 +409,8 @@ def job_jd(job_id: int):
         raise HTTPException(404, "job not found") from None
     except UnsupportedJDSourceError as exc:
         raise HTTPException(422, str(exc)) from None
+    except JDSourceUnavailableError as exc:
+        raise HTTPException(410, str(exc)) from None
     except JDSourceFetchError as exc:
         raise HTTPException(502, str(exc)) from None
     return {

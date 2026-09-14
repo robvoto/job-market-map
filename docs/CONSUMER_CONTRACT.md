@@ -58,6 +58,8 @@ POST /v3/jobs/{id}/jd
 
 This is idempotent get-or-enrich behaviour. JMM returns an existing canonical JD without refetching. If the JD is absent and the source is supported, JMM performs the source-specific fetch through its own adapter, stores the one canonical JD write-once, and returns it. SEEK and LinkedIn are currently supported: SEEK uses JMM's persistent SEEK browser, while LinkedIn uses direct public HTTP. Unsupported sources and source-fetch failures are explicit; consumers do not scrape the source page or write JMM SQLite themselves.
 
+If every linked source explicitly confirms that a vacancy is unavailable, JMM records those terminal source facts, excludes the vacancy from future active feeds, and responds with HTTP 410. A 502 remains a transient source-fetch failure that consumers may retry.
+
 ## Exact source-identity lookup
 
 ```text

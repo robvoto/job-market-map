@@ -17,6 +17,7 @@ from collector.browser_broker import (
 from collector.db import connect, store_job_jd_once, update_job_source_facts
 from collector.run_logging import collection_logger
 from collector.settings import get_setting
+from collector.source_status import source_status_is_active_sql
 
 SYDNEY = ZoneInfo("Australia/Sydney")
 _TRANSIENT_SWEEP_COOLDOWN_SECONDS = 300.0
@@ -457,7 +458,7 @@ def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
               LEFT JOIN jobs primary_job
                 ON primary_job.id=COALESCE(j.primary_job_id,j.id)
               LEFT JOIN jd_fetch_registry r ON r.identity_key=primary_job.identity_key
-             WHERE j.source='seek' AND COALESCE(j.source_status,'') NOT IN ('no_longer_advertised','not_found') AND p.geography_code IN ({placeholders})
+             WHERE j.source='seek' AND {source_status_is_active_sql('j.source_status')} AND p.geography_code IN ({placeholders})
              ORDER BY j.id
             """,
             codes,
@@ -480,7 +481,7 @@ def all_unfetched_seek_jobs() -> list[dict]:
               LEFT JOIN jobs primary_job
                 ON primary_job.id=COALESCE(j.primary_job_id,j.id)
               LEFT JOIN jd_fetch_registry r ON r.identity_key=primary_job.identity_key
-             WHERE j.source='seek' AND r.identity_key IS NULL AND COALESCE(j.source_status,'') NOT IN ('no_longer_advertised','not_found')
+             WHERE j.source='seek' AND r.identity_key IS NULL AND {source_status_is_active_sql('j.source_status')}
              ORDER BY j.id
             """
         ).fetchall()

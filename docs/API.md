@@ -30,6 +30,8 @@ When JMM has obtained a full JD, job payloads also expose the one current neutra
 
 `POST /v3/jobs/{id}/jd` is the supported get-or-enrich operation. If the canonical JD already exists, JMM returns it without reopening the source. If it is missing, JMM selects the source adapter, fetches validated neutral source evidence, stores the JD once, records permanent successful-fetch memory, and returns it. SEEK uses JMM's persistent SEEK browser; LinkedIn uses a direct public-HTTP detail helper and has no browser dependency. LinkedIn market discovery itself remains cards-only. Unsupported sources fail explicitly; consumers must not fetch a JD themselves and write JMM storage directly.
 
+When every linked source explicitly reports the vacancy unavailable, JMM records the terminal source status, removes that vacancy from normal active feeds, and returns HTTP 410 from this endpoint. Transient fetch failures remain HTTP 502 and are retryable.
+
 ## Consumer checkpoints
 
 ```text
