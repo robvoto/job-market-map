@@ -3,7 +3,11 @@ from __future__ import annotations
 from collector.browser_broker import BrowserBrokerError, close_tab, open_tab
 from collector.jd_enrichment import FetchedJD, JDSourceFetchError
 from collector.run_logging import collection_logger
-from collector.seek_jd import SeekJDFetchError, fetch_seek_detail_with_navigation_retry
+from collector.seek_jd import (
+    SeekJDFetchError,
+    SeekJDUnavailableError,
+    fetch_seek_detail_with_navigation_retry,
+)
 
 
 def fetch_seek_jd_for_job(job: dict[str, object]) -> FetchedJD:
@@ -22,6 +26,10 @@ def fetch_seek_jd_for_job(job: dict[str, object]) -> FetchedJD:
             expected_source_job_id=source_job_id,
             job_id=int(job["id"]),
         )
+    except SeekJDUnavailableError:
+        # Terminal source evidence must reach the JMM enrichment owner so it
+        # can retire the posting rather than treating it as a retryable fault.
+        raise
     except (BrowserBrokerError, SeekJDFetchError, KeyError, TypeError, ValueError) as exc:
         raise JDSourceFetchError(f"SEEK JD fetch failed: {exc}") from exc
     finally:
