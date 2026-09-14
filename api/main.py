@@ -308,6 +308,11 @@ def consumer_state(consumer_key: str):
 @app.get(f"/{API_VERSION}/consumers/{{consumer_key}}/feed")
 def consumer_feed(
     consumer_key: str,
+    through_id: int | None = Query(
+        None,
+        ge=0,
+        description="Optional run-scoped high-water job id returned by the first consumer page.",
+    ),
     limit: int | None = Query(None, ge=1),
     geography_code: str | None = None,
     source: str | None = None,
@@ -316,7 +321,7 @@ def consumer_feed(
     checkpoint = get_checkpoint(consumer_key)
     return job_feed(
         after_id=int(checkpoint["last_job_id"]),
-        through_id=None,
+        through_id=through_id,
         limit=limit,
         source=source,
         geography_code=geography_code,

@@ -36,7 +36,7 @@ Persist `next_cursor` only after safely processing the returned items. A feed re
 Named consumers may use:
 
 ```text
-GET  /v3/consumers/job-hunter/feed
+GET  /v3/consumers/job-hunter/feed?through_id=<optional-run-high-water>
 POST /v3/consumers/job-hunter/checkpoint
 GET  /v3/consumers/plan-z/feed
 POST /v3/consumers/plan-z/checkpoint
@@ -45,6 +45,8 @@ POST /v3/consumers/reset-edge/checkpoint
 ```
 
 Each consumer checkpoint is independent. A checkpoint answers only: "how far has this workflow safely processed the shared feed?"
+
+For one stable multi-page consumer run, the first feed response returns `snapshot_max_id`. The consumer keeps that value only in memory for that run and sends it as `through_id` on every later feed page. Jobs created after that boundary wait for the next run. `through_id` is never persisted as personal activity or as a permanent consumer-checkpoint field. If the run fails after a page was safely checkpointed, the next run starts from that saved checkpoint and captures a new `snapshot_max_id`.
 
 ## Canonical JD retrieval
 

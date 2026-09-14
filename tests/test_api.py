@@ -244,6 +244,53 @@ def test_feed_derives_vacancy_freshness_across_linked_sources(tmp_path, monkeypa
         assert item["vacancy_archived"] is False
 
 
+def test_named_consumer_feed_end_to_end_keeps_one_run_high_water_across_checkpoints(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(2)
+        first = client.get(
+            "/v3/consumers/job-hunter/feed", params={"limit": 1}
+        ).json()
+        assert first["snapshot_max_id"] == 2
+        assert [item["id"] for item in first["items"]] == [1]
+
+        with db.connect() as conn:
+            newest = conn.execute(
+                """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer)
+                   VALUES('seek','3','https://seek.test/3','Role 3','Acme')"""
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO job_observation_state(
+                    job_id,first_seen_at,last_seen_at,capture_count,archived
+                ) VALUES(?,?,?,1,0)""",
+                (newest, "2026-09-10T00:00:00+00:00", "2026-09-10T00:00:00+00:00"),
+            )
+        assert newest == 3
+
+        saved = client.post(
+            "/v3/consumers/job-hunter/checkpoint",
+            json={"last_job_id": first["next_cursor"]},
+        )
+        assert saved.status_code == 200
+
+        second = client.get(
+            "/v3/consumers/job-hunter/feed",
+            params={"limit": 10, "through_id": first["snapshot_max_id"]},
+        ).json()
+        assert second["snapshot_max_id"] == 2
+        assert [item["id"] for item in second["items"]] == [2]
+        assert second["has_more"] is False
+
+        client.post(
+            "/v3/consumers/job-hunter/checkpoint",
+            json={"last_job_id": second["next_cursor"]},
+        )
+        next_run = client.get(
+            "/v3/consumers/job-hunter/feed", params={"limit": 10}
+        ).json()
+        assert next_run["snapshot_max_id"] == 3
+        assert [item["id"] for item in next_run["items"]] == [3]
+
+
 def test_named_consumer_feed_uses_independent_api_checkpoint(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         insert_jobs(3)

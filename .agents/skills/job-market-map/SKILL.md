@@ -59,7 +59,7 @@ Unknown beats inference. Capture rich card evidence because it materially improv
 ## API/consumer rule
 External consumers use `/v3`; never couple them to SQLite columns. `identity_key` is the stable market reference for joining to Job Hunter/JH-305 personal history. Full contract: `docs/API.md` and `docs/CONSUMER_CONTRACT.md`.
 
-For a stable multi-page neutral market snapshot, call `/v3/feed/jobs` once without `through_id`, retain the returned `snapshot_max_id`, and send it back as `through_id` on every later page. This prevents jobs arriving mid-scan from moving the snapshot boundary.
+For a stable multi-page neutral market snapshot, call `/v3/feed/jobs` or a named `/v3/consumers/{consumer_key}/feed` once without `through_id`, retain the returned `snapshot_max_id`, and send it back as `through_id` on every later page in that run. The value is transient run state, not a permanent checkpoint field. This prevents jobs arriving mid-scan from moving the snapshot boundary.
 
 Named feed checkpoints belong here:
 - `/v3/consumers/job-hunter/feed`

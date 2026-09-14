@@ -22,7 +22,7 @@ POST /v3/jobs/{id}/jd
 GET /v3/coverage/seek
 ```
 
-`GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. Job payloads contain `identity_key` for stable cross-service correlation.
+`GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. The first page returns `snapshot_max_id`; a multi-page caller may pass that value back as `through_id` on later pages to keep one run on a fixed market boundary. Job payloads contain `identity_key` for stable cross-service correlation.
 
 When JMM has obtained a full JD, job payloads also expose the one current neutral JD as `full_description`, `jd_fetched_at`, and `jd_source`. JMM does not expose JD snapshot/version history.
 
@@ -38,7 +38,7 @@ GET  /v3/consumers/{consumer_key}/feed
 POST /v3/consumers/{consumer_key}/checkpoint
 ```
 
-Fetching does not advance a checkpoint. Advance only after safe processing. This state belongs here because it describes consumption of this feed, not user behaviour.
+Fetching does not advance a checkpoint. Advance only after safe processing. The consumer feed also accepts optional `through_id`: capture `snapshot_max_id` from the first page of a run and send that same value on every later page in that run. The high-water is transient run state, not a persisted checkpoint field or personal activity. If a run fails, the next run starts a fresh snapshot boundary from the last safely saved checkpoint. This state belongs here because it describes consumption of this feed, not user behaviour.
 
 ## Personal activity
 
