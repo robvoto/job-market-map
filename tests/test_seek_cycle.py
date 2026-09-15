@@ -88,6 +88,48 @@ def test_incomplete_rollover_preserves_leaf_diagnostics(tmp_path, monkeypatch):
     assert root["status"] == "PENDING"
 
 
+def test_incomplete_rollover_preserves_aggregate_diagnostic_when_leaves_completed(
+    tmp_path, monkeypatch
+):
+    cycle = _wire(tmp_path, monkeypatch)
+    with db.connect() as conn:
+        root_id = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,reported_results,
+                collected_unique_jobs,max_results_threshold,first_seen_at,updated_at,last_error
+            ) VALUES(
+                'NSW',NULL,'state','NSW','https://seek.test/nsw',
+                'INCOMPLETE_CHILD_COVERAGE',20,17,450,'x','x',
+                'Aggregate count mismatch after final state recheck: started=20, refreshed=20, covered=17, tolerance=0'
+            )"""
+        ).lastrowid
+        conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,reported_results,
+                collected_unique_jobs,max_results_threshold,first_seen_at,updated_at
+            ) VALUES(
+                'NSW',?,'classification','ICT','https://seek.test/nsw/ict',
+                'COMPLETE',20,17,450,'x','x'
+            )""",
+            (root_id,),
+        )
+
+    cycle.snapshot_and_reset_coverage(["NSW"])
+
+    with db.connect() as conn:
+        diagnostic = conn.execute(
+            "SELECT hierarchy_label,status,reported_results,collected_unique_jobs,last_error "
+            "FROM seek_coverage_diagnostics"
+        ).fetchone()
+    assert tuple(diagnostic[:4]) == (
+        "NSW",
+        "INCOMPLETE_CHILD_COVERAGE",
+        20,
+        17,
+    )
+    assert "Aggregate count mismatch" in diagnostic["last_error"]
+
+
 def test_rollover_deletes_stale_child_partitions_and_keeps_root(tmp_path, monkeypatch):
     """JMM-015: yesterday's classification/work-type split must not survive rollover.
 

@@ -232,6 +232,172 @@ def test_parent_remains_incomplete_if_any_child_incomplete(tmp_path, monkeypatch
     assert children == 1
 
 
+def test_state_root_reconciles_against_final_seek_count(tmp_path, monkeypatch):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    db.init_db()
+    with db.connect() as conn:
+        root = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,reported_results,
+                max_results_threshold,first_seen_at,updated_at
+            ) VALUES('NSW',NULL,'state','NSW','https://x/nsw','INSPECTED',26,450,'x','x')"""
+        ).lastrowid
+        child = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,max_results_threshold,
+                first_seen_at,updated_at
+            ) VALUES('NSW',?,'classification','ICT','https://x/nsw/ict','COMPLETE',450,'x','x')""",
+            (root,),
+        ).lastrowid
+        for number in range(17):
+            job_id = conn.execute(
+                "INSERT INTO jobs(source,source_job_id,canonical_url) VALUES('seek',?,?)",
+                (str(number), f"https://job/{number}"),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+                (child, job_id, "x"),
+            )
+
+    rechecks = []
+    monkeypatch.setattr(
+        market,
+        "_navigate_and_wait_snapshot",
+        lambda page_id, url, **_kwargs: (
+            rechecks.append((page_id, url)) or {"text": "21 jobs in New South Wales"}
+        ),
+    )
+    market._finalize_parent_coverage(
+        42,
+        partition_id=root,
+        level="state",
+        url="https://x/nsw",
+        reported=26,
+        tolerance=5,
+    )
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status,reported_results,collected_unique_jobs,last_error "
+            "FROM seek_partitions WHERE id=?",
+            (root,),
+        ).fetchone()
+    assert rechecks == [(42, "https://x/nsw")]
+    assert tuple(row) == ("COMPLETE_BY_PARTITION_RECONCILED", 21, 17, None)
+
+
+def test_state_root_stays_incomplete_when_final_count_remains_short(
+    tmp_path, monkeypatch
+):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    db.init_db()
+    with db.connect() as conn:
+        root = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,reported_results,
+                max_results_threshold,first_seen_at,updated_at
+            ) VALUES('QLD',NULL,'state','QLD','https://x/qld','INSPECTED',26,450,'x','x')"""
+        ).lastrowid
+        child = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,max_results_threshold,
+                first_seen_at,updated_at
+            ) VALUES('QLD',?,'classification','ICT','https://x/qld/ict','COMPLETE',450,'x','x')""",
+            (root,),
+        ).lastrowid
+        for number in range(17):
+            job_id = conn.execute(
+                "INSERT INTO jobs(source,source_job_id,canonical_url) VALUES('seek',?,?)",
+                (str(number), f"https://job/{number}"),
+            ).lastrowid
+            conn.execute(
+                "INSERT INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
+                (child, job_id, "x"),
+            )
+
+    monkeypatch.setattr(
+        market,
+        "_navigate_and_wait_snapshot",
+        lambda *_args, **_kwargs: {"text": "26 jobs in Queensland"},
+    )
+    market._finalize_parent_coverage(
+        42,
+        partition_id=root,
+        level="state",
+        url="https://x/qld",
+        reported=26,
+        tolerance=5,
+    )
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status,reported_results,collected_unique_jobs,last_error "
+            "FROM seek_partitions WHERE id=?",
+            (root,),
+        ).fetchone()
+    assert tuple(row[:3]) == ("INCOMPLETE_CHILD_COVERAGE", 26, 17)
+    assert "started=26, refreshed=26, covered=17, tolerance=5" in row["last_error"]
+
+
+def test_state_root_does_not_recheck_until_every_child_is_complete(
+    tmp_path, monkeypatch
+):
+    import sources.seek_market_map as market
+    from collector import db
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    monkeypatch.setattr(
+        market,
+        "_navigate_and_wait_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("final recheck must wait for completed children")
+        ),
+    )
+    db.init_db()
+    with db.connect() as conn:
+        root = conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,reported_results,
+                max_results_threshold,first_seen_at,updated_at
+            ) VALUES('QLD',NULL,'state','QLD','https://x/qld','INSPECTED',1,450,'x','x')"""
+        ).lastrowid
+        conn.execute(
+            """INSERT INTO seek_partitions(
+                geography_code,parent_id,level,label,url,status,max_results_threshold,
+                first_seen_at,updated_at
+            ) VALUES('QLD',?,'classification','ICT','https://x/qld/ict',
+                     'INCOMPLETE_COUNT_MISMATCH',450,'x','x')""",
+            (root,),
+        )
+
+    market._finalize_parent_coverage(
+        42,
+        partition_id=root,
+        level="state",
+        url="https://x/qld",
+        reported=1,
+        tolerance=0,
+    )
+
+    with db.connect() as conn:
+        status = conn.execute(
+            "SELECT status FROM seek_partitions WHERE id=?", (root,)
+        ).fetchone()[0]
+    assert status == "INCOMPLETE_CHILD_COVERAGE"
+
+
 def test_oversize_work_type_is_explicitly_unsplittable_not_complete(
     tmp_path, monkeypatch
 ):

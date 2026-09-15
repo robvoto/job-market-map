@@ -607,6 +607,92 @@ def _aggregate_parent(
     return status, len(ids), len(children)
 
 
+def _all_children_complete(partition_id: int) -> bool:
+    with connect() as conn:
+        statuses = [
+            str(row[0])
+            for row in conn.execute(
+                "SELECT status FROM seek_partitions WHERE parent_id=?", (partition_id,)
+            )
+        ]
+    return bool(statuses) and all(status.startswith("COMPLETE") for status in statuses)
+
+
+def _refresh_seek_result_count(
+    page_id: int,
+    url: str,
+    *,
+    should_stop: Callable[[], bool] | None = None,
+) -> int:
+    """Read a fresh result count without treating a changing market as coverage."""
+    snap = _navigate_and_wait_snapshot(page_id, url, should_stop=should_stop)
+    text = str(snap.get("text") or "")
+    if any(marker in text.casefold() for marker in TERMINAL_TEXT):
+        return 0
+    refreshed = seek_result_count(text)
+    if refreshed is None:
+        raise SeekParseError("SEEK did not expose result count during final state recheck")
+    return refreshed
+
+
+def _finalize_parent_coverage(
+    page_id: int,
+    *,
+    partition_id: int,
+    level: str,
+    url: str,
+    reported: int,
+    tolerance: int,
+    should_stop: Callable[[], bool] | None = None,
+) -> None:
+    """Persist parent coverage, reconciling a moved state total once at scan end.
+
+    A state crawl can take long enough for SEEK's total to change. We re-read only
+    the state root, only when every child completed, and only accept completion
+    when the fresh total meets the existing tolerance. A real remaining shortfall
+    stays incomplete and records both observed totals for the next investigation.
+    """
+    status, collected, child_count = _aggregate_parent(
+        partition_id, reported, tolerance
+    )
+    error = None
+    if (
+        level == "state"
+        and status == "INCOMPLETE_CHILD_COVERAGE"
+        and _all_children_complete(partition_id)
+    ):
+        initial_reported = reported
+        refreshed_reported = _refresh_seek_result_count(
+            page_id, url, should_stop=should_stop
+        )
+        reported = refreshed_reported
+        if collected + tolerance >= refreshed_reported:
+            status = "COMPLETE_BY_PARTITION_RECONCILED"
+            collection_logger().info(
+                "SEEK state coverage reconciled against final result count url=%s "
+                "initial_reported=%s refreshed_reported=%s covered=%s tolerance=%s",
+                url,
+                initial_reported,
+                refreshed_reported,
+                collected,
+                tolerance,
+            )
+        else:
+            error = (
+                "Aggregate count mismatch after final state recheck: "
+                f"started={initial_reported}, refreshed={refreshed_reported}, "
+                f"covered={collected}, tolerance={tolerance}"
+            )
+    _update_partition(
+        partition_id,
+        status=status,
+        reported=reported,
+        collected=collected,
+        child_count=child_count,
+        error=error,
+    )
+
+
 def _partition_state(partition_id: int) -> tuple[dict, list[dict]]:
     with connect() as conn:
         row = conn.execute(
@@ -629,6 +715,8 @@ def _resume_existing_children(
     *,
     geography: dict,
     partition_id: int,
+    level: str,
+    url: str,
     reported: int,
     threshold: int,
     tolerance: int,
@@ -653,15 +741,14 @@ def _resume_existing_children(
             cutoff_at=cutoff_at,
             should_stop=should_stop,
         )
-    status, collected, child_count = _aggregate_parent(
-        partition_id, reported, tolerance
-    )
-    _update_partition(
-        partition_id,
-        status=status,
+    _finalize_parent_coverage(
+        page_id,
+        partition_id=partition_id,
+        level=level,
+        url=url,
         reported=reported,
-        collected=collected,
-        child_count=child_count,
+        tolerance=tolerance,
+        should_stop=should_stop,
     )
 
 
@@ -705,6 +792,8 @@ def _process_partition(
                 page_id,
                 geography=geography,
                 partition_id=partition_id,
+                level=level,
+                url=url,
                 reported=int(current["reported_results"]),
                 threshold=threshold,
                 tolerance=tolerance,
@@ -789,15 +878,14 @@ def _process_partition(
                 cutoff_at=cutoff_at,
                 should_stop=should_stop,
             )
-        status, collected, child_count = _aggregate_parent(
-            partition_id, reported, tolerance
-        )
-        _update_partition(
-            partition_id,
-            status=status,
+        _finalize_parent_coverage(
+            page_id,
+            partition_id=partition_id,
+            level=level,
+            url=url,
             reported=reported,
-            collected=collected,
-            child_count=child_count,
+            tolerance=tolerance,
+            should_stop=should_stop,
         )
     except SeekHumanCheckRequired as exc:
         _update_partition(partition_id, status="BLOCKED_HUMAN", error=str(exc))

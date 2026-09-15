@@ -84,6 +84,20 @@ def _archive_incomplete_leaf_diagnostics(
         """,
         (root_id,),
     ).fetchall()
+    if not leaves:
+        leaves = conn.execute(
+            """
+            SELECT id,geography_code,label AS hierarchy_label,url,status,
+                   reported_results,collected_unique_jobs,
+                   COALESCE(
+                       last_error,
+                       'All child partitions completed, but aggregate coverage was short.'
+                   ) AS last_error
+              FROM seek_partitions
+             WHERE id=?
+            """,
+            (root_id,),
+        ).fetchall()
     conn.executemany(
         """
         INSERT INTO seek_coverage_diagnostics(
