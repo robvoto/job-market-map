@@ -263,6 +263,15 @@ CREATE TABLE IF NOT EXISTS consumer_checkpoints (
     note TEXT
 );
 
+-- A source page can be available while not exposing its original posting date.
+-- Retain that bounded repair outcome so it is not requested again indefinitely.
+CREATE TABLE IF NOT EXISTS posted_at_repair_attempts (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    outcome TEXT NOT NULL,
+    attempted_at TEXT NOT NULL
+);
+
 -- Long-running collection/service control. This is neutral operational state,
 -- not user/job activity.
 CREATE TABLE IF NOT EXISTS market_collection_runs (

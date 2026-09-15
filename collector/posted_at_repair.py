@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from datetime import UTC, datetime
 
 from collector.db import connect, update_job_source_facts
 from collector.linkedin_detail import LinkedInDetailError, fetch_linkedin_detail
@@ -21,8 +22,8 @@ class PostedAtRepairResult:
 def repair_linkedin_posted_at(*, limit: int) -> PostedAtRepairResult:
     """Fill missing LinkedIn dates from current exact source detail only.
 
-    A closed page may prove the source status but not expose its original date;
-    that status is persisted so the same retired posting is not retried forever.
+    A source page may not expose its original date. The evidence outcome is
+    persisted so the same page is not requested again indefinitely.
     """
     if limit < 1:
         raise ValueError("limit must be positive")
@@ -36,6 +37,11 @@ def repair_linkedin_posted_at(*, limit: int) -> PostedAtRepairResult:
                 WHERE source = 'linkedin'
                   AND posted_at IS NULL
                   AND source_status IS NULL
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM posted_at_repair_attempts AS attempt
+                      WHERE attempt.job_id = jobs.id
+                  )
                 ORDER BY id
                 LIMIT ?
                 """,
@@ -55,10 +61,26 @@ def repair_linkedin_posted_at(*, limit: int) -> PostedAtRepairResult:
         update_job_source_facts(int(job["id"]), **facts)
         if detail.posted_at:
             filled += 1
+            outcome = "filled"
         elif detail.source_status:
             closed += 1
+            outcome = "closed_without_exact_date"
         else:
             without_exact_date += 1
+            outcome = "source_date_unavailable"
+        with connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO posted_at_repair_attempts(job_id, source, outcome, attempted_at)
+                VALUES (?, 'linkedin', ?, ?)
+                ON CONFLICT(job_id) DO NOTHING
+                """,
+                (
+                    int(job["id"]),
+                    outcome,
+                    datetime.now(UTC).isoformat(timespec="seconds"),
+                ),
+            )
     return PostedAtRepairResult(
         candidates=len(candidates),
         checked=checked,

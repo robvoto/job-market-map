@@ -39,22 +39,37 @@ def test_repair_linkedin_fills_exact_date_and_retires_closed_source(tmp_path, mo
             title="Senior Business Analyst",
         )
     )
+    third = ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="li-3",
+            canonical_url="https://www.linkedin.com/jobs/view/3",
+            title="Principal Business Analyst",
+        )
+    )
 
     def fetch(url: str) -> LinkedInDetailEvidence:
-        return (
-            _detail(posted_at="2026-09-15")
-            if url.endswith("/1")
-            else _detail(posted_at=None, source_status="no_longer_accepting_applications")
-        )
+        if url.endswith("/1"):
+            return _detail(posted_at="2026-09-15")
+        if url.endswith("/2"):
+            return _detail(posted_at=None, source_status="no_longer_accepting_applications")
+        return _detail(posted_at=None)
 
     monkeypatch.setattr(posted_at_repair, "fetch_linkedin_detail", fetch)
-    result = posted_at_repair.repair_linkedin_posted_at(limit=2)
+    result = posted_at_repair.repair_linkedin_posted_at(limit=3)
 
     assert result.filled == 1
     assert result.closed == 1
+    assert result.without_exact_date == 1
     assert result.failures == 0
     with db.connect() as conn:
         first_row = conn.execute("SELECT posted_at FROM jobs WHERE id=?", (first.job_id,)).fetchone()
         second_row = conn.execute("SELECT source_status FROM jobs WHERE id=?", (second.job_id,)).fetchone()
+        third_row = conn.execute(
+            "SELECT outcome FROM posted_at_repair_attempts WHERE job_id=?",
+            (third.job_id,),
+        ).fetchone()
     assert first_row[0] == "2026-09-15"
     assert second_row[0] == "no_longer_accepting_applications"
+    assert third_row[0] == "source_date_unavailable"
+    assert posted_at_repair.repair_linkedin_posted_at(limit=3).candidates == 0
