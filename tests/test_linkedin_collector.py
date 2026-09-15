@@ -8,7 +8,7 @@ from collector.models import CardObservation
 from sources import linkedin_collector
 
 
-def _row(job_id: str = "li-4464190406") -> pd.DataFrame:
+def _row(job_id: str = "li-4464190406", *, date_posted: str | None = "2026-09-11") -> pd.DataFrame:
     numeric = job_id.removeprefix("li-")
     return pd.DataFrame(
         [
@@ -18,7 +18,7 @@ def _row(job_id: str = "li-4464190406") -> pd.DataFrame:
                 "company": "Example Co",
                 "location": "Sydney, NSW, Australia",
                 "job_url": f"https://www.linkedin.com/jobs/view/{numeric}",
-                "date_posted": "2026-09-11",
+                "date_posted": date_posted,
                 "is_remote": False,
             }
         ]
@@ -44,7 +44,9 @@ def test_linkedin_card_date_fallback_does_not_infer_relative_text():
     assert linkedin_collector._card_posted_at(card) is None
 
 
-def _detail(*, description: str | None = None) -> LinkedInDetailEvidence:
+def _detail(
+    *, description: str | None = None, posted_at: str | None = None
+) -> LinkedInDetailEvidence:
     return LinkedInDetailEvidence(
         full_description=description or ("A detailed LinkedIn job description. " * 10),
         apply_url=None,
@@ -54,6 +56,7 @@ def _detail(*, description: str | None = None) -> LinkedInDetailEvidence:
         source_status=None,
         applicant_count=30,
         header_text="Reposted 1 day ago · 30 applicants",
+        posted_at=posted_at,
     )
 
 
@@ -70,9 +73,13 @@ def test_linkedin_chunk_uses_jobspy_then_one_detail_response_for_all_neutral_fie
     monkeypatch.setattr(
         linkedin_collector,
         "_fetch_jobspy_isolated",
-        lambda params, should_stop: calls.append(params) or _row(),
+        lambda params, should_stop: calls.append(params) or _row(date_posted=None),
     )
-    monkeypatch.setattr(linkedin_collector, "fetch_linkedin_detail", lambda _url: _detail())
+    monkeypatch.setattr(
+        linkedin_collector,
+        "fetch_linkedin_detail",
+        lambda _url: _detail(posted_at="2026-09-10"),
+    )
 
     result = linkedin_collector.collect_linkedin_chunk(
         "business analyst",
@@ -98,6 +105,7 @@ def test_linkedin_chunk_uses_jobspy_then_one_detail_response_for_all_neutral_fie
         assert job["apply_method"] == "easy_apply"
         assert job["reposted"] == 1
         assert job["applicant_count"] == 30
+        assert job["posted_at"] == "2026-09-10"
         assert conn.execute("SELECT COUNT(*) FROM jd_fetch_registry").fetchone()[0] == 1
 
 

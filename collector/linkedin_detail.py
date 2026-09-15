@@ -60,6 +60,7 @@ class _LinkedInPageParser(HTMLParser):
         self._description_depth: int | None = None
         self._header_chunks: list[str] = []
         self._description_chunks: list[str] = []
+        self._posted_at: str | None = None
 
     def handle_starttag(self, tag: str, attrs) -> None:
         if tag.casefold() in self._VOID_TAGS:
@@ -68,6 +69,10 @@ class _LinkedInPageParser(HTMLParser):
         classes = set(str(dict(attrs).get("class") or "").split())
         if classes.intersection(HEADER_CLASS_TOKENS):
             self._header_depths.append(self._depth)
+        if tag.casefold() == "time" and self._header_depths and self._posted_at is None:
+            value = str(dict(attrs).get("datetime") or "").strip()
+            if value:
+                self._posted_at = value
         if self._description_depth is None and self._DESCRIPTION_CLASS in classes:
             self._description_depth = self._depth
 
@@ -102,6 +107,10 @@ class _LinkedInPageParser(HTMLParser):
     def description(self) -> str:
         return self._clean(self._description_chunks)
 
+    @property
+    def posted_at(self) -> str | None:
+        return self._posted_at
+
 
 @dataclass(frozen=True)
 class LinkedInDetailEvidence:
@@ -113,6 +122,7 @@ class LinkedInDetailEvidence:
     source_status: str | None
     applicant_count: int | None
     header_text: str
+    posted_at: str | None = None
 
     @property
     def facts(self) -> dict[str, object]:
@@ -124,6 +134,8 @@ class LinkedInDetailEvidence:
         }
         if self.source_status:
             facts["source_status"] = self.source_status
+        if self.posted_at:
+            facts["posted_at"] = self.posted_at
         return {key: value for key, value in facts.items() if value is not None}
 
 
@@ -180,6 +192,7 @@ def parse_linkedin_detail_html(html: str, *, canonical_url: str) -> LinkedInDeta
         reposted=bool(REPOSTED_RE.search(header)),
         source_status="no_longer_accepting_applications" if closed else None,
         applicant_count=_exact_applicant_count(header),
+        posted_at=parser.posted_at,
         header_text=header,
     )
 

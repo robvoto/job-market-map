@@ -18,7 +18,7 @@ def _html(header: str, *, apply_code: str = "") -> str:
 def test_linkedin_detail_extracts_repost_external_apply_and_exact_applicant_count():
     detail = parse_linkedin_detail_html(
         _html(
-            "Sydney · Reposted 2 days ago · 187 applicants",
+            'Sydney · <time datetime="2026-09-15">2 days ago</time> · Reposted · 187 applicants',
             apply_code='<code id="applyUrl">?url=https%3A%2F%2Fexample.com%2Fapply&amp;x=1</code>',
         ),
         canonical_url="https://www.linkedin.com/jobs/view/1234567890",
@@ -28,6 +28,8 @@ def test_linkedin_detail_extracts_repost_external_apply_and_exact_applicant_coun
     assert detail.apply_method == "external_apply"
     assert detail.easy_apply is False
     assert detail.apply_url == "https://example.com/apply"
+    assert detail.posted_at == "2026-09-15"
+    assert detail.facts["posted_at"] == "2026-09-15"
     assert detail.full_description
 
 

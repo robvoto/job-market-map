@@ -730,6 +730,7 @@ def collect_linkedin_chunk(
                         reposted=detail.reposted,
                         applicant_count=detail.applicant_count,
                         easy_apply=detail.easy_apply,
+                        posted_at=detail.posted_at,
                     )
                     refresh_job_fingerprints(observation_job_id)
                     refresh_duplicate_links(observation_job_id)
