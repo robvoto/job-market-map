@@ -462,11 +462,12 @@ def _collect_leaf(
     safety = int(get_setting("collection.seek_safety_page_limit"))
     while page <= safety:
         target_url = _page_url(url, page)
-        _navigate_seek(page_id, target_url)
-        time.sleep(float(get_setting("collection.seek_page_load_seconds")))
-        snap = _wait_snapshot(
+        # Later result pages can intermittently remain in SEEK's loading shell just
+        # like the first partition page. Use the same bounded reload-and-settle
+        # owner for every page; do not parse or count that page until it settles.
+        snap = _navigate_and_wait_snapshot(
             page_id,
-            expected_url=target_url,
+            target_url,
             should_stop=should_stop,
         )
         text = str(snap.get("text") or "")

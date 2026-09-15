@@ -811,3 +811,143 @@ def test_seek_result_page_raises_after_single_reload_retry(monkeypatch):
     with pytest.raises(SeekParseError, match="still invalid"):
         market._navigate_and_wait_snapshot(42, url)
     assert navigations == [(42, url), (42, url)]
+
+
+def test_seek_leaf_reloads_transient_later_result_page_before_counting_coverage(
+    tmp_path, monkeypatch
+):
+    """The page-6-style failure must use the bounded result-page recovery too."""
+    from collector import db
+    from sources import seek_market_map as market
+    from sources.seek import SeekParseError
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        market,
+        "get_setting",
+        lambda key: 2 if key == "collection.seek_safety_page_limit" else 0,
+    )
+    navigations = []
+    monkeypatch.setattr(
+        market, "_navigate_seek", lambda page_id, url: navigations.append(url)
+    )
+    page_two_attempts = 0
+
+    def wait(_page_id, *, expected_url=None, should_stop=None, timeout=None):
+        nonlocal page_two_attempts
+        if "page=2" in str(expected_url):
+            page_two_attempts += 1
+            if page_two_attempts == 1:
+                raise SeekParseError("SEEK partition page did not reach a result state")
+        return {"url": expected_url, "text": "2 jobs in New South Wales"}
+
+    monkeypatch.setattr(market, "_wait_snapshot", wait)
+    monkeypatch.setattr(
+        market,
+        "seek_cards",
+        lambda *_a, **_k: type("Response", (), {"result": [{}]})(),
+    )
+    monkeypatch.setattr(
+        market,
+        "parse_seek_dom_cards",
+        lambda *_a, page_number, **_k: [
+            CardObservation(
+                source="seek",
+                source_job_id=str(page_number),
+                canonical_url=f"https://au.seek.com/job/{page_number}",
+                title=f"Role {page_number}",
+                employer="Example",
+            )
+        ],
+    )
+    db.init_db()
+    url = "https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1"
+    partition_id = market._ensure_partition(
+        geography_code="NSW",
+        parent_id=None,
+        level="work_type",
+        label="All",
+        url=url,
+        threshold=450,
+    )
+
+    status, collected = market._collect_leaf(
+        42,
+        partition_id=partition_id,
+        url=url,
+        geography_code="NSW",
+        reported=2,
+        tolerance=0,
+    )
+
+    assert (status, collected) == ("COMPLETE", 2)
+    assert page_two_attempts == 2
+    assert navigations == [url, f"{url}&page=2", f"{url}&page=2"]
+
+
+def test_persistent_later_result_page_failure_stays_failed_and_not_complete(
+    tmp_path, monkeypatch
+):
+    import pytest
+
+    from collector import db
+    from sources import seek_market_map as market
+    from sources.seek import SeekParseError
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(market, "connect", db.connect)
+    monkeypatch.setattr(market, "init_db", db.init_db)
+    monkeypatch.setattr(market, "_navigate_seek", lambda *_a, **_k: None)
+    monkeypatch.setattr(market.time, "sleep", lambda *_a, **_k: None)
+    monkeypatch.setattr(
+        market,
+        "get_setting",
+        lambda key: 1 if key == "collection.seek_safety_page_limit" else 0,
+    )
+
+    wait_calls = 0
+
+    def wait(_page_id, *, expected_url=None, should_stop=None, timeout=None):
+        nonlocal wait_calls
+        wait_calls += 1
+        if wait_calls > 1:
+            raise SeekParseError("SEEK partition page did not reach a result state")
+        return {"url": expected_url, "text": "1 jobs in New South Wales"}
+
+    monkeypatch.setattr(market, "_wait_snapshot", wait)
+    db.init_db()
+    url = "https://au.seek.com/jobs/in-New-South-Wales-NSW?daterange=1"
+    partition_id = market._ensure_partition(
+        geography_code="NSW",
+        parent_id=None,
+        level="work_type",
+        label="All",
+        url=url,
+        threshold=450,
+    )
+
+    with pytest.raises(SeekParseError, match="result state"):
+        market._process_partition(
+            42,
+            geography={"code": "NSW", "seek_state_slug": "New-South-Wales-NSW"},
+            partition_id=partition_id,
+            level="work_type",
+            label="All",
+            url=url,
+            threshold=450,
+            tolerance=0,
+            budget=market.PartitionBudget(max_partitions=1),
+        )
+
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT status,reported_results,collected_unique_jobs,last_error FROM seek_partitions WHERE id=?",
+            (partition_id,),
+        ).fetchone()
+    assert row["status"] == "FAILED"
+    assert row["reported_results"] == 1
+    assert row["collected_unique_jobs"] == 0
+    assert "result state" in row["last_error"]
