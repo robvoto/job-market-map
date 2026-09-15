@@ -142,7 +142,7 @@ def stage(args: argparse.Namespace) -> int:
         f"chown ubuntu:ubuntu {shlex.quote(remote_manifest)}",
         "systemctl start job-market-map.service",
         "for i in $(seq 1 30); do curl -fsS http://127.0.0.1:8770/v3/health && break; sleep 1; done",
-        "curl -fsS http://127.0.0.1:8770/v3/health | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['ok'] and d['schema_version']==8; print('JMM_HEALTH_OK',d)\"",
+        "curl -fsS http://127.0.0.1:8770/v3/health | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['ok'] and d['schema_version']==9; print('JMM_HEALTH_OK',d)\"",
         "curl -fsS http://127.0.0.1:8770/v3/admin/service/status | python3 -c \"import json,sys; d=json.load(sys.stdin); assert d['scheduler']['enabled'] is False; assert d['collection']['active'] is False; print('JMM_STAGE_SCHEDULER_OFF')\"",
         f"sudo -u ubuntu env --chdir={shlex.quote(args.jh_dir)} JOB_HUNTER_MARKET_MAP_BASE_URL={shlex.quote(DEFAULT_JMM_URL)} {shlex.quote(args.jh_dir + '/.venv/bin/python')} -c \"from job_hunter_agent.job_market_map_client import JobMarketMapClient; c=JobMarketMapClient.from_environment(); p=c.feed_page(after_id=0,limit=1); assert p['items']; print('JH_CLIENT_READ_OK', p['items'][0]['id'], p['items'][0]['source'])\"",
         "systemctl stop job-market-map.service",

@@ -309,3 +309,20 @@ CREATE TABLE IF NOT EXISTS seek_coverage_history (
 
 CREATE INDEX IF NOT EXISTS idx_seek_coverage_history_geo_time
     ON seek_coverage_history(geography_code, captured_at DESC);
+
+-- Compact leaf evidence retained only for an archived incomplete SEEK cycle.
+-- This survives workspace rollover without retaining raw result pages.
+CREATE TABLE IF NOT EXISTS seek_coverage_diagnostics (
+    id INTEGER PRIMARY KEY,
+    coverage_history_id INTEGER NOT NULL REFERENCES seek_coverage_history(id) ON DELETE CASCADE,
+    geography_code TEXT NOT NULL,
+    hierarchy_label TEXT NOT NULL,
+    url TEXT NOT NULL,
+    status TEXT NOT NULL,
+    reported_results INTEGER,
+    collected_unique_jobs INTEGER NOT NULL DEFAULT 0,
+    last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_seek_coverage_diagnostics_history
+    ON seek_coverage_diagnostics(coverage_history_id, id);

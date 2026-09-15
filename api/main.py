@@ -59,7 +59,7 @@ from collector.settings import (
 from collector.source_status import source_status_is_active_sql
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 8
+SCHEMA_VERSION = 9
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -619,7 +619,8 @@ def seek_coverage():
             ).fetchone()[0]
             previous = conn.execute(
                 """
-                SELECT captured_at,root_status,reported_results,covered_unique_jobs,incomplete_partitions
+                SELECT id AS history_id,captured_at,root_status,reported_results,
+                       covered_unique_jobs,incomplete_partitions
                   FROM seek_coverage_history
                  WHERE geography_code=?
                  ORDER BY captured_at DESC, id DESC
@@ -627,6 +628,19 @@ def seek_coverage():
                 """,
                 (geography["code"],),
             ).fetchone()
+            previous_payload = dict(previous) if previous else None
+            if previous_payload is not None:
+                diagnostics = conn.execute(
+                    """
+                    SELECT hierarchy_label,url,status,reported_results,
+                           collected_unique_jobs,last_error
+                      FROM seek_coverage_diagnostics
+                     WHERE coverage_history_id=?
+                     ORDER BY id
+                    """,
+                    (previous_payload["history_id"],),
+                ).fetchall()
+                previous_payload["diagnostics"] = [dict(row) for row in diagnostics]
             coverage.append(
                 {
                     "geography_code": geography["code"],
@@ -637,7 +651,7 @@ def seek_coverage():
                     "reported_results": root["reported_results"] if root else None,
                     "covered_unique_jobs": root["collected_unique_jobs"] if root else 0,
                     "incomplete_partitions": int(incomplete),
-                    "previous": dict(previous) if previous else None,
+                    "previous": previous_payload,
                 }
             )
     return {

@@ -45,6 +45,47 @@ def test_completed_coverage_is_snapshotted_then_reset_without_deleting_jobs(
         history = conn.execute("SELECT * FROM seek_coverage_history").fetchone()
         assert history["root_status"] == "COMPLETE_BY_PARTITION"
         assert history["covered_unique_jobs"] == 1
+        assert conn.execute("SELECT COUNT(*) FROM seek_coverage_diagnostics").fetchone()[0] == 0
+
+
+def test_incomplete_rollover_preserves_leaf_diagnostics(tmp_path, monkeypatch):
+    cycle = _wire(tmp_path, monkeypatch)
+    with db.connect() as conn:
+        root_id = conn.execute(
+            """INSERT INTO seek_partitions(geography_code,parent_id,level,label,url,status,reported_results,collected_unique_jobs,max_results_threshold,first_seen_at,updated_at)
+               VALUES('NSW',NULL,'state','NSW','https://seek.test/nsw','INCOMPLETE_CHILD_COVERAGE',20,17,450,'x','x')"""
+        ).lastrowid
+        conn.execute(
+            """INSERT INTO seek_partitions(geography_code,parent_id,level,label,url,status,reported_results,collected_unique_jobs,max_results_threshold,first_seen_at,updated_at,last_error)
+               VALUES('NSW',?,'classification','ICT','https://seek.test/nsw/ict','FAILED',10,7,450,'x','x','SEEK page never loaded')""",
+            (root_id,),
+        )
+        conn.execute(
+            """INSERT INTO seek_partitions(geography_code,parent_id,level,label,url,status,reported_results,collected_unique_jobs,max_results_threshold,first_seen_at,updated_at)
+               VALUES('NSW',?,'classification','Healthcare','https://seek.test/nsw/health','COMPLETE',10,10,450,'x','x')""",
+            (root_id,),
+        )
+
+    cycle.snapshot_and_reset_coverage(["NSW"])
+
+    with db.connect() as conn:
+        history = conn.execute("SELECT * FROM seek_coverage_history").fetchone()
+        diagnostics = [
+            dict(row)
+            for row in conn.execute(
+                "SELECT * FROM seek_coverage_diagnostics ORDER BY hierarchy_label"
+            )
+        ]
+        root = conn.execute(
+            "SELECT * FROM seek_partitions WHERE id=?", (root_id,)
+        ).fetchone()
+    assert history["root_status"] == "INCOMPLETE_CHILD_COVERAGE"
+    assert [row["coverage_history_id"] for row in diagnostics] == [history["id"]]
+    assert diagnostics[0]["hierarchy_label"] == "NSW > ICT"
+    assert diagnostics[0]["status"] == "FAILED"
+    assert diagnostics[0]["collected_unique_jobs"] == 7
+    assert diagnostics[0]["last_error"] == "SEEK page never loaded"
+    assert root["status"] == "PENDING"
 
 
 def test_rollover_deletes_stale_child_partitions_and_keeps_root(tmp_path, monkeypatch):

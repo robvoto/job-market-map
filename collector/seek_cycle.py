@@ -54,6 +54,59 @@ def all_states_complete(codes: list[str]) -> bool:
     )
 
 
+def _archive_incomplete_leaf_diagnostics(
+    conn, *, coverage_history_id: int, root_id: int
+) -> None:
+    """Persist the compact terminal partition evidence needed after rollover."""
+    leaves = conn.execute(
+        """
+        WITH RECURSIVE partition_tree AS (
+            SELECT id,parent_id,geography_code,label,url,status,reported_results,
+                   collected_unique_jobs,last_error,label AS hierarchy_label
+              FROM seek_partitions
+             WHERE id=?
+            UNION ALL
+            SELECT child.id,child.parent_id,child.geography_code,child.label,
+                   child.url,child.status,child.reported_results,
+                   child.collected_unique_jobs,child.last_error,
+                   partition_tree.hierarchy_label || ' > ' || child.label
+              FROM seek_partitions child
+              JOIN partition_tree ON child.parent_id=partition_tree.id
+        )
+        SELECT id,geography_code,hierarchy_label,url,status,reported_results,
+               collected_unique_jobs,last_error
+          FROM partition_tree leaf
+         WHERE NOT EXISTS (
+            SELECT 1 FROM seek_partitions child WHERE child.parent_id=leaf.id
+         )
+           AND leaf.status NOT LIKE 'COMPLETE%'
+         ORDER BY hierarchy_label,url
+        """,
+        (root_id,),
+    ).fetchall()
+    conn.executemany(
+        """
+        INSERT INTO seek_coverage_diagnostics(
+            coverage_history_id,geography_code,hierarchy_label,url,status,
+            reported_results,collected_unique_jobs,last_error
+        ) VALUES(?,?,?,?,?,?,?,?)
+        """,
+        [
+            (
+                coverage_history_id,
+                leaf["geography_code"],
+                leaf["hierarchy_label"],
+                leaf["url"],
+                leaf["status"],
+                leaf["reported_results"],
+                leaf["collected_unique_jobs"],
+                leaf["last_error"],
+            )
+            for leaf in leaves
+        ],
+    )
+
+
 def snapshot_and_reset_coverage(codes: list[str]) -> None:
     """Archive summary evidence, then reset only the current SEEK coverage workspace.
 
@@ -89,7 +142,7 @@ def snapshot_and_reset_coverage(codes: list[str]) -> None:
                 ).fetchone()[0]
             )
             if root:
-                conn.execute(
+                history_id = conn.execute(
                     """
                     INSERT INTO seek_coverage_history(
                         captured_at,geography_code,root_status,reported_results,
@@ -104,7 +157,13 @@ def snapshot_and_reset_coverage(codes: list[str]) -> None:
                         root["collected_unique_jobs"],
                         incomplete,
                     ),
-                )
+                ).lastrowid
+                if not str(root["status"]).startswith("COMPLETE"):
+                    _archive_incomplete_leaf_diagnostics(
+                        conn,
+                        coverage_history_id=int(history_id),
+                        root_id=int(root["id"]),
+                    )
         conn.execute(
             f"""
             DELETE FROM seek_partitions

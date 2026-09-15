@@ -37,7 +37,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 8
+        assert payload["schema_version"] == 9
         assert payload["snapshot_max_id"] == 3
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
@@ -176,7 +176,7 @@ def test_geography_admin_and_seek_coverage_api(tmp_path, monkeypatch):
 def test_seek_coverage_exposes_previous_archived_cycle(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         with db.connect() as conn:
-            conn.execute(
+            history_id = conn.execute(
                 """
                 INSERT INTO seek_coverage_history(
                     captured_at,geography_code,root_status,reported_results,
@@ -184,17 +184,37 @@ def test_seek_coverage_exposes_previous_archived_cycle(tmp_path, monkeypatch):
                 ) VALUES(?,?,?,?,?,?)
                 """,
                 ("2026-09-11T06:12:41+00:00", "NSW", "INCOMPLETE_CHILD_COVERAGE", 6958, 6905, 59),
+            ).lastrowid
+            conn.execute(
+                """
+                INSERT INTO seek_coverage_diagnostics(
+                    coverage_history_id,geography_code,hierarchy_label,url,status,
+                    reported_results,collected_unique_jobs,last_error
+                ) VALUES(?,?,?,?,?,?,?,?)
+                """,
+                (history_id, "NSW", "NSW > ICT", "https://seek.test/nsw/ict", "FAILED", 100, 94, "page parse failed"),
             )
         coverage = client.get("/v3/coverage/seek").json()
         nsw = next(g for g in coverage["geographies"] if g["geography_code"] == "NSW")
         assert nsw["status"] == "NOT_RUN"
         assert nsw["has_current_cycle"] is False
         assert nsw["previous"] == {
+            "history_id": history_id,
             "captured_at": "2026-09-11T06:12:41+00:00",
             "root_status": "INCOMPLETE_CHILD_COVERAGE",
             "reported_results": 6958,
             "covered_unique_jobs": 6905,
             "incomplete_partitions": 59,
+            "diagnostics": [
+                {
+                    "hierarchy_label": "NSW > ICT",
+                    "url": "https://seek.test/nsw/ict",
+                    "status": "FAILED",
+                    "reported_results": 100,
+                    "collected_unique_jobs": 94,
+                    "last_error": "page parse failed",
+                }
+            ],
         }
 
 
