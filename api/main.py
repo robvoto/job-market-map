@@ -169,6 +169,33 @@ def _vacancy_lifecycle_select(job_alias: str = "j") -> str:
     """
 
 
+def _pending_active_primary_summary(after_id: int) -> dict[str, int]:
+    """Return one fixed feed snapshot and its actionable primary-job count."""
+    with connect() as conn:
+        row = conn.execute(
+            f"""
+            WITH snapshot AS (
+                SELECT COALESCE(MAX(id),0) AS snapshot_max_id
+                  FROM jobs
+            )
+            SELECT snapshot.snapshot_max_id,
+                   COUNT(j.id) AS pending_active_primary_count
+              FROM snapshot
+              LEFT JOIN jobs j
+                ON j.id > ?
+               AND j.id <= snapshot.snapshot_max_id
+               AND j.primary_job_id IS NULL
+               AND {_vacancy_active_clause('j')}
+             GROUP BY snapshot.snapshot_max_id
+            """,
+            (after_id,),
+        ).fetchone()
+    return {
+        "snapshot_max_id": int(row["snapshot_max_id"]),
+        "pending_active_primary_count": int(row["pending_active_primary_count"]),
+    }
+
+
 def _limit(requested: int | None) -> int:
     default = int(get_setting("api.default_page_size"))
     maximum = int(get_setting("api.max_page_size"))
@@ -305,7 +332,11 @@ def job_feed(
 
 @app.get(f"/{API_VERSION}/consumers/{{consumer_key}}/state")
 def consumer_state(consumer_key: str):
-    return get_checkpoint(consumer_key)
+    checkpoint = get_checkpoint(consumer_key)
+    return {
+        **checkpoint,
+        **_pending_active_primary_summary(int(checkpoint["last_job_id"])),
+    }
 
 
 @app.get(f"/{API_VERSION}/consumers/{{consumer_key}}/feed")

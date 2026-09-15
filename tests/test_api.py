@@ -321,6 +321,60 @@ def test_named_consumer_feed_end_to_end_keeps_one_run_high_water_across_checkpoi
         assert [item["id"] for item in next_run["items"]] == [3]
 
 
+def test_consumer_state_reports_exact_pending_active_primary_snapshot(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(6)
+        with db.connect() as conn:
+            conn.execute("UPDATE job_observation_state SET archived=1 WHERE job_id=3")
+            conn.execute("UPDATE jobs SET source_status='not_found' WHERE id=4")
+            conn.execute("UPDATE jobs SET primary_job_id=2 WHERE id=5")
+
+        saved = client.post(
+            "/v3/consumers/job-hunter/checkpoint",
+            json={"last_job_id": 1},
+        )
+        assert saved.status_code == 200
+
+        state = client.get("/v3/consumers/job-hunter/state").json()
+        assert state["last_job_id"] == 1
+        assert state["snapshot_max_id"] == 6
+        assert state["pending_active_primary_count"] == 2
+
+        feed = client.get(
+            "/v3/consumers/job-hunter/feed",
+            params={"through_id": state["snapshot_max_id"], "limit": 10},
+        ).json()
+        assert [item["id"] for item in feed["items"]] == [2, 6]
+        assert len(feed["items"]) == state["pending_active_primary_count"]
+
+
+def test_consumer_state_snapshot_excludes_new_arrivals_from_that_run(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(2)
+        state = client.get("/v3/consumers/job-hunter/state").json()
+        assert state["snapshot_max_id"] == 2
+        assert state["pending_active_primary_count"] == 2
+
+        with db.connect() as conn:
+            newest = conn.execute(
+                """INSERT INTO jobs(source,source_job_id,canonical_url,title,employer)
+                   VALUES('seek','3','https://seek.test/3','Role 3','Acme')"""
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO job_observation_state(
+                    job_id,first_seen_at,last_seen_at,capture_count,archived
+                ) VALUES(?,?,?,1,0)""",
+                (newest, "2026-09-10T00:00:00+00:00", "2026-09-10T00:00:00+00:00"),
+            )
+        assert newest == 3
+        feed = client.get(
+            "/v3/consumers/job-hunter/feed",
+            params={"through_id": state["snapshot_max_id"], "limit": 10},
+        ).json()
+        assert feed["snapshot_max_id"] == 2
+        assert [item["id"] for item in feed["items"]] == [1, 2]
+
+
 def test_named_consumer_feed_uses_independent_api_checkpoint(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         insert_jobs(3)
