@@ -807,10 +807,13 @@ def test_no_longer_advertised_is_terminal_not_failed(tmp_path, monkeypatch):
     assert result.unavailable == 1
     assert result.remaining == 0
     with db.connect() as conn:
-        row = conn.execute(
-            "SELECT source_status FROM jobs WHERE id=?", (job_id,)
+        assert conn.execute(
+            "SELECT 1 FROM jobs WHERE id=?", (job_id,)
+        ).fetchone() is None
+        tombstone = conn.execute(
+            "SELECT source_job_id FROM job_tombstones WHERE source_job_id='94511500'"
         ).fetchone()
-        assert row["source_status"] == "no_longer_advertised"
+        assert tombstone is not None
     assert seek_jd.coverage_seek_jobs(codes=["ACT"], days=3) == []
 
 
@@ -924,10 +927,10 @@ def test_not_found_is_terminal_and_excluded(tmp_path, monkeypatch):
     assert result.unavailable == 1
     assert result.remaining == 0
     with db.connect() as conn:
-        assert (
-            conn.execute(
-                "SELECT source_status FROM jobs WHERE id=?", (job_id,)
-            ).fetchone()[0]
-            == "not_found"
-        )
+        assert conn.execute(
+            "SELECT 1 FROM jobs WHERE id=?", (job_id,)
+        ).fetchone() is None
+        assert conn.execute(
+            "SELECT 1 FROM job_tombstones WHERE source_job_id='94520983'"
+        ).fetchone() is not None
     assert seek_jd.coverage_seek_jobs(codes=["ACT"], days=3) == []

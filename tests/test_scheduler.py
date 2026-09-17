@@ -100,6 +100,30 @@ def test_linkedin_uses_four_hour_slots_and_does_not_repeat_terminal_slot(monkeyp
     assert due is False
 
 
+def test_linkedin_partial_failure_does_not_immediately_retry_same_slot(monkeypatch):
+    from collector import scheduler
+
+    settings = {
+        "scheduler.enabled": True,
+        "scheduler.linkedin_enabled": True,
+        "scheduler.linkedin_interval_hours": 4,
+        "collection.linkedin_enabled": True,
+    }
+    monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
+    cycle_key = "linkedin:2026-09-11T20:00+10:00"
+    monkeypatch.setattr(
+        scheduler,
+        "get_cycle",
+        lambda _source: {"cycle_key": cycle_key, "status": "PARTIAL_FAILURE"},
+    )
+    tz = ZoneInfo("Australia/Sydney")
+    due, returned_key, _ = scheduler.SchedulerService.linkedin_due_context(
+        datetime(2026, 9, 11, 22, 15, tzinfo=tz)
+    )
+    assert due is False
+    assert returned_key == cycle_key
+
+
 def test_linkedin_partial_cycle_is_resumed_before_new_slot(monkeypatch):
     from collector import scheduler
 

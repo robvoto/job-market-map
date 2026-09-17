@@ -66,6 +66,18 @@ CREATE TABLE IF NOT EXISTS jd_fetch_registry (
 CREATE INDEX IF NOT EXISTS idx_jd_fetch_registry_source_id
     ON jd_fetch_registry(source, source_job_id);
 
+CREATE TABLE IF NOT EXISTS jd_enrichment_queue (
+    job_id INTEGER PRIMARY KEY REFERENCES jobs(id) ON DELETE CASCADE,
+    source TEXT NOT NULL,
+    queued_at TEXT NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    last_attempt_at TEXT,
+    last_error TEXT
+);
+
+CREATE INDEX IF NOT EXISTS idx_jd_enrichment_queue_source
+    ON jd_enrichment_queue(source, queued_at);
+
 CREATE TABLE IF NOT EXISTS card_captures (
     id INTEGER PRIMARY KEY,
     job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,

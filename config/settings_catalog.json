@@ -135,7 +135,7 @@
       "category": "Collection",
       "type": "boolean",
       "default": true,
-      "help": "Enable geography-first LinkedIn cards-only discovery. LinkedIn uses the same scheduler service and singleton collection lock as SEEK, but runs on its own short rolling window and never uses Chromium."
+      "help": "Enable geography-first LinkedIn card discovery with queued direct-HTTP JD enrichment for newly discovered jobs. LinkedIn uses the same scheduler service and singleton collection lock as SEEK, runs on its own short rolling window, and never uses Chromium."
     },
     {
       "key": "collection.linkedin_window_hours",

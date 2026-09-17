@@ -299,6 +299,7 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             )
 
     observation_job_id = job_id
+    source_row_created = created
     refresh_duplicate_links(observation_job_id)
     primary_job_id = get_primary_job_id(observation_job_id)
     if primary_job_id != observation_job_id:
@@ -318,6 +319,14 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                     (query_id,),
                 )
         created = False
+    if source_row_created or resurrected:
+        from collector.jd_queue import enqueue_job_for_jd
+
+        enqueue_job_for_jd(
+            observation_job_id,
+            source=source,
+            queued_at=captured_at,
+        )
     return IngestResult(
         job_id=primary_job_id,
         created=created,

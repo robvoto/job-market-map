@@ -100,7 +100,7 @@ When SEEK failure hardening (JMM-014) exhausts a normal daily cycle without full
 
 Rollover (`snapshot_and_reset_coverage`, JMM-015) archives each geography's current root summary into `seek_coverage_history`, then deletes every child/grandchild partition for that geography and resets only the reused state-root row (matched by URL) to PENDING. Earlier rollover code reset root fields without deleting children, so a later same-day root completion — for example a narrower incremental pass reporting fewer results than the split threshold — could mark the root COMPLETE while a prior cycle's orphaned classification/subclassification/work-type rows still counted as incomplete. Because children are now deleted rather than left PENDING, COMPLETE always implies `incomplete_partitions=0` for that geography. Canonical jobs/JDs are never touched by rollover.
 
-Operating cadence is source-specific rather than symmetric. LinkedIn runs every 4 hours with a 5-hour lookback because its 1,000-result ceiling makes wider whole-state rolling windows unsafe; it remains enabled on weekends. SEEK runs once daily over one day because it is browser-backed and can encounter human/security challenges. If both are due at midnight, the scheduler evaluates LinkedIn first; after that short HTTP pass releases the singleton collection lock, SEEK may start. Normal collection on both sources is card-only; JDs are demand-driven after dedupe.
+Operating cadence is source-specific rather than symmetric. LinkedIn runs every 4 hours with a 5-hour lookback because its 1,000-result ceiling makes wider whole-state rolling windows unsafe; it remains enabled on weekends. SEEK runs once daily over one day because it is browser-backed and can encounter human/security challenges. If both are due at midnight, the scheduler evaluates LinkedIn first; after that short HTTP pass releases the singleton collection lock, SEEK may start. Normal collection ingests/dedupes cards first, then enriches newly discovered jobs through the pending JD queue. On-demand JD retrieval remains a fallback for missing canonical JDs.
 
 The scheduler only starts when the API was launched in service mode (`start-api.sh` / `service.sh`). Direct test imports do not create background collection.
 
@@ -128,7 +128,7 @@ The durable collection log is `logs/collection.log`. Admin links to `GET /v3/adm
 
 ## Current scheduled source scope
 
-SEEK and LinkedIn use separate subprocess entrypoints under the same scheduler and singleton lock. SEEK uses the persistent JMM Chromium service. LinkedIn is cards-only HTTP discovery, never uses Chromium, and fetches enabled geographies concurrently while all SQLite ingest/dedupe/cursor writes remain serialized in one coordinator thread. LinkedIn owns independent geography cursors with exact 10-position source offsets and reports the hard 1,000-result ceiling as `INCOMPLETE_CAP` rather than falsely complete.
+SEEK and LinkedIn use separate subprocess entrypoints under the same scheduler and singleton lock. SEEK uses the persistent JMM Chromium service. LinkedIn uses HTTP card discovery and direct public-page JD enrichment, never Chromium, and fetches enabled geographies concurrently while all SQLite ingest/dedupe/cursor writes remain serialized in one coordinator thread. LinkedIn owns independent geography cursors with exact 10-position source offsets and reports the hard 1,000-result ceiling as `INCOMPLETE_CAP` rather than falsely complete.
 
 ## Pre-live local-to-AWS database promotion (JMM-012)
 

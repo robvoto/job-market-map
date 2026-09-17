@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from collector.browser_broker import BrowserBrokerError, close_tab, open_tab
-from collector.jd_enrichment import FetchedJD, JDSourceFetchError
+from collector.jd_enrichment import (
+    FetchedJD,
+    JDSourceFetchError,
+    JDSourcePostingUnavailableError,
+)
 from collector.run_logging import collection_logger
 from collector.seek_jd import (
     SeekJDFetchError,
@@ -11,7 +15,7 @@ from collector.seek_jd import (
 
 
 def fetch_seek_jd_for_job(job: dict[str, object]) -> FetchedJD:
-    """Fetch one SEEK JD using JMM's existing browser and proven SEEK parser."""
+    """Fetch one SEEK JD using JMM's persistent browser and validated SEEK parser."""
     source_job_id = str(job.get("source_job_id") or "").strip()
     canonical_url = str(job.get("canonical_url") or "").strip()
     if not source_job_id or not canonical_url:
@@ -26,10 +30,10 @@ def fetch_seek_jd_for_job(job: dict[str, object]) -> FetchedJD:
             expected_source_job_id=source_job_id,
             job_id=int(job["id"]),
         )
-    except SeekJDUnavailableError:
-        # Terminal source evidence must reach the JMM enrichment owner so it
-        # can retire the posting rather than treating it as a retryable fault.
-        raise
+    except SeekJDUnavailableError as exc:
+        raise JDSourcePostingUnavailableError(
+            str(exc), source_status=exc.source_status
+        ) from exc
     except (BrowserBrokerError, SeekJDFetchError, KeyError, TypeError, ValueError) as exc:
         raise JDSourceFetchError(f"SEEK JD fetch failed: {exc}") from exc
     finally:
@@ -38,7 +42,7 @@ def fetch_seek_jd_for_job(job: dict[str, object]) -> FetchedJD:
                 close_tab(page_id)
             except BrowserBrokerError as exc:
                 collection_logger().warning(
-                    "Could not close on-demand SEEK JD tab page_id=%s error=%s",
+                    "JD_TAB_CLOSE_FAILED source=seek page_id=%s error=%s",
                     page_id,
                     exc,
                 )
@@ -46,9 +50,5 @@ def fetch_seek_jd_for_job(job: dict[str, object]) -> FetchedJD:
     return FetchedJD(
         full_description=detail.full_description,
         jd_source="seek_job_page",
-        facts={
-            key: value
-            for key, value in detail.facts.items()
-            if key != "source_job_id"
-        },
+        facts={key: value for key, value in detail.facts.items() if key != "source_job_id"},
     )

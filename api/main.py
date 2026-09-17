@@ -39,7 +39,7 @@ from collector.query_admin import add_query, set_query_active
 from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
 from collector.retention import apply_retention
-from collector.run_logging import read_collection_log_tail
+from collector.run_logging import configure_collection_logging, read_collection_log_tail
 from collector.run_stats import population_stats
 from collector.scheduler import SCHEDULER, SchedulerService
 from collector.seek_cycle import enabled_state_codes
@@ -66,6 +66,7 @@ ADMIN_HTML = ROOT / "api" / "admin.html"
 
 @asynccontextmanager
 async def lifespan(_: FastAPI):
+    configure_collection_logging()
     init_db()
     seed_settings()
     seed_geographies()
@@ -538,10 +539,10 @@ def search_jobs(
 
 
 @app.post(f"/{API_VERSION}/jobs/{{job_id}}/jd")
-def job_jd(job_id: int):
+def job_jd(job_id: int, source: str | None = None):
     """Return the canonical JD, enriching it through JMM when it is missing."""
     try:
-        result = get_or_enrich_job_jd(job_id)
+        result = get_or_enrich_job_jd(job_id, source=source) if source else get_or_enrich_job_jd(job_id)
     except KeyError:
         raise HTTPException(404, "job not found") from None
     except UnsupportedJDSourceError as exc:

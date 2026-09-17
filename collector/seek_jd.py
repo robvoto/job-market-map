@@ -15,6 +15,7 @@ from collector.browser_broker import (
     select_page,
 )
 from collector.db import connect, store_job_jd_once, update_job_source_facts
+from collector.job_retirement import retire_known_terminal_family, retire_terminal_source_job
 from collector.run_logging import collection_logger
 from collector.settings import get_setting
 from collector.source_status import source_status_is_active_sql
@@ -449,6 +450,7 @@ def coverage_seek_jobs(*, codes: list[str], days: int) -> list[dict]:
         rows = conn.execute(
             f"""
             SELECT DISTINCT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,j.source_status,
+                            COALESCE(j.primary_job_id,j.id) AS primary_job_id,
                             p.url AS partition_url,
                             CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
@@ -476,6 +478,7 @@ def all_unfetched_seek_jobs() -> list[dict]:
         rows = conn.execute(
             """
             SELECT j.id,j.identity_key,j.source_job_id,j.canonical_url,j.full_description,j.source_status,
+                   COALESCE(j.primary_job_id,j.id) AS primary_job_id,
                    CASE WHEN r.identity_key IS NULL THEN 0 ELSE 1 END AS jd_fetch_completed
               FROM jobs j
               LEFT JOIN jobs primary_job
@@ -510,8 +513,36 @@ def enrich_seek_coverage_jds(
     on_progress=None,
 ) -> SeekJDEnrichmentResult:
     global _transient_sweep_cooldown_until
+    coverage_rows = coverage_seek_jobs(codes=codes, days=days)
+    family_ids = sorted(
+        {int(row.get("primary_job_id") or row["id"]) for row in coverage_rows}
+    )
+    cleaned_families = 0
+    for primary_id in family_ids:
+        with connect() as conn:
+            terminal_count = int(
+                conn.execute(
+                    """
+                    SELECT COUNT(*) FROM jobs
+                     WHERE (id=? OR primary_job_id=?)
+                       AND lower(trim(COALESCE(source_status,'')))
+                           IN ('no_longer_accepting_applications','no_longer_advertised','not_found')
+                    """,
+                    (primary_id, primary_id),
+                ).fetchone()[0]
+            )
+        if terminal_count:
+            retire_known_terminal_family(primary_id)
+            cleaned_families += 1
+    if cleaned_families:
+        collection_logger().info(
+            "JD_TERMINAL_COVERAGE_CLEANUP source=seek families=%s cleaned=%s",
+            len(family_ids), cleaned_families,
+        )
+        coverage_rows = coverage_seek_jobs(codes=codes, days=days)
+
     rows = _merge_candidates(
-        coverage_seek_jobs(codes=codes, days=days),
+        coverage_rows,
         include_existing_unfetched=include_existing_unfetched,
     )
     completed_ids = {
@@ -620,16 +651,21 @@ def enrich_seek_coverage_jds(
             )
             break
         except SeekJDUnavailableError as exc:
-            update_job_source_facts(job_id, source_status=exc.source_status)
+            replacement_primary = retire_terminal_source_job(
+                job_id, source_status=exc.source_status, reason=str(exc)
+            )
             unavailable += 1
             unavailable_ids.add(job_id)
             if on_progress is not None:
                 on_progress("unavailable")
             collection_logger().info(
-                "SEEK JD unavailable job_id=%s source_job_id=%s status=%s",
+                "JD_SOURCE_TERMINAL source=seek job_id=%s source_job_id=%s status=%s "
+                "replacement_primary=%s error=%s",
                 job_id,
                 str(row["source_job_id"] or "").strip(),
                 exc.source_status,
+                replacement_primary,
+                exc,
             )
         except SeekJDFetchError as exc:
             failed += 1

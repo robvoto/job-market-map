@@ -63,7 +63,9 @@ def test_seek_adapter_preserves_terminal_unavailable_status(monkeypatch):
         ),
     )
 
-    with pytest.raises(SeekJDUnavailableError, match="SEEK listing is gone"):
+    from collector.jd_enrichment import JDSourcePostingUnavailableError
+
+    with pytest.raises(JDSourcePostingUnavailableError, match="SEEK listing is gone") as exc_info:
         seek_jd_adapter.fetch_seek_jd_for_job(
             {
                 "id": 7,
@@ -72,4 +74,5 @@ def test_seek_adapter_preserves_terminal_unavailable_status(monkeypatch):
             }
         )
 
+    assert exc_info.value.source_status == "not_found"
     assert closed == [92]

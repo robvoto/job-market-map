@@ -61,9 +61,9 @@ Personal applied/rejected/presented state is not a retention exception here beca
 - default freshness horizon;
 - SEEK page settling, parser wait and safety-page guard;
 - `collection.seek_incremental_overlap_minutes` (default 120) for safe overlap on extra fresh runs inside the 1-day window; normal ~24-hour daily runs remain full reconciliation passes;
-- LinkedIn enable/disable, `collection.linkedin_window_hours` (default 5), `scheduler.linkedin_interval_hours` (default 4), HTTP no-progress/timeout controls, and direct-detail HTTP timeout for JMM-003 on-demand enrichment. The LinkedIn window must be larger than the cadence. Production LinkedIn discovery is geography-first, cards-only, parallel on network fetches, and serialized for SQLite writes.
+- LinkedIn enable/disable, `collection.linkedin_window_hours` (default 5), `scheduler.linkedin_interval_hours` (default 4), HTTP no-progress/timeout controls, and direct-detail HTTP timeout for queued/on-demand enrichment. The LinkedIn window must be larger than the cadence. Production LinkedIn discovery is geography-first, card-first, parallel on network fetches, serialized for SQLite writes, then drains newly discovered jobs from the JD queue.
 
-The right-side stats panel shows current source totals (including APSJobs), the current LinkedIn geography cycle (complete/capped/remaining), and the latest SEEK run. LinkedIn discovery itself is cards-only and its next refresh time is shown in Service status.
+The right-side stats panel shows current source totals (including APSJobs), the current LinkedIn geography cycle (complete/capped/remaining), and the latest SEEK run. LinkedIn discovery is card-first and its next refresh time is shown in Service status; newly discovered jobs are JD-enriched before a successful cycle completes.
 
 ### Duplicate detection
 - near-match enable/disable;

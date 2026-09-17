@@ -72,8 +72,8 @@ The port itself is an admin setting and takes effect on the next API start.
 - one-off JMM-006 bootstrap from trustworthy existing Job Hunter neutral job/JD evidence: implemented
 - opt-in retention controls with preserve-evidence defaults: implemented
 - geography-first LinkedIn discovery for NSW/ACT/QLD; old LinkedIn keyword runs are historical/admin only
-- SEEK recent-window discovery + recursive whole-state NSW/ACT/QLD card coverage + on-demand write-once JD enrichment: implemented
-- LinkedIn resumable HTTP cards-only discovery + on-demand JMM-003 detail/JD enrichment: implemented
+- SEEK recent-window discovery + recursive whole-state NSW/ACT/QLD card coverage + queued/write-once JD enrichment for newly discovered jobs: implemented
+- LinkedIn resumable HTTP card discovery + queued public-page JD enrichment for newly discovered jobs, with on-demand JMM-003 fallback: implemented
 - APSJobs neutral collector: pending
 - permanent SEEK JD fetch memory: implemented; successfully fetched jobs are not reopened on later daily runs
 

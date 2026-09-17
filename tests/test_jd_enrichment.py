@@ -106,10 +106,10 @@ def test_terminal_seek_unavailable_marks_source_and_is_not_retryable(tmp_path, m
     enrichment = _wire(tmp_path, monkeypatch)
     job_id = _insert_job()
 
-    from collector.seek_jd import SeekJDUnavailableError
-
     def unavailable(_job):
-        raise SeekJDUnavailableError("SEEK listing is gone", source_status="not_found")
+        raise enrichment.JDSourcePostingUnavailableError(
+            "SEEK listing is gone", source_status="not_found"
+        )
 
     monkeypatch.setitem(enrichment._SOURCE_FETCHERS, "seek", unavailable)
 
@@ -117,8 +117,12 @@ def test_terminal_seek_unavailable_marks_source_and_is_not_retryable(tmp_path, m
         enrichment.get_or_enrich_job_jd(job_id)
 
     with db.connect() as conn:
-        row = conn.execute("SELECT source_status FROM jobs WHERE id=?", (job_id,)).fetchone()
-        assert row["source_status"] == "not_found"
+        assert conn.execute("SELECT 1 FROM jobs WHERE id=?", (job_id,)).fetchone() is None
+        tombstone = conn.execute(
+            "SELECT source,source_job_id FROM job_tombstones WHERE source_job_id='123'"
+        ).fetchone()
+        assert tombstone is not None
+        assert tombstone["source"] == "seek"
         assert conn.execute("SELECT COUNT(*) FROM jd_fetch_registry").fetchone()[0] == 0
 
 
@@ -128,7 +132,6 @@ def test_unsupported_source_fails_explicitly(tmp_path, monkeypatch):
 
     with pytest.raises(enrichment.UnsupportedJDSourceError, match="apsjobs"):
         enrichment.get_or_enrich_job_jd(job_id)
-
 
 def test_linked_vacancy_prefers_linkedin_http_then_falls_back_to_seek(tmp_path, monkeypatch):
     enrichment = _wire(tmp_path, monkeypatch)
@@ -192,3 +195,89 @@ def test_linked_vacancy_updates_facts_on_source_that_supplied_jd(tmp_path, monke
         alias = conn.execute("SELECT * FROM jobs WHERE id=?", (linkedin_id,)).fetchone()
     assert primary["applicant_count"] is None
     assert alias["applicant_count"] == 17
+
+
+def test_terminal_primary_repost_is_promoted_before_jd_fetch(tmp_path, monkeypatch):
+    enrichment = _wire(tmp_path, monkeypatch)
+    old_id = _insert_job(source="seek", source_job_id="old")
+    new_id = _insert_job(source="seek", source_job_id="new")
+    with db.connect() as conn:
+        conn.execute("UPDATE jobs SET source_status='not_found' WHERE id=?", (old_id,))
+        conn.execute("UPDATE jobs SET primary_job_id=? WHERE id=?", (old_id, new_id))
+
+    calls = []
+
+    def fetch(job):
+        calls.append(int(job["id"]))
+        return enrichment.FetchedJD(
+            full_description="Current repost JD from the active SEEK posting.",
+            jd_source="seek_job_page",
+        )
+
+    monkeypatch.setitem(enrichment._SOURCE_FETCHERS, "seek", fetch)
+    result = enrichment.get_or_enrich_job_jd(old_id, source="seek")
+
+    assert result["status"] == "enriched"
+    assert calls == [new_id]
+    with db.connect() as conn:
+        assert conn.execute("SELECT 1 FROM jobs WHERE id=?", (old_id,)).fetchone() is None
+        current = conn.execute("SELECT * FROM jobs WHERE id=?", (new_id,)).fetchone()
+        assert current["primary_job_id"] is None
+        assert current["full_description"] == result["full_description"]
+        assert conn.execute(
+            "SELECT 1 FROM job_tombstones WHERE source_job_id='old'"
+        ).fetchone() is not None
+
+
+def test_terminal_primary_cached_jd_moves_to_active_repost(tmp_path, monkeypatch):
+    enrichment = _wire(tmp_path, monkeypatch)
+    old_id = _insert_job(source="seek", source_job_id="old-cached")
+    new_id = _insert_job(source="seek", source_job_id="new-cached")
+    db.store_job_jd_once(
+        old_id,
+        full_description="Useful canonical JD already cached before the old posting closed.",
+        jd_fetched_at="2026-09-17T00:00:00+00:00",
+        jd_source="seek_job_page",
+    )
+    with db.connect() as conn:
+        conn.execute("UPDATE jobs SET source_status='not_found' WHERE id=?", (old_id,))
+        conn.execute("UPDATE jobs SET primary_job_id=? WHERE id=?", (old_id, new_id))
+
+    monkeypatch.setitem(
+        enrichment._SOURCE_FETCHERS,
+        "seek",
+        lambda _job: (_ for _ in ()).throw(AssertionError("cached JD must be reused")),
+    )
+    result = enrichment.get_or_enrich_job_jd(old_id, source="seek")
+
+    assert result["status"] == "cached"
+    with db.connect() as conn:
+        assert conn.execute("SELECT 1 FROM jobs WHERE id=?", (old_id,)).fetchone() is None
+        current = conn.execute("SELECT * FROM jobs WHERE id=?", (new_id,)).fetchone()
+        assert current["primary_job_id"] is None
+        assert current["full_description"] == "Useful canonical JD already cached before the old posting closed."
+        registry = conn.execute(
+            "SELECT * FROM jd_fetch_registry WHERE identity_key=?", (current["identity_key"],)
+        ).fetchone()
+        assert registry is not None
+
+
+def test_terminal_status_returned_with_jd_is_removed_not_stored(tmp_path, monkeypatch):
+    enrichment = _wire(tmp_path, monkeypatch)
+    job_id = _insert_job(source="linkedin", source_job_id="li-closed")
+
+    monkeypatch.setitem(
+        enrichment._SOURCE_FETCHERS,
+        "linkedin",
+        lambda _job: enrichment.FetchedJD(
+            full_description="A description still visible on a closed posting.",
+            jd_source="linkedin_public_job_page",
+            facts={"source_status": "no_longer_accepting_applications"},
+        ),
+    )
+
+    with pytest.raises(enrichment.JDSourceUnavailableError):
+        enrichment.get_or_enrich_job_jd(job_id)
+    with db.connect() as conn:
+        assert conn.execute("SELECT 1 FROM jobs WHERE id=?", (job_id,)).fetchone() is None
+        assert conn.execute("SELECT COUNT(*) FROM jd_fetch_registry").fetchone()[0] == 0

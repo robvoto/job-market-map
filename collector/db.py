@@ -249,6 +249,10 @@ def store_job_jd_once(
         if str(existing["full_description"] or "").strip():
             if existing["jd_fetched_at"] and existing["jd_source"]:
                 _record_successful_jd_fetch(conn, existing)
+            conn.execute(
+                "DELETE FROM jd_enrichment_queue WHERE job_id IN (SELECT id FROM jobs WHERE id=? OR primary_job_id=?)",
+                (primary_job_id, primary_job_id),
+            )
             return {
                 "id": existing["id"],
                 "full_description": existing["full_description"],
@@ -270,6 +274,10 @@ def store_job_jd_once(
             (primary_job_id,),
         ).fetchone()
         _record_successful_jd_fetch(conn, stored)
+        conn.execute(
+            "DELETE FROM jd_enrichment_queue WHERE job_id IN (SELECT id FROM jobs WHERE id=? OR primary_job_id=?)",
+            (primary_job_id, primary_job_id),
+        )
     return {
         "id": stored["id"],
         "full_description": stored["full_description"],

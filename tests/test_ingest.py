@@ -84,6 +84,37 @@ def test_same_source_id_upserts_neutral_market_row(tmp_path, monkeypatch):
     assert hits == 2
 
 
+def test_new_source_row_is_queued_for_jd_once(tmp_path, monkeypatch):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    first = ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="queue-1",
+            canonical_url="https://linkedin.com/jobs/view/queue-1",
+            title="Business Analyst",
+            captured_at="2026-09-17T10:00:00+00:00",
+        )
+    )
+    ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="queue-1",
+            canonical_url="https://linkedin.com/jobs/view/queue-1",
+            title="Business Analyst",
+            captured_at="2026-09-17T10:05:00+00:00",
+        )
+    )
+
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT job_id,source,queued_at,attempts FROM jd_enrichment_queue"
+        ).fetchall()
+
+    assert [(row["job_id"], row["source"], row["queued_at"], row["attempts"]) for row in rows] == [
+        (first.observation_job_id, "linkedin", "2026-09-17T10:00:00+00:00", 0)
+    ]
+
+
 def test_card_text_and_relative_posted_label_never_become_canonical_jd_or_posted_date(tmp_path, monkeypatch):
     ingest = _use_tmp_db(tmp_path, monkeypatch)
     result = ingest.ingest_card(

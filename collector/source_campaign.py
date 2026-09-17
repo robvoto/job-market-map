@@ -4,7 +4,7 @@ from datetime import datetime
 
 from collector.db import connect, init_db
 
-TERMINAL_CYCLE_STATUSES = {"COMPLETE", "INCOMPLETE_CAP"}
+TERMINAL_CYCLE_STATUSES = {"COMPLETE", "INCOMPLETE_CAP", "PARTIAL_FAILURE"}
 
 
 def now_local_cycle_key() -> str:

@@ -138,6 +138,8 @@ def main(argv: list[str] | None = None) -> int:
     list_page_id: int | None = None
     detail_page_id: int | None = None
     jd_totals = {"attempted": 0, "stored": 0, "failed": 0, "unavailable": 0}
+    seek_card_elapsed_seconds = 0.0
+    seek_jd_elapsed_seconds = 0.0
 
     def request_stop(*_args) -> None:
         stop_event.set()
@@ -216,11 +218,7 @@ def main(argv: list[str] | None = None) -> int:
                 )
 
             list_page_id = int(open_tab("about:blank", active=False).result["pageId"])
-            detail_page_id = (
-                int(open_tab("about:blank", active=False).result["pageId"])
-                if args.backfill_existing_jds
-                else None
-            )
+            detail_page_id = None
             log.info(
                 "browser pages ready list_page_id=%s detail_page_id=%s",
                 list_page_id,
@@ -233,13 +231,16 @@ def main(argv: list[str] | None = None) -> int:
                     jd_totals[event] += 1
 
             def sweep_required_jds(*, include_existing_unfetched: bool = False) -> None:
-                nonlocal jd_result
+                nonlocal jd_result, detail_page_id, seek_jd_elapsed_seconds
                 if stop_event.is_set() or deadline_reached():
                     return
+                if detail_page_id is None:
+                    detail_page_id = int(open_tab("about:blank", active=False).result["pageId"])
                 log.info(
                     "JD sweep started include_existing_unfetched=%s",
                     include_existing_unfetched,
                 )
+                jd_started = time.monotonic()
                 jd_result = enrich_seek_coverage_jds(
                     page_id=detail_page_id,
                     codes=codes,
@@ -249,6 +250,7 @@ def main(argv: list[str] | None = None) -> int:
                     include_existing_unfetched=include_existing_unfetched,
                     on_progress=record_jd_progress,
                 )
+                seek_jd_elapsed_seconds += time.monotonic() - jd_started
                 log.info(
                     "JD sweep finished candidates=%s cached=%s attempted=%s stored=%s failed=%s unavailable=%s remaining=%s",
                     jd_result.candidates,
@@ -271,6 +273,7 @@ def main(argv: list[str] | None = None) -> int:
                     progress.partitions_processed,
                 )
 
+            seek_cards_started = time.monotonic()
             result = run_seek_cycle(
                 page_id=list_page_id,
                 codes=codes,
@@ -280,14 +283,15 @@ def main(argv: list[str] | None = None) -> int:
                 after_progress=after_coverage_progress,
                 cutoff_at=seek_cutoff_at,
             )
+            seek_card_elapsed_seconds = time.monotonic() - seek_cards_started
 
             run_partitions_processed = result.partitions_processed
 
-            # Normal market collection is card-only. Historical bulk JD acquisition
-            # is an explicit maintenance action; normal consumers use JMM-003 on demand
-            # after card-level dedupe and filtering decide that a JD is actually needed.
-            if result.status == "COMPLETE" and args.backfill_existing_jds:
-                sweep_required_jds(include_existing_unfetched=True)
+            # A completed SEEK market cycle is not complete for JMM until the
+            # current coverage window has JDs. Resume runs use the same coverage,
+            # so jobs discovered before the current process started are not missed.
+            if result.status == "COMPLETE":
+                sweep_required_jds(include_existing_unfetched=args.backfill_existing_jds)
 
             # Release this process's SEEK-owned pages/CDP attachment before exit.
             for page_id in (detail_page_id, list_page_id):
@@ -303,6 +307,7 @@ def main(argv: list[str] | None = None) -> int:
                     )
             detail_page_id = None
             list_page_id = None
+
             close_browser()
 
             if stop_event.is_set():
@@ -311,7 +316,7 @@ def main(argv: list[str] | None = None) -> int:
                 final_status = "PARTIAL_TIME_LIMIT"
             elif result.status != "COMPLETE":
                 final_status = result.status
-            elif args.backfill_existing_jds and (jd_result is None or jd_result.remaining):
+            elif jd_result is not None and (jd_result.failed or jd_result.remaining):
                 final_status = "PARTIAL_JD"
             else:
                 final_status = "COMPLETE"
@@ -341,6 +346,12 @@ def main(argv: list[str] | None = None) -> int:
                     get_setting("collection.seek_incremental_overlap_minutes")
                 ),
             }
+            run_stats["timing"] = {
+                "seek_cards_seconds": round(seek_card_elapsed_seconds, 3),
+                "seek_jd_seconds": round(seek_jd_elapsed_seconds, 3),
+                "total_seconds": round(time.monotonic() - run_started, 3),
+            }
+            log.info("run timing=%s", run_stats["timing"])
             finish_market_run(
                 run_id,
                 status=final_status,

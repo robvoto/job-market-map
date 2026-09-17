@@ -68,7 +68,7 @@ def test_admin_page_exposes_current_source_stats_and_latest_seek_run():
     assert "LinkedIn geography cycle" in html
     assert "LinkedIn cards" in html
     assert "geographies done" in html
-    assert "Cards-only discovery · no Chromium · no JD fetches." in html
+    assert "Card-first discovery · no Chromium · new jobs queued for JD enrichment." in html
     assert "await r.text()" in html
     assert "Stats unavailable" in html
     assert "Incremental SEEK window" in html
@@ -82,5 +82,5 @@ def test_admin_status_is_source_specific_and_bootstrap_is_not_live_status():
     assert "LinkedIn running" in html
     assert "SEEK running" in html
     assert "Latest SEEK run:" in html
-    assert "LinkedIn cards-only geography refreshes every 4 hours" in html
+    assert "LinkedIn card-first geography refreshes every 4 hours" in html
     assert "daily whole-state SEEK run" in html

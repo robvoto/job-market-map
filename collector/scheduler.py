@@ -14,7 +14,7 @@ from collector.service_state import (
 from collector.settings import get_setting
 from collector.source_campaign import get_cycle
 
-LINKEDIN_TERMINAL_STATUSES = {"COMPLETE", "INCOMPLETE_CAP"}
+LINKEDIN_TERMINAL_STATUSES = {"COMPLETE", "INCOMPLETE_CAP", "PARTIAL_FAILURE"}
 
 
 class SchedulerService:

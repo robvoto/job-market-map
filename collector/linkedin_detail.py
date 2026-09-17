@@ -32,6 +32,12 @@ class LinkedInDetailError(RuntimeError):
     pass
 
 
+class LinkedInDetailUnavailableError(LinkedInDetailError):
+    def __init__(self, message: str, *, source_status: str = "not_found") -> None:
+        super().__init__(message)
+        self.source_status = source_status
+
+
 class _LinkedInPageParser(HTMLParser):
     _VOID_TAGS = frozenset(
         {
@@ -210,6 +216,10 @@ def fetch_linkedin_detail(canonical_url: str) -> LinkedInDetailEvidence:
                 raise LinkedInDetailError("LinkedIn redirected the vacancy to sign-up")
             html = response.read().decode("utf-8", errors="replace")
     except HTTPError as exc:
+        if exc.code in {404, 410}:
+            raise LinkedInDetailUnavailableError(
+                f"LinkedIn vacancy HTTP {exc.code}", source_status="not_found"
+            ) from exc
         raise LinkedInDetailError(f"LinkedIn vacancy HTTP {exc.code}") from exc
     except (URLError, TimeoutError, ValueError, OSError) as exc:
         raise LinkedInDetailError(f"LinkedIn vacancy request failed: {exc}") from exc

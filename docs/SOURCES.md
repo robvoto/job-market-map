@@ -21,13 +21,13 @@ Extra fresh runs inside 24 hours use the exact ordered card timestamps to stop a
 
 ## LinkedIn
 
-Status: geography-first HTTP cards-only discovery, resumable campaign state and direct public-page JMM-003 detail/JD enrichment implemented.
+Status: geography-first HTTP card discovery, resumable campaign state and queued direct public-page JD enrichment for newly discovered jobs implemented.
 
 Mechanics are based on Job Hunter's proven implementation:
 - discovery uses `python-jobspy` over HTTP, not Chromium/Playwright;
 - production discovery uses a blank search term plus each enabled geography's LinkedIn location and native LinkedIn-ID dedupe;
 - JMM owns exact 10-position source offsets and uses bounded retry/terminal confirmation because LinkedIn can transiently return a short or empty page before later real results;
-- production discovery is cards-only. It does not fetch vacancy details or JDs; JMM-003 owns on-demand LinkedIn detail/JD enrichment through the shared public-page helper;
+- discovery collects cards first; newly discovered jobs enter JMM’s pending JD queue and are enriched through the direct public-page helper before the cycle is complete. JMM-003 remains the on-demand fallback for a missing canonical JD;
 - LinkedIn's public guest endpoint returns HTTP 400 at offset 1000. Reaching that ceiling is reported as `INCOMPLETE_CAP`, never as complete coverage;
 - a vacancy detail page is fetched only through explicit/on-demand enrichment, not merely because a card was discovered;
 - apply method uses the current public page's direct apply URL: trustworthy external URL -> `external_apply`; no external URL -> `easy_apply`; otherwise unknown;
