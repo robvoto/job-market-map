@@ -1,14 +1,22 @@
 from __future__ import annotations
 
 import logging
+import os
 import sys
 from collections import deque
 from logging.handlers import RotatingFileHandler
+from pathlib import Path
 
 from collector.db import ROOT
 
 LOG_PATH = ROOT / "logs" / "collection.log"
+LOG_PATH_ENV = "JMM_COLLECTION_LOG_PATH"
 LOGGER_NAME = "jmm.collection"
+
+
+def _resolved_log_path():
+    override = str(os.environ.get(LOG_PATH_ENV) or "").strip()
+    return Path(override) if override else LOG_PATH
 
 
 def configure_collection_logging() -> logging.Logger:
@@ -17,7 +25,8 @@ def configure_collection_logging() -> logging.Logger:
     if getattr(logger, "_jmm_configured", False):
         return logger
 
-    LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    log_path = _resolved_log_path()
+    log_path.parent.mkdir(parents=True, exist_ok=True)
     logger.setLevel(logging.INFO)
     logger.propagate = False
 
@@ -31,7 +40,7 @@ def configure_collection_logging() -> logging.Logger:
     logger.addHandler(stream)
 
     file_handler = RotatingFileHandler(
-        LOG_PATH,
+        log_path,
         maxBytes=10 * 1024 * 1024,
         backupCount=5,
         encoding="utf-8",
@@ -50,7 +59,8 @@ def collection_logger() -> logging.Logger:
 def read_collection_log_tail(lines: int = 500) -> str:
     if lines < 1:
         raise ValueError("lines must be >= 1")
-    if not LOG_PATH.exists():
+    log_path = _resolved_log_path()
+    if not log_path.exists():
         return ""
-    with LOG_PATH.open("r", encoding="utf-8", errors="replace") as handle:
+    with log_path.open("r", encoding="utf-8", errors="replace") as handle:
         return "".join(deque(handle, maxlen=lines))

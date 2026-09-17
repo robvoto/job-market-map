@@ -103,7 +103,11 @@ def _enrich_ids(ids: list[int], *, source: str | None = None, record_queue_attem
             except JDSourceFetchError as exc:
                 last_error = exc
                 message = str(exc)
-                rate_limited = "429" in message or "rate limit" in message.casefold()
+                rate_limited = (
+                    "429" in message
+                    or "rate limit" in message.casefold()
+                    or "rate-limit" in message.casefold()
+                )
                 if record_queue_attempts:
                     record_pending_attempt(primary_id, error=message)
                 if rate_limited:
