@@ -225,6 +225,7 @@ exports/*
 !exports/.gitkeep
 backups/*.db
 logs/*.log
+logs/run/
 data/*.lock
 
 data/*.logpath
