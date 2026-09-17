@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
 from fastapi.responses import HTMLResponse, PlainTextResponse
@@ -394,41 +395,112 @@ def new_jobs(days: int = Query(1, ge=0, le=30), limit: int | None = Query(None, 
 @app.get(f"/{API_VERSION}/jobs/search")
 @app.get("/jobs/search", include_in_schema=False)
 def search_jobs(
-    q: str | None = None,
-    source: str | None = None,
-    geography_code: str | None = None,
+    q: Annotated[list[str] | None, Query()] = None,
+    source: Annotated[list[str] | None, Query()] = None,
+    geography_code: Annotated[list[str] | None, Query()] = None,
+    posted_after: str | None = None,
+    after_id: int = Query(0, ge=0),
+    through_id: int | None = Query(None, ge=0),
     include_archived: bool = False,
     limit: int | None = Query(None, ge=1),
+    include_raw: bool = False,
 ):
+    """Search canonical vacancies using filters evaluated on active source rows.
+
+    JH supplies its existing board search terms and geography scope here. A
+    canonical vacancy is returned once, but matching is intentionally evaluated
+    against any linked active source row so a non-primary board posting can
+    satisfy the selected search scope.
+    """
     resolved_limit = _limit(limit)
-    clauses = ["j.primary_job_id IS NULL"]
-    params: list[object] = []
-    if q:
-        clauses.append("(j.title LIKE ? OR j.employer LIKE ? OR j.raw_card_text LIKE ?)")
-        like = f"%{q}%"
-        params.extend([like, like, like])
-    if source:
-        clauses.append("j.source=?")
-        params.append(source.casefold())
-    if geography_code:
-        clauses.append("j.geography_code=?")
-        params.append(geography_code.upper())
-    if not include_archived:
-        clauses.append(_vacancy_active_clause("j"))
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    terms = [" ".join(str(value).split()).strip() for value in q or []]
+    terms = [term for term in terms if term]
+    sources = [str(value).strip().casefold() for value in source or [] if str(value).strip()]
+    geographies = [str(value).strip().upper() for value in geography_code or [] if str(value).strip()]
+
+    linked_clauses = [
+        "(vacancy_job.id=j.id OR vacancy_job.primary_job_id=j.id)",
+        "COALESCE(vacancy_state.archived,0)=0",
+        source_status_is_active_sql("vacancy_job.source_status"),
+    ]
+    linked_params: list[object] = []
+    if sources:
+        placeholders = ",".join("?" for _ in sources)
+        linked_clauses.append(f"vacancy_job.source IN ({placeholders})")
+        linked_params.extend(sources)
+    if geographies:
+        placeholders = ",".join("?" for _ in geographies)
+        linked_clauses.append(f"vacancy_job.geography_code IN ({placeholders})")
+        linked_params.extend(geographies)
+    if posted_after:
+        linked_clauses.append("(vacancy_job.posted_at IS NULL OR vacancy_job.posted_at>=?)")
+        linked_params.append(posted_after)
+    if terms:
+        term_clauses: list[str] = []
+        for term in terms:
+            term_clauses.append(
+                "(vacancy_job.title LIKE ? OR vacancy_job.employer LIKE ? "
+                "OR vacancy_job.raw_card_text LIKE ?)"
+            )
+            like = f"%{term}%"
+            linked_params.extend([like, like, like])
+        linked_clauses.append("(" + " OR ".join(term_clauses) + ")")
+
     with connect() as conn:
+        snapshot_max_id = (
+            int(conn.execute("SELECT COALESCE(MAX(id),0) FROM jobs").fetchone()[0])
+            if through_id is None
+            else int(through_id)
+        )
+    search_clauses = ["j.primary_job_id IS NULL", "j.id <= ?"]
+    search_params: list[object] = [snapshot_max_id]
+    search_clauses.append(
+        "EXISTS ("
+        "SELECT 1 FROM jobs vacancy_job "
+        "JOIN job_observation_state vacancy_state ON vacancy_state.job_id=vacancy_job.id "
+        "WHERE " + " AND ".join(linked_clauses) + ")"
+    )
+    search_params.extend(linked_params)
+    if not include_archived:
+        search_clauses.append(_vacancy_active_clause("j"))
+    search_where = f"WHERE {' AND '.join(search_clauses)}"
+    page_clauses = ["j.id > ?", *search_clauses]
+    page_params: list[object] = [after_id, *search_params]
+    with connect() as conn:
+        total = int(
+            conn.execute(
+                f"""
+                SELECT COUNT(*)
+                  FROM jobs j
+                  LEFT JOIN job_observation_state s ON s.job_id=j.id
+                  {search_where}
+                """,
+                search_params,
+            ).fetchone()[0]
+        )
         rows = conn.execute(
             f"""
             SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at,
                    {_vacancy_lifecycle_select("j")}
               FROM jobs j
               LEFT JOIN job_observation_state s ON s.job_id=j.id
-              {where}
-             ORDER BY s.first_seen_at DESC LIMIT ?
+             WHERE {' AND '.join(page_clauses)}
+             ORDER BY j.id ASC LIMIT ?
             """,
-            (*params, resolved_limit),
+            (*page_params, resolved_limit + 1),
         ).fetchall()
-    return [_job_payload(row) for row in rows]
+    has_more = len(rows) > resolved_limit
+    rows = rows[:resolved_limit]
+    return {
+        "api_version": API_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "generated_at": _now(),
+        "snapshot_max_id": snapshot_max_id,
+        "total": total,
+        "items": [_job_payload(row, include_raw=include_raw) for row in rows],
+        "next_cursor": int(rows[-1]["id"]) if rows else after_id,
+        "has_more": has_more,
+    }
 
 
 @app.post(f"/{API_VERSION}/jobs/{{job_id}}/jd")
