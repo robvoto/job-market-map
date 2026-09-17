@@ -209,6 +209,11 @@ def same_vacancy_evidence(
     if exact_a and exact_a == exact_b:
         return 1.0, "exact_rich_card", reasons + ["same rich-card fingerprint"]
 
+    locality_a = specific_locality(a.get("location"))
+    locality_b = specific_locality(b.get("location"))
+    if locality_a and locality_b and locality_a != locality_b:
+        return None
+
     teaser_similarity = _teaser_similarity(
         a.get("teaser_text"), b.get("teaser_text"), min_chars=teaser_min_chars
     )
@@ -221,8 +226,6 @@ def same_vacancy_evidence(
 
     source_a = normalize(a.get("source"))
     source_b = normalize(b.get("source"))
-    locality_a = specific_locality(a.get("location"))
-    locality_b = specific_locality(b.get("location"))
     if source_a and source_b and source_a != source_b and locality_a and locality_a == locality_b:
         return (
             0.96,
@@ -272,6 +275,29 @@ def _cross_source_locality_is_reciprocally_unique(
     )
 
 
+def _group_specific_localities(conn, job_id: int) -> set[str]:
+    primary_id = resolve_primary_job_id(conn, job_id)
+    rows = conn.execute(
+        "SELECT location FROM jobs WHERE id=? OR primary_job_id=?",
+        (primary_id, primary_id),
+    ).fetchall()
+    return {
+        locality
+        for row in rows
+        if (locality := specific_locality(row["location"]))
+    }
+
+
+def _groups_have_conflicting_localities(conn, job_id: int, candidate_id: int) -> bool:
+    current_localities = _group_specific_localities(conn, job_id)
+    candidate_localities = _group_specific_localities(conn, candidate_id)
+    return bool(
+        current_localities
+        and candidate_localities
+        and current_localities != candidate_localities
+    )
+
+
 def _same_vacancy_matches(
     conn,
     current: dict[str, Any],
@@ -297,6 +323,8 @@ def _same_vacancy_matches(
             min_secondary_signals=min_secondary_signals,
         )
         if evidence is None:
+            continue
+        if _groups_have_conflicting_localities(conn, int(current["id"]), int(candidate["id"])):
             continue
         confidence, match_type, reasons = evidence
         if (
@@ -505,3 +533,61 @@ def backfill_fingerprints_and_duplicates() -> tuple[int, int]:
     for job_id in ids:
         links += refresh_duplicate_links(job_id)
     return updated, links
+
+
+def rebuild_same_vacancy_links() -> int:
+    """Rebuild canonical vacancy grouping from the current deterministic rules."""
+    init_db()
+    with connect() as conn:
+        ids = [int(row[0]) for row in conn.execute("SELECT id FROM jobs ORDER BY id")]
+        conn.execute("DELETE FROM same_vacancy_links")
+        conn.execute("UPDATE jobs SET primary_job_id=NULL")
+    for job_id in ids:
+        establish_same_vacancy(job_id)
+    with connect() as conn:
+        return int(conn.execute("SELECT COUNT(*) FROM same_vacancy_links").fetchone()[0])
+
+
+def repair_conflicting_same_vacancy_groups() -> tuple[int, int, int]:
+    """Rebuild only groups that currently contain conflicting specific localities."""
+    init_db()
+    grouped: dict[int, list[tuple[int, str]]] = {}
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, primary_job_id, location
+              FROM jobs
+             WHERE primary_job_id IS NOT NULL
+                OR id IN (SELECT DISTINCT primary_job_id FROM jobs WHERE primary_job_id IS NOT NULL)
+            """
+        ).fetchall()
+        for row in rows:
+            root = int(row["primary_job_id"] or row["id"])
+            grouped.setdefault(root, []).append(
+                (int(row["id"]), specific_locality(row["location"]))
+            )
+        bad_roots = {
+            root
+            for root, members in grouped.items()
+            if len({locality for _, locality in members if locality}) > 1
+        }
+        member_ids = sorted(
+            {job_id for root in bad_roots for job_id, _ in grouped[root]}
+        )
+        if member_ids:
+            conn.execute("CREATE TEMP TABLE repair_same_vacancy_ids(id INTEGER PRIMARY KEY)")
+            conn.executemany(
+                "INSERT INTO repair_same_vacancy_ids(id) VALUES(?)",
+                [(job_id,) for job_id in member_ids],
+            )
+            conn.execute(
+                "DELETE FROM same_vacancy_links WHERE job_id IN (SELECT id FROM repair_same_vacancy_ids) OR primary_job_id IN (SELECT id FROM repair_same_vacancy_ids)"
+            )
+            conn.execute(
+                "UPDATE jobs SET primary_job_id=NULL WHERE id IN (SELECT id FROM repair_same_vacancy_ids)"
+            )
+    for job_id in member_ids:
+        establish_same_vacancy(job_id)
+    with connect() as conn:
+        final_links = int(conn.execute("SELECT COUNT(*) FROM same_vacancy_links").fetchone()[0])
+    return len(bad_roots), len(member_ids), final_links

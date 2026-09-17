@@ -193,6 +193,68 @@ def test_same_vacancy_accepts_two_agreeing_secondary_signals():
     assert reasons[-2:] == ["same workplace type", "same classification"]
 
 
+def test_same_vacancy_rejects_conflicting_specific_locations_even_with_secondary_signals():
+    a = base_row(
+        id=1,
+        source="linkedin",
+        location="Brisbane, Queensland, Australia",
+        teaser_text=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type="Remote",
+        classification_text="Information Technology",
+        subclassification_text=None,
+    )
+    b = base_row(
+        id=2,
+        source="seek",
+        location="Sydney NSW",
+        teaser_text=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type="Remote",
+        classification_text="Information Technology",
+        subclassification_text=None,
+    )
+
+    assert (
+        same_vacancy_evidence(
+            a,
+            b,
+            teaser_min_similarity=0.90,
+            teaser_min_chars=40,
+            min_secondary_signals=2,
+        )
+        is None
+    )
+
+
+def test_same_vacancy_rejects_conflicting_specific_locations_even_with_matching_teaser():
+    a = base_row(
+        id=1,
+        source="linkedin",
+        location="Brisbane, Queensland, Australia",
+        teaser_text="Lead enterprise customer onboarding, API integration, testing and launch activities.",
+    )
+    b = base_row(
+        id=2,
+        source="seek",
+        location="Sydney NSW",
+        teaser_text="Lead enterprise customer onboarding, API integration, testing and launch activities.",
+    )
+
+    assert (
+        same_vacancy_evidence(
+            a,
+            b,
+            teaser_min_similarity=0.90,
+            teaser_min_chars=40,
+            min_secondary_signals=2,
+        )
+        is None
+    )
+
+
 def test_specific_locality_normalizes_cross_board_location_formats():
     assert specific_locality("Coffs Harbour, New South Wales, Australia") == "coffs harbour"
     assert specific_locality("Coffs Harbour, Coffs Harbour & North Coast NSW") == "coffs harbour"

@@ -303,6 +303,48 @@ def test_ambiguous_repost_candidate_remains_separate(tmp_path, monkeypatch):
         assert conn.execute("SELECT COUNT(*) FROM same_vacancy_links").fetchone()[0] == 0
 
 
+def test_missing_location_bridge_cannot_merge_two_different_localities(tmp_path, monkeypatch):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    teaser = "Lead enterprise customer onboarding, API integration, testing and launch activities."
+    first = ingest.ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="sydney",
+            canonical_url="https://seek.test/jobs/sydney",
+            title="Implementation Consultant",
+            employer="Example Co",
+            location="Sydney NSW",
+            teaser_text=teaser,
+        )
+    )
+    bridge = ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="bridge",
+            canonical_url="https://linkedin.test/jobs/bridge",
+            title="Implementation Consultant",
+            employer="Example Co",
+            location=None,
+            teaser_text=teaser,
+        )
+    )
+    canberra = ingest.ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="canberra",
+            canonical_url="https://seek.test/jobs/canberra",
+            title="Implementation Consultant",
+            employer="Example Co",
+            location="Canberra ACT",
+            teaser_text=teaser,
+        )
+    )
+
+    assert bridge.job_id == first.job_id
+    assert canberra.created is True
+    assert canberra.job_id == canberra.observation_job_id
+
+
 def test_cross_source_cards_only_same_locality_reuses_primary(tmp_path, monkeypatch):
     ingest = _use_tmp_db(tmp_path, monkeypatch)
     first = ingest.ingest_card(
