@@ -237,6 +237,56 @@ def test_feed_can_filter_by_normalized_geography(tmp_path, monkeypatch):
         assert [item["geography_code"] for item in payload["items"]] == ["ACT"]
 
 
+def test_search_matches_filters_on_any_active_linked_source_and_returns_primary_once(
+    tmp_path, monkeypatch
+):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            primary_id = conn.execute(
+                """INSERT INTO jobs(
+                       source,source_job_id,canonical_url,title,employer,geography_code,posted_at
+                   ) VALUES('seek','seek-1','https://seek.test/1','Old title','Acme','NSW',?)""",
+                ("2026-09-01T00:00:00+00:00",),
+            ).lastrowid
+            linkedin_id = conn.execute(
+                """INSERT INTO jobs(
+                       source,source_job_id,canonical_url,title,employer,geography_code,posted_at,
+                       primary_job_id
+                   ) VALUES('linkedin','linkedin-1','https://linkedin.test/1',
+                            'Business Analyst','Acme','ACT',?,?)""",
+                ("2026-09-12T00:00:00+00:00", primary_id),
+            ).lastrowid
+            conn.execute(
+                """INSERT INTO job_observation_state(
+                       job_id,first_seen_at,last_seen_at,capture_count,archived
+                   ) VALUES(?,?,?,1,1)""",
+                (primary_id, "2026-09-01T00:00:00+00:00", "2026-09-01T00:00:00+00:00"),
+            )
+            conn.execute(
+                """INSERT INTO job_observation_state(
+                       job_id,first_seen_at,last_seen_at,capture_count,archived
+                   ) VALUES(?,?,?,1,0)""",
+                (linkedin_id, "2026-09-12T00:00:00+00:00", "2026-09-12T00:00:00+00:00"),
+            )
+
+        response = client.get(
+            "/v3/jobs/search",
+            params=[
+                ("q", "Business Analyst"),
+                ("source", "linkedin"),
+                ("geography_code", "ACT"),
+                ("posted_after", "2026-09-11T00:00:00+00:00"),
+                ("limit", "10"),
+            ],
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert [item["id"] for item in payload["items"]] == [primary_id]
+        assert payload["has_more"] is False
+        assert payload["items"][0]["source"] == "seek"
+
+
 
 def test_feed_derives_vacancy_freshness_across_linked_sources(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
