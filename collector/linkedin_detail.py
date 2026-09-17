@@ -1,14 +1,17 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
+from http.cookiejar import CookieJar
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote
-from urllib.request import Request, urlopen
+from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from collector.settings import get_setting
+from threading import Lock
 
 HEADER_CLASS_TOKENS = {
     "job-details-jobs-unified-top-card__container",
@@ -26,6 +29,11 @@ APPLY_URL_CODE_RE = re.compile(
 )
 APPLY_URL_VALUE_RE = re.compile(r'(?<=\?url=)[^"&<]+')
 MIN_JD_CHARS = 120
+
+_LINKEDIN_HTTP_LOCK = Lock()
+_LINKEDIN_OPENER = build_opener(HTTPCookieProcessor(CookieJar()))
+_LINKEDIN_LAST_REQUEST_AT = 0.0
+_LINKEDIN_RATE_LIMIT_UNTIL = 0.0
 
 
 class LinkedInDetailError(RuntimeError):
@@ -204,25 +212,44 @@ def parse_linkedin_detail_html(html: str, *, canonical_url: str) -> LinkedInDeta
 
 
 def fetch_linkedin_detail(canonical_url: str) -> LinkedInDetailEvidence:
+    global _LINKEDIN_LAST_REQUEST_AT, _LINKEDIN_RATE_LIMIT_UNTIL
+
     url = str(canonical_url or "").strip()
     if not url:
         raise LinkedInDetailError("LinkedIn canonical URL is required")
     timeout = float(get_setting("collection.linkedin_detail_timeout_seconds"))
+    min_interval = float(get_setting("collection.linkedin_detail_min_interval_seconds"))
+    cooldown = float(get_setting("collection.linkedin_detail_rate_limit_cooldown_seconds"))
     request = Request(url, headers={"User-Agent": "Mozilla/5.0"})
-    try:
-        with urlopen(request, timeout=timeout) as response:
-            final_url = str(response.geturl() or "")
-            if "linkedin.com/signup" in final_url:
-                raise LinkedInDetailError("LinkedIn redirected the vacancy to sign-up")
-            html = response.read().decode("utf-8", errors="replace")
-    except HTTPError as exc:
-        if exc.code in {404, 410}:
-            raise LinkedInDetailUnavailableError(
-                f"LinkedIn vacancy HTTP {exc.code}", source_status="not_found"
-            ) from exc
-        raise LinkedInDetailError(f"LinkedIn vacancy HTTP {exc.code}") from exc
-    except (URLError, TimeoutError, ValueError, OSError) as exc:
-        raise LinkedInDetailError(f"LinkedIn vacancy request failed: {exc}") from exc
+
+    with _LINKEDIN_HTTP_LOCK:
+        now = time.monotonic()
+        if now < _LINKEDIN_RATE_LIMIT_UNTIL:
+            remaining = _LINKEDIN_RATE_LIMIT_UNTIL - now
+            raise LinkedInDetailError(
+                f"LinkedIn detail rate-limit cooldown active ({remaining:.1f}s remaining)"
+            )
+        wait_seconds = max(0.0, (_LINKEDIN_LAST_REQUEST_AT + min_interval) - now)
+        if wait_seconds > 0:
+            time.sleep(wait_seconds)
+        _LINKEDIN_LAST_REQUEST_AT = time.monotonic()
+
+        try:
+            with _LINKEDIN_OPENER.open(request, timeout=timeout) as response:
+                final_url = str(response.geturl() or "")
+                if "linkedin.com/signup" in final_url:
+                    raise LinkedInDetailError("LinkedIn redirected the vacancy to sign-up")
+                html = response.read().decode("utf-8", errors="replace")
+        except HTTPError as exc:
+            if exc.code in {404, 410}:
+                raise LinkedInDetailUnavailableError(
+                    f"LinkedIn vacancy HTTP {exc.code}", source_status="not_found"
+                ) from exc
+            if exc.code == 429:
+                _LINKEDIN_RATE_LIMIT_UNTIL = time.monotonic() + cooldown
+            raise LinkedInDetailError(f"LinkedIn vacancy HTTP {exc.code}") from exc
+        except (URLError, TimeoutError, ValueError, OSError) as exc:
+            raise LinkedInDetailError(f"LinkedIn vacancy request failed: {exc}") from exc
     if not html.strip():
         raise LinkedInDetailError("LinkedIn vacancy returned an empty page")
     return parse_linkedin_detail_html(html, canonical_url=url)

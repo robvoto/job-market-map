@@ -9,19 +9,44 @@ print(int(get_setting('api.port')))
 PY
 )"
 BASE="http://127.0.0.1:${PORT}"
+ROOT="$(pwd)"
 
 health_ok() { curl -fsS "${BASE}/health" >/dev/null 2>&1; }
 managed_pid() {
   local pid="$1"
   [[ -r "/proc/${pid}/cmdline" ]] || return 1
+  [[ "$(readlink -f "/proc/${pid}/cwd" 2>/dev/null || true)" == "$ROOT" ]] || return 1
   tr '\0' ' ' < "/proc/${pid}/cmdline" | grep -Eq 'uvicorn api\.main:app|scripts/start-api\.sh'
+}
+
+find_managed_api_pid() {
+  local pid
+  while read -r pid; do
+    [[ -n "$pid" ]] || continue
+    if managed_pid "$pid"; then
+      echo "$pid"
+      return 0
+    fi
+  done < <(pgrep -f "uv run uvicorn api\.main:app --host 127\.0\.0\.1 --port ${PORT}" || true)
+  return 1
+}
+
+adopt_running_api_pid() {
+  local pid
+  pid="$(find_managed_api_pid)" || return 1
+  echo "$pid" > "$PID_FILE"
+  echo "$pid"
 }
 
 case "${1:-status}" in
   start)
     if health_ok; then
-      echo "JOB_MARKET_MAP_SERVICE_ALREADY_RUNNING ${BASE}/admin"
-      exit 0
+      if pid="$(adopt_running_api_pid)"; then
+        echo "JOB_MARKET_MAP_SERVICE_ALREADY_RUNNING pid=${pid} ${BASE}/admin"
+        exit 0
+      fi
+      echo "JOB_MARKET_MAP_SERVICE_RUNNING_UNMANAGED; refusing to adopt an unverified process" >&2
+      exit 1
     fi
     nohup ./scripts/start-api.sh >>logs/api.log 2>&1 &
     pid=$!
@@ -49,8 +74,13 @@ case "${1:-status}" in
     fi
     pid="$(cat "$PID_FILE")"
     if ! managed_pid "$pid"; then
-      echo "JOB_MARKET_MAP_SERVICE_PID_NOT_MANAGED pid=${pid}; refusing to signal" >&2
-      exit 1
+      stale_pid="$pid"
+      if pid="$(adopt_running_api_pid)"; then
+        echo "JOB_MARKET_MAP_SERVICE_PID_REPAIRED stale=${stale_pid} active=${pid}"
+      else
+        echo "JOB_MARKET_MAP_SERVICE_PID_NOT_MANAGED pid=${stale_pid}; refusing to signal" >&2
+        exit 1
+      fi
     fi
     kill -TERM "$pid"
     for _ in $(seq 1 20); do

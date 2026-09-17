@@ -165,6 +165,24 @@
       "help": "Timeout for one direct public LinkedIn vacancy-page HTTP fetch used for neutral JD/apply/repost/closed/applicant evidence."
     },
     {
+      "key": "collection.linkedin_detail_min_interval_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 1.0,
+      "min": 0.0,
+      "max": 10.0,
+      "help": "Minimum spacing between direct public LinkedIn vacancy-page requests. This protects the guest detail endpoint without slowing cached JDs or other sources."
+    },
+    {
+      "key": "collection.linkedin_detail_rate_limit_cooldown_seconds",
+      "category": "Collection",
+      "type": "number",
+      "default": 60.0,
+      "min": 1.0,
+      "max": 900.0,
+      "help": "Cooldown after LinkedIn returns HTTP 429. During the cooldown JMM fails LinkedIn detail requests fast instead of repeatedly hitting the rate-limited endpoint."
+    },
+    {
       "key": "dedupe.near_match_min_score",
       "category": "Duplicates",
       "type": "number",
