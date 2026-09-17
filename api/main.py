@@ -418,12 +418,19 @@ def search_jobs(
     sources = [str(value).strip().casefold() for value in source or [] if str(value).strip()]
     geographies = [str(value).strip().upper() for value in geography_code or [] if str(value).strip()]
 
+    with connect() as conn:
+        snapshot_max_id = (
+            int(conn.execute("SELECT COALESCE(MAX(id),0) FROM jobs").fetchone()[0])
+            if through_id is None
+            else int(through_id)
+        )
+
     linked_clauses = [
-        "(vacancy_job.id=j.id OR vacancy_job.primary_job_id=j.id)",
+        "vacancy_job.id <= ?",
         "COALESCE(vacancy_state.archived,0)=0",
         source_status_is_active_sql("vacancy_job.source_status"),
     ]
-    linked_params: list[object] = []
+    linked_params: list[object] = [snapshot_max_id]
     if sources:
         placeholders = ",".join("?" for _ in sources)
         linked_clauses.append(f"vacancy_job.source IN ({placeholders})")
@@ -446,58 +453,85 @@ def search_jobs(
             linked_params.extend([like, like, like])
         linked_clauses.append("(" + " OR ".join(term_clauses) + ")")
 
-    with connect() as conn:
-        snapshot_max_id = (
-            int(conn.execute("SELECT COALESCE(MAX(id),0) FROM jobs").fetchone()[0])
-            if through_id is None
-            else int(through_id)
-        )
-    search_clauses = ["j.primary_job_id IS NULL", "j.id <= ?"]
-    search_params: list[object] = [snapshot_max_id]
-    search_clauses.append(
-        "EXISTS ("
-        "SELECT 1 FROM jobs vacancy_job "
+    linked_from_where = (
+        " FROM jobs vacancy_job "
         "JOIN job_observation_state vacancy_state ON vacancy_state.job_id=vacancy_job.id "
-        "WHERE " + " AND ".join(linked_clauses) + ")"
+        "WHERE " + " AND ".join(linked_clauses)
     )
-    search_params.extend(linked_params)
-    if not include_archived:
-        search_clauses.append(_vacancy_active_clause("j"))
-    search_where = f"WHERE {' AND '.join(search_clauses)}"
-    page_clauses = ["j.id > ?", *search_clauses]
-    page_params: list[object] = [after_id, *search_params]
     with connect() as conn:
         total = int(
             conn.execute(
-                f"""
-                SELECT COUNT(*)
-                  FROM jobs j
-                  LEFT JOIN job_observation_state s ON s.job_id=j.id
-                  {search_where}
-                """,
-                search_params,
+                "SELECT COUNT(DISTINCT COALESCE(vacancy_job.primary_job_id, vacancy_job.id))"
+                + linked_from_where,
+                linked_params,
             ).fetchone()[0]
         )
-        rows = conn.execute(
-            f"""
-            SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at,
-                   {_vacancy_lifecycle_select("j")}
-              FROM jobs j
-              LEFT JOIN job_observation_state s ON s.job_id=j.id
-             WHERE {' AND '.join(page_clauses)}
-             ORDER BY j.id ASC LIMIT ?
-            """,
-            (*page_params, resolved_limit + 1),
-        ).fetchall()
+        page_ids = [
+            int(row["primary_id"])
+            for row in conn.execute(
+                "SELECT DISTINCT COALESCE(vacancy_job.primary_job_id, vacancy_job.id) AS primary_id"
+                + linked_from_where
+                + " AND COALESCE(vacancy_job.primary_job_id, vacancy_job.id) > ?"
+                + " ORDER BY primary_id ASC LIMIT ?",
+                (*linked_params, after_id, resolved_limit + 1),
+            ).fetchall()
+        ]
+        rows = []
+        if page_ids:
+            placeholders = ",".join("?" for _ in page_ids)
+            rows = conn.execute(
+                f"""
+                SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at
+                  FROM jobs j
+                  LEFT JOIN job_observation_state s ON s.job_id=j.id
+                 WHERE j.id IN ({placeholders})
+                 ORDER BY j.id ASC
+                """,
+                page_ids,
+            ).fetchall()
+        page_ids = [int(row["id"]) for row in rows]
+        lifecycle_by_id: dict[int, dict[str, object]] = {}
+        if page_ids:
+            placeholders = ",".join("?" for _ in page_ids)
+            lifecycle_rows = conn.execute(
+                f"""
+                SELECT primary_job.id AS primary_id,
+                       MAX(vacancy_state.last_seen_at) AS vacancy_last_seen_at,
+                       CASE WHEN MAX(
+                           CASE WHEN COALESCE(vacancy_state.archived,0)=0
+                                  AND {source_status_is_active_sql("vacancy_job.source_status")}
+                                THEN 1 ELSE 0 END
+                       )=1 THEN 0 ELSE 1 END AS vacancy_archived
+                  FROM jobs primary_job
+                  JOIN jobs vacancy_job
+                    ON vacancy_job.id=primary_job.id OR vacancy_job.primary_job_id=primary_job.id
+                  JOIN job_observation_state vacancy_state ON vacancy_state.job_id=vacancy_job.id
+                 WHERE primary_job.id IN ({placeholders})
+                 GROUP BY primary_job.id
+                """,
+                page_ids,
+            ).fetchall()
+            lifecycle_by_id = {
+                int(row["primary_id"]): {
+                    "vacancy_last_seen_at": row["vacancy_last_seen_at"],
+                    "vacancy_archived": row["vacancy_archived"],
+                }
+                for row in lifecycle_rows
+            }
     has_more = len(rows) > resolved_limit
     rows = rows[:resolved_limit]
+    payload_rows = []
+    for row in rows:
+        item = dict(row)
+        item.update(lifecycle_by_id.get(int(item["id"]), {}))
+        payload_rows.append(item)
     return {
         "api_version": API_VERSION,
         "schema_version": SCHEMA_VERSION,
         "generated_at": _now(),
         "snapshot_max_id": snapshot_max_id,
         "total": total,
-        "items": [_job_payload(row, include_raw=include_raw) for row in rows],
+        "items": [_job_payload(row, include_raw=include_raw) for row in payload_rows],
         "next_cursor": int(rows[-1]["id"]) if rows else after_id,
         "has_more": has_more,
     }
