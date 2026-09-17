@@ -54,7 +54,7 @@ For one stable multi-page consumer run, the first feed response returns `snapsho
 GET /v3/jobs/search?q=<role-term>&source=<board>&geography_code=<code>&posted_after=<timestamp>
 ```
 
-The `q`, `source`, and `geography_code` parameters may be repeated. The filters are evaluated together against any active linked source row, while the response contains each matching canonical vacancy once. `after_id` and `through_id` provide stateless pagination; filtered search does not create or advance a consumer checkpoint.
+The `q`, `source`, and `geography_code` parameters may be repeated. The filters are evaluated together against any active linked source row, while the response contains each matching canonical vacancy once. The response's `total` counts those canonical vacancies within the fixed snapshot and does not change with `after_id`. `after_id` and `through_id` provide stateless pagination; filtered search does not create or advance a consumer checkpoint.
 
 ## Canonical JD retrieval
 

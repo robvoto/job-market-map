@@ -452,29 +452,42 @@ def search_jobs(
             if through_id is None
             else int(through_id)
         )
-    clauses = ["j.primary_job_id IS NULL", "j.id > ?", "j.id <= ?"]
-    params: list[object] = [after_id, snapshot_max_id]
-    clauses.append(
+    search_clauses = ["j.primary_job_id IS NULL", "j.id <= ?"]
+    search_params: list[object] = [snapshot_max_id]
+    search_clauses.append(
         "EXISTS ("
         "SELECT 1 FROM jobs vacancy_job "
         "JOIN job_observation_state vacancy_state ON vacancy_state.job_id=vacancy_job.id "
         "WHERE " + " AND ".join(linked_clauses) + ")"
     )
-    params.extend(linked_params)
+    search_params.extend(linked_params)
     if not include_archived:
-        clauses.append(_vacancy_active_clause("j"))
-    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+        search_clauses.append(_vacancy_active_clause("j"))
+    search_where = f"WHERE {' AND '.join(search_clauses)}"
+    page_clauses = ["j.id > ?", *search_clauses]
+    page_params: list[object] = [after_id, *search_params]
     with connect() as conn:
+        total = int(
+            conn.execute(
+                f"""
+                SELECT COUNT(*)
+                  FROM jobs j
+                  LEFT JOIN job_observation_state s ON s.job_id=j.id
+                  {search_where}
+                """,
+                search_params,
+            ).fetchone()[0]
+        )
         rows = conn.execute(
             f"""
             SELECT j.*, s.first_seen_at, s.last_seen_at, s.capture_count, s.archived, s.compacted_at,
                    {_vacancy_lifecycle_select("j")}
               FROM jobs j
               LEFT JOIN job_observation_state s ON s.job_id=j.id
-              {where}
+             WHERE {' AND '.join(page_clauses)}
              ORDER BY j.id ASC LIMIT ?
             """,
-            (*params, resolved_limit + 1),
+            (*page_params, resolved_limit + 1),
         ).fetchall()
     has_more = len(rows) > resolved_limit
     rows = rows[:resolved_limit]
@@ -483,6 +496,7 @@ def search_jobs(
         "schema_version": SCHEMA_VERSION,
         "generated_at": _now(),
         "snapshot_max_id": snapshot_max_id,
+        "total": total,
         "items": [_job_payload(row, include_raw=include_raw) for row in rows],
         "next_cursor": int(rows[-1]["id"]) if rows else after_id,
         "has_more": has_more,

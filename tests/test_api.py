@@ -283,8 +283,25 @@ def test_search_matches_filters_on_any_active_linked_source_and_returns_primary_
         assert response.status_code == 200
         payload = response.json()
         assert [item["id"] for item in payload["items"]] == [primary_id]
+        assert payload["total"] == 1
         assert payload["has_more"] is False
         assert payload["items"][0]["source"] == "seek"
+
+        second_page = client.get(
+            "/v3/jobs/search",
+            params=[
+                ("q", "Business Analyst"),
+                ("source", "linkedin"),
+                ("geography_code", "ACT"),
+                ("posted_after", "2026-09-11T00:00:00+00:00"),
+                ("after_id", str(primary_id)),
+                ("through_id", str(payload["snapshot_max_id"])),
+                ("limit", "10"),
+            ],
+        )
+        assert second_page.status_code == 200
+        assert second_page.json()["items"] == []
+        assert second_page.json()["total"] == 1
 
 
 

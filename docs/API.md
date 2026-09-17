@@ -24,7 +24,7 @@ GET /v3/coverage/seek
 
 `GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. The first page returns `snapshot_max_id`; a multi-page caller may pass that value back as `through_id` on later pages to keep one run on a fixed market boundary. Job payloads contain `identity_key` for stable cross-service correlation.
 
-`GET /v3/jobs/search` is the stateless filtered-search contract. It accepts repeated `q`, `source`, and `geography_code` parameters plus `posted_after`, `after_id`, and `through_id`. Each filter is evaluated against any active linked source row; matching vacancies are returned once as their canonical primary. Search does not create or advance a consumer checkpoint.
+`GET /v3/jobs/search` is the stateless filtered-search contract. It accepts repeated `q`, `source`, and `geography_code` parameters plus `posted_after`, `after_id`, and `through_id`. Each filter is evaluated against any active linked source row; matching vacancies are returned once as their canonical primary. The response's `total` is the count of those canonical vacancies within the fixed snapshot and is independent of the page cursor. Search does not create or advance a consumer checkpoint.
 
 When JMM has obtained a full JD, job payloads also expose the one current neutral JD as `full_description`, `jd_fetched_at`, and `jd_source`. JMM does not expose JD snapshot/version history.
 
