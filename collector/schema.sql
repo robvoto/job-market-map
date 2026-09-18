@@ -310,6 +310,7 @@ CREATE TABLE IF NOT EXISTS scheduler_state (
     id INTEGER PRIMARY KEY CHECK(id=1),
     heartbeat_at TEXT,
     last_attempt_local_date TEXT,
+    last_attempt_seek_slot TEXT,
     last_started_at TEXT,
     last_finished_at TEXT,
     last_status TEXT,

@@ -92,6 +92,13 @@ Market lifecycle is rich/current -> archived/compacted -> neutral tombstone. Ret
 Every parser, partition, dedupe, cursor, retention, settings or API-contract bug gets a regression test. Update docs with architecture/API changes in the same commit. Source parser failures must be explicit; never silently fall back to JD opening.
 
 ## Scheduler / service / backup rule
-Use the project-owned in-app scheduler. The background Admin/API service is started with `./scripts/service.sh start`; scheduled and manual collection both invoke the same collection-cycle runner. Supported runtime entrypoints are single-instance: API via `data/api-service.lock`, persistent browser via `data/browser-service.lock`/its fixed user-service unit, and collection via `data/collection.lock`.
+Use the project-owned in-app scheduler. Scheduled and manual collection both invoke the same collection-cycle runner. Supported runtime entrypoints are single-instance: API via `data/api-service.lock`, persistent browser via `data/browser-service.lock`/its fixed user-service unit, and collection via `data/collection.lock`.
+
+### Runtime ownership
+Rob owns starting, stopping and restarting the local JMM runtime because he wants the live terminal/log visibility himself.
+
+Agents must **not** start, stop, restart, relaunch, replace or take over the local JMM API/Admin service, scheduler, persistent browser service, or collection process unless Rob explicitly asks for that runtime action in the current conversation. Do not infer permission from a coding, debugging, testing, deployment-preparation or health-check request. Do not create replacement launchers or wrapper scripts unless Rob explicitly asks for one.
+
+The default agent behaviour is read-only runtime inspection: check service status, process/lock state, Admin/API status and durable logs; make code/config/test/doc changes as requested; then leave runtime startup/restart to Rob. If a code change requires a restart to take effect, say so clearly and stop there unless Rob explicitly authorises the restart.
 
 Create/verify an online SQLite backup before collection by default. Backup policy is admin-configurable, but do not disable or bypass it casually. The shared scheduler runs proven whole-state SEEK first and then the resumable LinkedIn JobSpy/HTTP campaign under the same collection lock/runtime budget. LinkedIn must never use the persistent SEEK Chromium path; the obsolete browser LinkedIn implementation was removed under JMM-011.

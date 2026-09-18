@@ -829,3 +829,70 @@ def test_admin_stats_exposes_current_bootstrap_and_latest(tmp_path, monkeypatch)
             "latest_seek": latest,
             "linkedin_campaign": linkedin_campaign,
         }
+
+
+def test_v3_cached_job_jd_get_never_enriches_and_returns_cached_value(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        from api import main as api_main
+        from collector import db
+
+        db.store_job_jd_once(
+            1,
+            full_description="Cached canonical JD",
+            jd_fetched_at="2026-09-17T13:00:00+00:00",
+            jd_source="seek_job_page",
+        )
+        monkeypatch.setattr(
+            api_main,
+            "get_or_enrich_job_jd",
+            lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("GET must not enrich")),
+        )
+
+        response = client.get("/v3/jobs/1/jd")
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert payload["status"] == "cached"
+        assert payload["full_description"] == "Cached canonical JD"
+        assert payload["jd_source"] == "seek_job_page"
+
+
+def test_v3_cached_job_jd_get_returns_conflict_when_not_cached(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        insert_jobs(1)
+        from api import main as api_main
+
+        monkeypatch.setattr(
+            api_main,
+            "get_or_enrich_job_jd",
+            lambda *_a, **_k: (_ for _ in ()).throw(AssertionError("GET must not enrich")),
+        )
+        response = client.get("/v3/jobs/1/jd")
+
+        assert response.status_code == 409
+        assert response.json()["detail"] == "JD not cached yet"
+
+
+def test_v3_cached_job_jd_get_returns_gone_for_tombstoned_identity(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        from collector import db
+
+        with db.connect() as conn:
+            conn.execute(
+                """
+                INSERT INTO job_tombstones(
+                    source,source_job_id,identity_key,canonical_url,title,
+                    first_seen_at,last_seen_at,removed_at
+                ) VALUES('linkedin','li-123','linkedin:id:li-123',
+                         'https://www.linkedin.com/jobs/view/123','Role',
+                         '2026-09-17T12:00:00+00:00','2026-09-17T12:30:00+00:00',
+                         '2026-09-17T13:00:00+00:00')
+                """
+            )
+        response = client.get(
+            "/v3/jobs/999/jd", params={"identity_key": "linkedin:id:li-123"}
+        )
+
+        assert response.status_code == 410
+        assert response.json()["detail"] == "job was terminal-retired"

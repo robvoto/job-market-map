@@ -9,6 +9,8 @@ from threading import Event
 
 from collector.backup import create_backup
 from collector.browser_broker import close_browser, close_tab, open_tab
+from collector.jd_batch import enrich_pending_jds
+from collector.jd_queue import mark_pending_deferred, pending_primary_ids
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
 from collector.run_stats import build_run_stats, log_run_summary, population_stats
@@ -83,18 +85,16 @@ def _satisfy_manual_schedule_slot(
 ) -> str | None:
     if trigger != "manual" or final_status != "COMPLETE" or days != default_days:
         return None
-    schedule_date = SchedulerService.manual_run_schedule_date(started_at, finished_at)
-    if not schedule_date:
+    schedule_slot = SchedulerService.manual_run_schedule_slot(started_at, finished_at)
+    if not schedule_slot:
         return None
     update_scheduler_state(
-        last_attempt_local_date=schedule_date,
+        last_attempt_local_date=schedule_slot.removeprefix("seek:")[:10],
+        last_attempt_seek_slot=schedule_slot,
         last_status="SATISFIED_MANUAL",
-        last_message=(
-            "Successful manual collection satisfied the configured "
-            f"overnight slot for {schedule_date}."
-        ),
+        last_message=f"Successful manual collection satisfied SEEK slot {schedule_slot}.",
     )
-    return schedule_date
+    return schedule_slot
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -230,6 +230,37 @@ def main(argv: list[str] | None = None) -> int:
                 if event in jd_totals:
                     jd_totals[event] += 1
 
+            seek_queue_since = run_started_local.isoformat(timespec="seconds")
+
+            def drain_new_seek_jds(*, max_candidates: int | None = None) -> None:
+                nonlocal seek_jd_elapsed_seconds
+                if stop_event.is_set() or deadline_reached():
+                    return
+                started = time.monotonic()
+                result = enrich_pending_jds(
+                    source="seek",
+                    queued_since=seek_queue_since,
+                    max_candidates=max_candidates,
+                    should_stop=stop_event.is_set,
+                    deadline_reached=deadline_reached,
+                )
+                seek_jd_elapsed_seconds += time.monotonic() - started
+                jd_totals["attempted"] += (
+                    result.stored + result.cached + result.failed + result.unavailable
+                )
+                jd_totals["stored"] += result.stored
+                jd_totals["failed"] += result.failed
+                jd_totals["unavailable"] += result.unavailable
+                if result.candidates:
+                    log.info(
+                        "SEEK queued JD batch candidates=%s stored=%s cached=%s failed=%s unavailable=%s",
+                        result.candidates,
+                        result.stored,
+                        result.cached,
+                        result.failed,
+                        result.unavailable,
+                    )
+
             def sweep_required_jds(*, include_existing_unfetched: bool = False) -> None:
                 nonlocal jd_result, detail_page_id, seek_jd_elapsed_seconds
                 if stop_event.is_set() or deadline_reached():
@@ -272,6 +303,10 @@ def main(argv: list[str] | None = None) -> int:
                     progress.incomplete_partitions,
                     progress.partitions_processed,
                 )
+                if not args.backfill_existing_jds:
+                    drain_new_seek_jds(
+                        max_candidates=int(get_setting("collection.seek_jd_batch_size"))
+                    )
 
             seek_cards_started = time.monotonic()
             result = run_seek_cycle(
@@ -287,11 +322,26 @@ def main(argv: list[str] | None = None) -> int:
 
             run_partitions_processed = result.partitions_processed
 
-            # A completed SEEK market cycle is not complete for JMM until the
-            # current coverage window has JDs. Resume runs use the same coverage,
-            # so jobs discovered before the current process started are not missed.
-            if result.status == "COMPLETE":
-                sweep_required_jds(include_existing_unfetched=args.backfill_existing_jds)
+            if (stop_event.is_set() or deadline_reached()) and not args.backfill_existing_jds:
+                deferred = mark_pending_deferred(
+                    source="seek",
+                    queued_since=seek_queue_since,
+                    reason=(
+                        "deferred by collection stop"
+                        if stop_event.is_set()
+                        else "deferred by collection runtime limit"
+                    ),
+                )
+                if deferred:
+                    log.info("SEEK JD queue carried forward rows=%s", deferred)
+
+            if result.partitions_processed > 0 and not stop_event.is_set() and not deadline_reached():
+                if args.backfill_existing_jds:
+                    sweep_required_jds(include_existing_unfetched=True)
+                else:
+                    # Finish this run's queue after the per-partition bounded drains.
+                    # Historical unattempted repair debt is intentionally excluded.
+                    drain_new_seek_jds()
 
             # Release this process's SEEK-owned pages/CDP attachment before exit.
             for page_id in (detail_page_id, list_page_id):
@@ -316,7 +366,10 @@ def main(argv: list[str] | None = None) -> int:
                 final_status = "PARTIAL_TIME_LIMIT"
             elif result.status != "COMPLETE":
                 final_status = result.status
-            elif jd_result is not None and (jd_result.failed or jd_result.remaining):
+            elif jd_result is not None and (jd_result.failed or jd_result.remaining) or (
+                not args.backfill_existing_jds
+                and pending_primary_ids(source="seek", queued_since=seek_queue_since)
+            ):
                 final_status = "PARTIAL_JD"
             else:
                 final_status = "COMPLETE"
@@ -366,7 +419,7 @@ def main(argv: list[str] | None = None) -> int:
             ):
                 snapshot_and_reset_coverage(codes)
                 log.info(
-                    "archived exhausted incomplete daily SEEK coverage and reset workspace"
+                    "archived exhausted incomplete scheduled SEEK coverage and reset workspace"
                 )
             _satisfy_manual_schedule_slot(
                 trigger=args.trigger,

@@ -79,8 +79,15 @@ def test_admin_status_is_source_specific_and_bootstrap_is_not_live_status():
     html = Path("api/admin.html").read_text(encoding="utf-8")
     assert "bootstrapOnly" not in html
     assert "active_source" in html
-    assert "LinkedIn running" in html
-    assert "SEEK running" in html
-    assert "Latest SEEK run:" in html
-    assert "LinkedIn card-first geography refreshes every 4 hours" in html
-    assert "daily whole-state SEEK run" in html
+    assert "LinkedIn collection running" in html
+    assert "SEEK collection running" in html
+
+
+def test_admin_surfaces_major_attention_and_distinguishes_repair_from_collection():
+    html = Path("api/admin.html").read_text(encoding="utf-8")
+    assert 'id="system-attention"' in html
+    assert "Scheduler is not running" in html
+    assert "Scheduler heartbeat is stale" in html
+    assert "This is a SEEK warning, not the overall JMM status." in html
+    assert "LinkedIn collection running" in html
+    assert "SEEK collection running" in html

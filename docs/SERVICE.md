@@ -2,7 +2,7 @@
 
 ## Why this exists
 
-Job Market Map uses one **in-app scheduler** for two source rhythms: a daily SEEK whole-state run and short rolling LinkedIn-only refreshes.
+Job Market Map uses one **in-app scheduler** for two source rhythms: SEEK whole-state runs every 12 hours and short rolling LinkedIn-only refreshes.
 
 The distinction is important:
 - the API/Admin service stays running;
@@ -55,7 +55,7 @@ The Admin page provides:
 - **Run LinkedIn now** — starts the current rolling LinkedIn geography slot without SEEK;
 - **Stop current collection** — requests a graceful stop after the current partition unit;
 - **Pause ALL schedules** / **Resume ALL schedules** — emergency master switch for automatic collection;
-- **Pause SEEK schedule** / **Resume SEEK schedule** — controls only the daily SEEK run;
+- **Pause SEEK schedule** / **Resume SEEK schedule** — controls only the SEEK schedule;
 - **Pause LinkedIn schedule** / **Resume LinkedIn schedule** — controls only rolling LinkedIn refreshes;
 - overnight local time control (default **02:00**);
 - current collector PID/state;
@@ -80,11 +80,11 @@ Do not remove these locks in favour of a UI-only `running=true` flag.
 
 ## Scheduling semantics
 
-SEEK uses the configured daily local time (default **02:00**). LinkedIn defaults to a **5-hour rolling window every 4 hours**. The LinkedIn window must remain larger than its cadence so adjacent runs overlap. `scheduler.enabled` is only the emergency master switch; `scheduler.seek_enabled` and `scheduler.linkedin_enabled` control the two automatic source rhythms independently. Both schedules share `data/collection.lock`, so they never mutate JMM concurrently.
+SEEK uses a configurable interval, default **12 hours**, anchored at the configured local time (default **02:00**), producing default slots at **02:00 and 14:00**. LinkedIn defaults to a **5-hour rolling window every 4 hours**. The LinkedIn window must remain larger than its cadence so adjacent runs overlap. `scheduler.enabled` is only the emergency master switch; `scheduler.seek_enabled` and `scheduler.linkedin_enabled` control the two automatic source rhythms independently. Both schedules share `data/collection.lock`, so they never mutate JMM concurrently.
 
-When LinkedIn and SEEK are both due, LinkedIn is started first. The daily SEEK slot remains due and starts after LinkedIn releases the singleton lock.
+When LinkedIn and SEEK are both due, LinkedIn is started first. The SEEK slot remains due and starts after LinkedIn releases the singleton lock.
 
-The scheduler does not blindly restart collection every night:
+The scheduler does not blindly restart collection on every slot:
 - if the current SEEK NSW/ACT/QLD coverage cycle is incomplete, the run **resumes it**;
 - if there is no current coverage workspace, the run starts a **fresh coverage cycle**;
 - if all enabled states are complete, the next run first snapshots coverage history and starts a **fresh coverage cycle**;
@@ -94,13 +94,13 @@ A successful manual run using the normal freshness horizon may satisfy the sched
 
 Fresh extra runs within the same 24-hour freshness period use exact SEEK `listingDate` timestamps as a conservative incremental cutoff with `collection.seek_incremental_overlap_minutes` (default 120 minutes). Only a prior completed **fresh** cycle is trusted as a watermark. Resumed/stopped/partial cycles never advance it. If the previous completed fresh run is old enough that the cutoff falls outside the current 1-day horizon, the run is a normal full 1-day reconciliation. Missing or non-monotonic exact timestamps also force full paging.
 
-A daily refresh therefore cannot inherit yesterday's partition memberships and falsely claim current completeness.
+A fresh scheduled cycle cannot inherit stale partition memberships and falsely claim current completeness.
 
-When SEEK failure hardening (JMM-014) exhausts a normal daily cycle without full completion (`BLOCKED_INCOMPLETE`), the run is archived and reset the same way rather than left resuming an unresolvable workspace; a scheduled SEEK failure gets at most one same-window retry after `scheduler.seek_failure_retry_minutes` (default 15 minutes), and a second same-day scheduled failure does not loop again.
+When SEEK failure hardening (JMM-014) exhausts a normal scheduled cycle without full completion (`BLOCKED_INCOMPLETE`), the run is archived and reset the same way rather than left resuming an unresolvable workspace; a scheduled SEEK failure gets at most one same-window retry after `scheduler.seek_failure_retry_minutes` (default 15 minutes), and a second same-day scheduled failure does not loop again.
 
 Rollover (`snapshot_and_reset_coverage`, JMM-015) archives each geography's current root summary into `seek_coverage_history`, then deletes every child/grandchild partition for that geography and resets only the reused state-root row (matched by URL) to PENDING. Earlier rollover code reset root fields without deleting children, so a later same-day root completion — for example a narrower incremental pass reporting fewer results than the split threshold — could mark the root COMPLETE while a prior cycle's orphaned classification/subclassification/work-type rows still counted as incomplete. Because children are now deleted rather than left PENDING, COMPLETE always implies `incomplete_partitions=0` for that geography. Canonical jobs/JDs are never touched by rollover.
 
-Operating cadence is source-specific rather than symmetric. LinkedIn runs every 4 hours with a 5-hour lookback because its 1,000-result ceiling makes wider whole-state rolling windows unsafe; it remains enabled on weekends. SEEK runs once daily over one day because it is browser-backed and can encounter human/security challenges. If both are due at midnight, the scheduler evaluates LinkedIn first; after that short HTTP pass releases the singleton collection lock, SEEK may start. Normal collection ingests/dedupes cards first, then enriches newly discovered jobs through the pending JD queue. On-demand JD retrieval remains a fallback for missing canonical JDs.
+Operating cadence is source-specific. LinkedIn runs every 4 hours with a 5-hour lookback. SEEK runs every 12 hours by default with a 1-day horizon. Both sources queue newly discovered jobs for JD enrichment during their normal runs; SEEK drains bounded JD batches between coverage partitions and finishes with a final queue drain. If both sources are due together, LinkedIn runs first and SEEK follows after the singleton lock is released. On-demand JD retrieval remains a fallback, not the normal collection path.
 
 The scheduler only starts when the API was launched in service mode (`start-api.sh` / `service.sh`). Direct test imports do not create background collection.
 

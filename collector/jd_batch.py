@@ -4,7 +4,11 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from collector.db import connect
-from collector.jd_enrichment import JDSourceFetchError, JDSourceUnavailableError, get_or_enrich_job_jd
+from collector.jd_enrichment import (
+    JDSourceFetchError,
+    JDSourceUnavailableError,
+    get_or_enrich_job_jd,
+)
 from collector.jd_queue import pending_primary_ids, record_pending_attempt
 from collector.run_logging import collection_logger
 from collector.source_status import source_status_is_active_sql
@@ -73,10 +77,21 @@ def recent_primary_ids(*, source: str | None = None, posted_since: str) -> list[
     return _primary_ids(source=source, posted_since=posted_since, require_missing_jd=False)
 
 
-def _enrich_ids(ids: list[int], *, source: str | None = None, record_queue_attempts: bool = False) -> JDBatchResult:
+def _enrich_ids(
+    ids: list[int],
+    *,
+    source: str | None = None,
+    record_queue_attempts: bool = False,
+    should_stop=None,
+    deadline_reached=None,
+) -> JDBatchResult:
     log = collection_logger()
     stored = cached = failed = unavailable = 0
     for primary_id in ids:
+        if should_stop is not None and should_stop():
+            break
+        if deadline_reached is not None and deadline_reached():
+            break
         last_error: Exception | None = None
         for attempt in (1, 2):
             try:
@@ -90,13 +105,13 @@ def _enrich_ids(ids: list[int], *, source: str | None = None, record_queue_attem
                 else:
                     stored += 1
                 if record_queue_attempts:
-                    record_pending_attempt(primary_id, error=None)
+                    record_pending_attempt(primary_id, source=source, error=None)
                 last_error = None
                 break
             except JDSourceUnavailableError as exc:
                 unavailable += 1
                 if record_queue_attempts:
-                    record_pending_attempt(primary_id, error=str(exc))
+                    record_pending_attempt(primary_id, source=source, error=str(exc))
                 log.info("JD unavailable primary_job_id=%s error=%s", primary_id, exc)
                 last_error = None
                 break
@@ -109,7 +124,7 @@ def _enrich_ids(ids: list[int], *, source: str | None = None, record_queue_attem
                     or "rate-limit" in message.casefold()
                 )
                 if record_queue_attempts:
-                    record_pending_attempt(primary_id, error=message)
+                    record_pending_attempt(primary_id, source=source, error=message)
                 if rate_limited:
                     failed += 1
                     log.error(
@@ -150,6 +165,23 @@ def enrich_missing_jds(*, source: str | None = None, first_seen_since: str | Non
     return _enrich_ids(ids, source=source)
 
 
-def enrich_pending_jds(*, source: str | None = None) -> JDBatchResult:
-    ids = pending_primary_ids(source=source)
-    return _enrich_ids(ids, source=source, record_queue_attempts=True)
+def enrich_pending_jds(
+    *,
+    source: str | None = None,
+    queued_since: str | None = None,
+    max_candidates: int | None = None,
+    should_stop=None,
+    deadline_reached=None,
+) -> JDBatchResult:
+    ids = pending_primary_ids(
+        source=source,
+        queued_since=queued_since,
+        limit=max_candidates,
+    )
+    return _enrich_ids(
+        ids,
+        source=source,
+        record_queue_attempts=True,
+        should_stop=should_stop,
+        deadline_reached=deadline_reached,
+    )

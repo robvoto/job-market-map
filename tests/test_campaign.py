@@ -261,3 +261,62 @@ def test_linkedin_fetches_geographies_in_parallel_but_ingests_on_one_thread(
     assert len(ingest_threads) == 3
     assert len(set(ingest_threads)) == 1
     assert ingest_threads[0] == threading.get_ident()
+
+
+def test_completed_linkedin_campaign_seeds_and_drains_jd_queue_before_complete(
+    tmp_path, monkeypatch
+):
+    from collector.jd_batch import JDBatchResult
+
+    campaign, _ = _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(campaign, "get_setting", lambda key: True)
+    monkeypatch.setattr(
+        campaign,
+        "linkedin_geography_runs",
+        lambda: [
+            {"geography_code": "NSW", "location": "New South Wales, Australia"}
+        ],
+    )
+    monkeypatch.setattr(
+        campaign, "fetch_linkedin_geography_page", lambda *_a, **_k: _fetched()
+    )
+
+    def fake_ingest(fetched, location, **kwargs):
+        save_cursor(
+            "linkedin",
+            "",
+            location,
+            10,
+            status="COMPLETE",
+            cycle_key=kwargs["cycle_key"],
+        )
+        return _result()
+
+    monkeypatch.setattr(campaign, "ingest_linkedin_geography_page", fake_ingest)
+    events = []
+    monkeypatch.setattr(
+        campaign,
+        "cleanup_observed_terminal_families",
+        lambda **kwargs: events.append(("cleanup", kwargs["source"])),
+    )
+    monkeypatch.setattr(
+        campaign,
+        "seed_new_missing_since",
+        lambda **kwargs: events.append(("seed", kwargs["source"])) or 3,
+    )
+    monkeypatch.setattr(
+        campaign,
+        "enrich_pending_jds",
+        lambda **kwargs: events.append(("drain", kwargs["source"]))
+        or JDBatchResult(candidates=3, stored=3, cached=0, failed=0, unavailable=0),
+    )
+
+    result = campaign.run_linkedin_campaign(
+        days=1, should_stop=lambda: False, deadline_reached=lambda: False
+    )
+
+    assert result.status == "COMPLETE"
+    assert result.detail_attempted == 3
+    assert result.detail_stored == 3
+    assert result.detail_failed == 0
+    assert events == [("cleanup", "linkedin"), ("seed", "linkedin"), ("drain", "linkedin")]

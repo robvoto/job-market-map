@@ -2,12 +2,34 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 
-def test_scheduler_due_only_inside_window_and_once_per_local_day(monkeypatch):
+def test_scheduler_loop_survives_unexpected_tick_error(monkeypatch):
+    from collector import scheduler
+
+    service = scheduler.SchedulerService()
+    calls = []
+
+    def tick():
+        calls.append("tick")
+        if len(calls) == 1:
+            raise RuntimeError("transient scheduler failure")
+        service._stop.set()
+
+    monkeypatch.setattr(service, "_tick", tick)
+    monkeypatch.setattr(scheduler, "get_setting", lambda _key: 1)
+    monkeypatch.setattr(service._stop, "wait", lambda _seconds: False)
+
+    service._loop()
+
+    assert calls == ["tick", "tick"]
+
+
+def test_scheduler_due_only_inside_each_twelve_hour_slot(monkeypatch):
     from collector import scheduler
 
     settings = {
         "scheduler.enabled": True,
         "scheduler.seek_enabled": True,
+        "scheduler.seek_interval_hours": 12,
         "scheduler.daily_hour": 2,
         "scheduler.daily_minute": 0,
         "scheduler.run_window_minutes": 240,
@@ -16,12 +38,13 @@ def test_scheduler_due_only_inside_window_and_once_per_local_day(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "scheduler_state",
-        lambda: {"last_attempt_local_date": None},
+        lambda: {"last_attempt_seek_slot": None},
     )
     service = scheduler.SchedulerService()
     tz = ZoneInfo("Australia/Sydney")
     assert service.due_now(datetime(2026, 9, 10, 3, 0, tzinfo=tz)) is True
     assert service.due_now(datetime(2026, 9, 10, 12, 0, tzinfo=tz)) is False
+    assert service.due_now(datetime(2026, 9, 10, 15, 0, tzinfo=tz)) is True
 
     settings["scheduler.seek_enabled"] = False
     assert service.due_now(datetime(2026, 9, 10, 3, 0, tzinfo=tz)) is False
@@ -30,9 +53,10 @@ def test_scheduler_due_only_inside_window_and_once_per_local_day(monkeypatch):
     monkeypatch.setattr(
         scheduler,
         "scheduler_state",
-        lambda: {"last_attempt_local_date": "2026-09-10"},
+        lambda: {"last_attempt_seek_slot": "seek:2026-09-10T02:00+10:00"},
     )
     assert service.due_now(datetime(2026, 9, 10, 3, 0, tzinfo=tz)) is False
+    assert service.due_now(datetime(2026, 9, 10, 15, 0, tzinfo=tz)) is True
 
 
 def test_manual_run_only_satisfies_schedule_when_it_overlaps_schedule_window(monkeypatch):
@@ -41,6 +65,7 @@ def test_manual_run_only_satisfies_schedule_when_it_overlaps_schedule_window(mon
     settings = {
         "scheduler.daily_hour": 0,
         "scheduler.daily_minute": 0,
+        "scheduler.seek_interval_hours": 12,
         "scheduler.run_window_minutes": 240,
     }
     monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
@@ -197,6 +222,7 @@ def test_failed_seek_run_gets_one_same_day_retry_after_cooldown(monkeypatch):
     settings = {
         "scheduler.enabled": True,
         "scheduler.seek_enabled": True,
+        "scheduler.seek_interval_hours": 12,
         "scheduler.daily_hour": 0,
         "scheduler.daily_minute": 0,
         "scheduler.run_window_minutes": 240,
@@ -208,6 +234,7 @@ def test_failed_seek_run_gets_one_same_day_retry_after_cooldown(monkeypatch):
         "scheduler_state",
         lambda: {
             "last_attempt_local_date": "2026-09-13",
+            "last_attempt_seek_slot": "seek:2026-09-13T00:00+10:00",
             "last_status": "FAILED",
             "last_finished_at": "2026-09-12T14:02:22+00:00",
         },
@@ -248,6 +275,7 @@ def test_failed_seek_run_does_not_retry_more_than_once_same_day(monkeypatch):
     settings = {
         "scheduler.enabled": True,
         "scheduler.seek_enabled": True,
+        "scheduler.seek_interval_hours": 12,
         "scheduler.daily_hour": 0,
         "scheduler.daily_minute": 0,
         "scheduler.run_window_minutes": 240,
@@ -259,6 +287,7 @@ def test_failed_seek_run_does_not_retry_more_than_once_same_day(monkeypatch):
         "scheduler_state",
         lambda: {
             "last_attempt_local_date": "2026-09-13",
+            "last_attempt_seek_slot": "seek:2026-09-13T00:00+10:00",
             "last_status": "FAILED",
             "last_finished_at": "2026-09-12T14:40:00+00:00",
         },
@@ -300,6 +329,7 @@ def test_scheduler_status_does_not_show_expired_same_day_retry(monkeypatch):
     settings = {
         "scheduler.enabled": True,
         "scheduler.seek_enabled": True,
+        "scheduler.seek_interval_hours": 12,
         "scheduler.linkedin_enabled": False,
         "collection.linkedin_enabled": False,
         "scheduler.daily_hour": 0,
@@ -308,6 +338,7 @@ def test_scheduler_status_does_not_show_expired_same_day_retry(monkeypatch):
         "scheduler.seek_failure_retry_minutes": 15,
         "scheduler.linkedin_interval_hours": 4,
         "collection.linkedin_window_hours": 5,
+        "scheduler.poll_seconds": 60,
     }
     monkeypatch.setattr(scheduler, "get_setting", lambda key: settings[key])
     monkeypatch.setattr(
@@ -315,6 +346,7 @@ def test_scheduler_status_does_not_show_expired_same_day_retry(monkeypatch):
         "scheduler_state",
         lambda: {
             "last_attempt_local_date": "2026-09-13",
+            "last_attempt_seek_slot": "seek:2026-09-13T00:00+10:00",
             "last_status": "FAILED",
             "last_finished_at": "2026-09-12T14:02:22+00:00",
         },
@@ -349,4 +381,52 @@ def test_scheduler_status_does_not_show_expired_same_day_retry(monkeypatch):
     monkeypatch.setattr(scheduler, "datetime", type("FixedDateTime", (datetime,), {"now": classmethod(lambda cls: now)}))
 
     status = service.status()
-    assert status["next_run_at"] == "2026-09-14T00:00:00+10:00"
+    assert status["next_run_at"] == "2026-09-13T12:00:00+10:00"
+
+
+def test_scheduled_seek_uses_only_remaining_slot_runtime(monkeypatch):
+    from collector import scheduler
+
+    tz = ZoneInfo("Australia/Sydney")
+    now = datetime(2026, 9, 18, 15, 0, tzinfo=tz)
+    service = scheduler.SchedulerService()
+    calls = []
+
+    monkeypatch.setattr(
+        scheduler,
+        "datetime",
+        type(
+            "FixedDateTime",
+            (datetime,),
+            {"now": classmethod(lambda cls: now)},
+        ),
+    )
+    monkeypatch.setattr(scheduler, "update_scheduler_state", lambda **_kwargs: None)
+    monkeypatch.setattr(
+        service,
+        "linkedin_due_context",
+        lambda _now=None: (False, "linkedin:2026-09-18T12:00+10:00", now),
+    )
+    monkeypatch.setattr(service, "due_now", lambda _now=None: True)
+    monkeypatch.setattr(
+        service,
+        "schedule_window",
+        lambda _now=None: (
+            datetime(2026, 9, 18, 14, 0, tzinfo=tz),
+            datetime(2026, 9, 18, 18, 0, tzinfo=tz),
+        ),
+    )
+    monkeypatch.setattr(
+        service,
+        "seek_slot",
+        lambda _now=None: datetime(2026, 9, 18, 14, 0, tzinfo=tz),
+    )
+
+    def start(**kwargs):
+        calls.append(kwargs)
+
+    monkeypatch.setattr(scheduler.PROCESS_MANAGER, "start", start)
+
+    service._tick()
+
+    assert calls == [{"trigger": "scheduled", "max_runtime_minutes": 180}]

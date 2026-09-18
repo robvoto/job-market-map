@@ -179,6 +179,7 @@ def update_scheduler_state(**fields: Any) -> dict:
     allowed = {
         "heartbeat_at",
         "last_attempt_local_date",
+        "last_attempt_seek_slot",
         "last_started_at",
         "last_finished_at",
         "last_status",

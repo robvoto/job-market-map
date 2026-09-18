@@ -22,6 +22,7 @@ from collector.db import (
     connect,
     get_job_by_identity_key,
     get_job_by_source_id,
+    get_job_jd,
     init_db,
 )
 from collector.geographies import (
@@ -535,6 +536,40 @@ def search_jobs(
         "items": [_job_payload(row, include_raw=include_raw) for row in payload_rows],
         "next_cursor": int(rows[-1]["id"]) if rows else after_id,
         "has_more": has_more,
+    }
+
+
+@app.get(f"/{API_VERSION}/jobs/{{job_id}}/jd")
+def cached_job_jd(job_id: int, identity_key: str | None = None):
+    """Return only a JD already cached in JMM; never fetch from the source board."""
+    resolved_job_id = job_id
+    try:
+        result = get_job_jd(resolved_job_id)
+    except KeyError:
+        result = None
+        stable_identity = str(identity_key or "").strip()
+        if stable_identity:
+            active = get_job_by_identity_key(stable_identity)
+            if active is not None:
+                resolved_job_id = int(active["id"])
+                result = get_job_jd(resolved_job_id)
+            else:
+                with connect() as conn:
+                    tombstone = conn.execute(
+                        "SELECT 1 FROM job_tombstones WHERE identity_key=? LIMIT 1",
+                        (stable_identity,),
+                    ).fetchone()
+                if tombstone is not None:
+                    raise HTTPException(410, "job was terminal-retired")
+        if result is None and resolved_job_id == job_id:
+            raise HTTPException(404, "job not found")
+    if result is None:
+        raise HTTPException(409, "JD not cached yet")
+    return {
+        "api_version": API_VERSION,
+        "schema_version": SCHEMA_VERSION,
+        "status": "cached",
+        **result,
     }
 
 

@@ -7,11 +7,11 @@ from dataclasses import asdict, dataclass
 
 from collector.cursors import get_cursor
 from collector.geographies import list_geographies
-from collector.query_admin import list_queries
-from collector.run_logging import collection_logger
 from collector.jd_batch import enrich_pending_jds
 from collector.jd_queue import seed_new_missing_since
 from collector.job_retirement import cleanup_observed_terminal_families
+from collector.query_admin import list_queries
+from collector.run_logging import collection_logger
 from collector.settings import get_setting
 from collector.source_campaign import get_cycle, get_or_start_cycle, set_cycle_status
 from sources.linkedin_collector import (
@@ -346,7 +346,12 @@ def run_linkedin_campaign(
                 "LinkedIn JD queue seeded cycle=%s added=%s", cycle_key, queued
             )
         jd_started = time.perf_counter()
-        jd_result = enrich_pending_jds(source="linkedin")
+        jd_result = enrich_pending_jds(
+            source="linkedin",
+            queued_since=cycle_started_at,
+            should_stop=should_stop,
+            deadline_reached=deadline_reached,
+        )
         jd_elapsed_seconds = time.perf_counter() - jd_started
         detail_attempted = jd_result.candidates
         detail_stored = jd_result.stored

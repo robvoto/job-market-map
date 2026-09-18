@@ -502,6 +502,12 @@ def init_db() -> None:
             "stats_json",
             "stats_json TEXT",
         )
+        _ensure_column(
+            conn,
+            "scheduler_state",
+            "last_attempt_seek_slot",
+            "last_attempt_seek_slot TEXT",
+        )
 
         _migrate_job_observation_state(conn)
         _backfill_identity(conn, "jobs")

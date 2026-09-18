@@ -56,7 +56,7 @@
       "default": 1,
       "min": 1,
       "max": 30,
-      "help": "Normal freshness horizon for the daily SEEK market run. Keep at 1 day for ongoing SEEK reconciliation; LinkedIn uses its own rolling hourly window. One-off bootstrap runs may explicitly request a wider SEEK window."
+      "help": "Normal freshness horizon for scheduled SEEK runs. Keep at 1 day for ongoing reconciliation; the default scheduler runs SEEK every 12 hours while LinkedIn uses its own rolling hourly window. One-off bootstrap runs may explicitly request a wider SEEK window."
     },
     {
       "key": "collection.seek_page_load_seconds",
@@ -131,6 +131,15 @@
       "help": "Safety overlap for extra SEEK runs inside the normal freshness window. If a previous fresh run completed recently, JMM scans back this many minutes before that run started, then stops only on exact ordered SEEK listing timestamps. Normal ~24-hour daily runs remain full passes."
     },
     {
+      "key": "collection.seek_jd_batch_size",
+      "category": "Collection",
+      "type": "integer",
+      "default": 25,
+      "min": 1,
+      "max": 200,
+      "help": "Maximum newly queued SEEK job descriptions enriched after each completed coverage partition. A final drain handles the rest of the current run before completion, bounded by the run deadline."
+    },
+    {
       "key": "collection.linkedin_enabled",
       "category": "Collection",
       "type": "boolean",
@@ -177,7 +186,7 @@
       "key": "collection.linkedin_detail_rate_limit_cooldown_seconds",
       "category": "Collection",
       "type": "number",
-      "default": 120.0,
+      "default": 300.0,
       "min": 1.0,
       "max": 900.0,
       "help": "Cooldown after LinkedIn returns HTTP 429. During the cooldown JMM fails LinkedIn detail requests fast instead of repeatedly hitting the rate-limited endpoint."
@@ -264,7 +273,16 @@
       "category": "Scheduler",
       "type": "boolean",
       "default": true,
-      "help": "Enable the daily automatic SEEK whole-state run independently of LinkedIn. Turning this off does not pause LinkedIn or manual SEEK runs."
+      "help": "Enable automatic SEEK whole-state runs independently of LinkedIn. Turning this off does not pause LinkedIn or manual SEEK runs."
+    },
+    {
+      "key": "scheduler.seek_interval_hours",
+      "category": "Scheduler",
+      "type": "integer",
+      "default": 12,
+      "min": 1,
+      "max": 24,
+      "help": "Hours between automatic SEEK slots. Default 12 runs SEEK twice daily, anchored from scheduler.daily_hour/daily_minute."
     },
     {
       "key": "scheduler.linkedin_enabled",
@@ -289,7 +307,7 @@
       "default": 2,
       "min": 0,
       "max": 23,
-      "help": "Local host hour (0-23) for the daily overnight collection window. WSL currently uses AEST/AEDT local time. Default 02:00."
+      "help": "Local host hour (0-23) anchoring the recurring SEEK schedule. With the default 12-hour SEEK interval, 02:00 produces 02:00 and 14:00 slots."
     },
     {
       "key": "scheduler.daily_minute",
@@ -298,7 +316,7 @@
       "default": 0,
       "min": 0,
       "max": 59,
-      "help": "Local minute for the daily overnight collection window. Combined with scheduler.daily_hour."
+      "help": "Local minute anchoring the recurring SEEK schedule. Combined with scheduler.daily_hour."
     },
     {
       "key": "scheduler.run_window_minutes",
@@ -307,7 +325,7 @@
       "default": 240,
       "min": 15,
       "max": 720,
-      "help": "How long after the configured overnight time the scheduler may still start that day's run. Prevents a service started in the afternoon from unexpectedly launching a missed overnight crawl."
+      "help": "How long after each SEEK slot the scheduler may still start that slot. Prevents a late service start from unexpectedly launching a stale collection."
     },
     {
       "key": "scheduler.seek_failure_retry_minutes",
@@ -316,7 +334,7 @@
       "default": 15,
       "min": 5,
       "max": 120,
-      "help": "Minutes to wait before the one allowed same-day retry after a scheduled SEEK run fails."
+      "help": "Minutes to wait before the one allowed retry within the same SEEK slot after a scheduled SEEK run fails."
     },
     {
       "key": "scheduler.poll_seconds",

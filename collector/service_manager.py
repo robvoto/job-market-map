@@ -47,25 +47,32 @@ class CollectionProcessManager:
                 "log_path": str(LOG_PATH),
             }
 
-    def start(self, *, trigger: str) -> dict:
+    def start(self, *, trigger: str, max_runtime_minutes: int | None = None) -> dict:
         if trigger not in {"manual", "scheduled"}:
             raise ValueError("trigger must be manual or scheduled")
+        if max_runtime_minutes is not None and int(max_runtime_minutes) < 1:
+            raise ValueError("max_runtime_minutes must be >= 1 when provided")
         with self._guard:
             self._refresh()
             current_lock = lock_status()
             if self._process is not None or current_lock["active"]:
                 raise CollectionProcessError("A collection process is already running.")
+            command = [
+                sys.executable,
+                "-m",
+                "scripts.run_collection_cycle",
+                "--trigger",
+                trigger,
+            ]
+            if max_runtime_minutes is not None:
+                command.extend(
+                    ["--max-runtime-minutes", str(int(max_runtime_minutes))]
+                )
             # The runner itself writes structured output to logs/collection.log and
             # stdout. Inherit stdout/stderr here so service/journal output and the
             # durable runner log contain the same messages without double-writing.
             process = subprocess.Popen(
-                [
-                    sys.executable,
-                    "-m",
-                    "scripts.run_collection_cycle",
-                    "--trigger",
-                    trigger,
-                ],
+                command,
                 cwd=ROOT,
                 start_new_session=True,
             )
@@ -74,6 +81,7 @@ class CollectionProcessManager:
                 "started": True,
                 "pid": process.pid,
                 "trigger": trigger,
+                "max_runtime_minutes": max_runtime_minutes,
                 "log_path": str(LOG_PATH),
             }
 

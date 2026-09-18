@@ -53,8 +53,8 @@ def test_successful_manual_default_run_marks_only_overlapping_schedule_slot(monk
     updates = []
     monkeypatch.setattr(
         runner.SchedulerService,
-        "manual_run_schedule_date",
-        lambda _start, _finish: "2026-09-12",
+        "manual_run_schedule_slot",
+        lambda _start, _finish: "seek:2026-09-12T00:00+10:00",
     )
     monkeypatch.setattr(runner, "update_scheduler_state", lambda **kwargs: updates.append(kwargs))
     tz = ZoneInfo("Australia/Sydney")
@@ -67,15 +67,13 @@ def test_successful_manual_default_run_marks_only_overlapping_schedule_slot(monk
         started_at=datetime(2026, 9, 12, 0, 30, tzinfo=tz),
         finished_at=datetime(2026, 9, 12, 1, 0, tzinfo=tz),
     )
-    assert result == "2026-09-12"
+    assert result == "seek:2026-09-12T00:00+10:00"
     assert updates == [
         {
             "last_attempt_local_date": "2026-09-12",
+            "last_attempt_seek_slot": "seek:2026-09-12T00:00+10:00",
             "last_status": "SATISFIED_MANUAL",
-            "last_message": (
-                "Successful manual collection satisfied the configured overnight slot "
-                "for 2026-09-12."
-            ),
+            "last_message": "Successful manual collection satisfied SEEK slot seek:2026-09-12T00:00+10:00.",
         }
     ]
 
@@ -234,3 +232,166 @@ def test_exhausted_normal_daily_coverage_rolls_over_but_other_partial_states_do_
         default_days=1,
         backfill_existing_jds=True,
     ) is False
+
+
+def test_normal_seek_run_drains_new_jds_after_each_partition_and_at_finish(monkeypatch):
+    from collector.jd_batch import JDBatchResult
+    from collector.seek_cycle import SeekCycleResult
+    from scripts import run_collection_cycle as runner
+    from sources.seek_market_map import MarketMapResult
+
+    events = []
+
+    @contextmanager
+    def fake_lock(_trigger, *, source=None):
+        assert source == "seek"
+        yield
+
+    class _TestLog:
+        def info(self, *_args, **_kwargs): pass
+        def warning(self, *_args, **_kwargs): pass
+        def error(self, *_args, **_kwargs): pass
+        def exception(self, *_args, **_kwargs): pass
+
+    monkeypatch.setattr(runner, "collection_run_lock", fake_lock)
+    monkeypatch.setattr(runner, "configure_collection_logging", lambda: _TestLog())
+    monkeypatch.setattr(runner, "enabled_state_codes", lambda: ["ACT"])
+    monkeypatch.setattr(runner, "state_root", lambda _code: None)
+    monkeypatch.setattr(runner, "all_states_complete", lambda _codes: False)
+    monkeypatch.setattr(runner, "latest_complete_fresh_seek_started_at", lambda _codes: None)
+    monkeypatch.setattr(runner, "start_market_run", lambda **_kwargs: 1)
+    monkeypatch.setattr(runner, "finish_market_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "set_market_run_backup", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "snapshot_and_reset_coverage", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "update_scheduler_state", lambda **_kwargs: None)
+    monkeypatch.setattr(runner, "close_browser", lambda: None)
+    monkeypatch.setattr(runner, "close_tab", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "population_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(runner, "build_run_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(runner, "log_run_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "pending_primary_ids", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        runner,
+        "get_setting",
+        lambda key: {
+            "backup.before_collection_enabled": False,
+            "collection.days": 1,
+            "collection.max_runtime_minutes": 0,
+            "collection.seek_incremental_overlap_minutes": 120,
+            "collection.seek_jd_batch_size": 25,
+        }.get(key, 0),
+    )
+    monkeypatch.setattr(
+        runner,
+        "open_tab",
+        lambda *_a, **_k: type("Response", (), {"result": {"pageId": 21}})(),
+    )
+
+    def fake_cycle(**kwargs):
+        events.append("coverage")
+        kwargs["after_progress"](
+            MarketMapResult(
+                geography_code="ACT",
+                status="COMPLETE",
+                root_partition_id=1,
+                reported_results=1,
+                covered_unique_jobs=1,
+                incomplete_partitions=0,
+                partitions_processed=1,
+            )
+        )
+        return SeekCycleResult("COMPLETE", ["ACT"], 1, [])
+
+    def fake_pending(**kwargs):
+        events.append(("jd", kwargs["max_candidates"]))
+        return JDBatchResult(
+            candidates=1 if kwargs["max_candidates"] else 0,
+            stored=1 if kwargs["max_candidates"] else 0,
+            cached=0,
+            failed=0,
+            unavailable=0,
+        )
+
+    monkeypatch.setattr(runner, "run_seek_cycle", fake_cycle)
+    monkeypatch.setattr(runner, "enrich_pending_jds", fake_pending)
+
+    assert runner.main(["--trigger", "scheduled", "--max-runtime-minutes", "0"]) == 0
+    assert events == ["coverage", ("jd", 25), ("jd", None)]
+
+
+def test_incomplete_seek_run_still_drains_new_jds(monkeypatch):
+    from collector.jd_batch import JDBatchResult
+    from collector.seek_cycle import SeekCycleResult
+    from scripts import run_collection_cycle as runner
+    from sources.seek_market_map import MarketMapResult
+
+    events = []
+
+    @contextmanager
+    def fake_lock(_trigger, *, source=None):
+        assert source == "seek"
+        yield
+
+    class _TestLog:
+        def info(self, *_args, **_kwargs): pass
+        def warning(self, *_args, **_kwargs): pass
+        def error(self, *_args, **_kwargs): pass
+        def exception(self, *_args, **_kwargs): pass
+
+    monkeypatch.setattr(runner, "collection_run_lock", fake_lock)
+    monkeypatch.setattr(runner, "configure_collection_logging", lambda: _TestLog())
+    monkeypatch.setattr(runner, "enabled_state_codes", lambda: ["NSW"])
+    monkeypatch.setattr(runner, "state_root", lambda _code: None)
+    monkeypatch.setattr(runner, "all_states_complete", lambda _codes: False)
+    monkeypatch.setattr(runner, "latest_complete_fresh_seek_started_at", lambda _codes: None)
+    monkeypatch.setattr(runner, "start_market_run", lambda **_kwargs: 1)
+    monkeypatch.setattr(runner, "finish_market_run", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "set_market_run_backup", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "snapshot_and_reset_coverage", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "update_scheduler_state", lambda **_kwargs: None)
+    monkeypatch.setattr(runner, "close_browser", lambda: None)
+    monkeypatch.setattr(runner, "close_tab", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "population_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(runner, "build_run_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(runner, "log_run_summary", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "pending_primary_ids", lambda **_kwargs: [])
+    monkeypatch.setattr(
+        runner,
+        "get_setting",
+        lambda key: {
+            "backup.before_collection_enabled": False,
+            "collection.days": 1,
+            "collection.max_runtime_minutes": 0,
+            "collection.seek_incremental_overlap_minutes": 120,
+            "collection.seek_jd_batch_size": 25,
+        }.get(key, 0),
+    )
+    monkeypatch.setattr(
+        runner,
+        "open_tab",
+        lambda *_a, **_k: type("Response", (), {"result": {"pageId": 31}})(),
+    )
+
+    def fake_cycle(**kwargs):
+        kwargs["after_progress"](
+            MarketMapResult(
+                geography_code="NSW",
+                status="INCOMPLETE_CHILD_COVERAGE",
+                root_partition_id=1,
+                reported_results=100,
+                covered_unique_jobs=80,
+                incomplete_partitions=1,
+                partitions_processed=1,
+            )
+        )
+        return SeekCycleResult("BLOCKED_INCOMPLETE", ["NSW"], 1, [])
+
+    def fake_pending(**kwargs):
+        events.append(("jd", kwargs["max_candidates"]))
+        return JDBatchResult(candidates=1, stored=1, cached=0, failed=0, unavailable=0)
+
+    monkeypatch.setattr(runner, "run_seek_cycle", fake_cycle)
+    monkeypatch.setattr(runner, "enrich_pending_jds", fake_pending)
+
+    assert runner.main(["--trigger", "scheduled", "--max-runtime-minutes", "0"]) == 1
+    assert events == [("jd", 25), ("jd", None)]
