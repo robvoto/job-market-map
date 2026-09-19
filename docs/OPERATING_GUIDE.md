@@ -90,7 +90,7 @@ JD enrichment is a distinct source-detail operation after card ingestion/dedupe.
 ## Browser rule
 
 JMM uses one visible long-lived Chromium service with profile `data/playwright_jmm_seek_user_data`. It must not reuse Rob's normal Chrome or Job Hunter's SEEK profile. Collection runs attach over localhost CDP and detach without closing Chrome, so SEEK/Cloudflare session state survives retries and later runs. Genuine human verification is completed in that same visible JMM window and the run resumes.
-For long-running manual/MCP starts, use `scripts/start_collection_service.sh ...`; it ensures the persistent browser service exists and launches the same `scripts.run_collection_cycle` runner in the user systemd manager.
+For long-running manual/MCP starts, use `scripts/start_collection_service.sh ...`; it ensures the persistent browser service exists and launches the same `scripts.run_collection_cycle` runner detached with a PID file and log under `data/` and `logs/`.
 
 ## Source transport ownership
 

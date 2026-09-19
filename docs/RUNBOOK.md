@@ -61,7 +61,7 @@ uv run python -m collector.retention
 
 JMM keeps one visible long-lived Chromium service using `data/playwright_jmm_seek_user_data` **for SEEK only**. `scripts/start_browser_service.sh` starts it only when it is not already running; later SEEK collection runs attach to the same browser over localhost CDP and detach without closing it. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, use Admin's **Open SEEK login browser** control, complete it in the visible JMM browser and let the run continue. LinkedIn is a separate HTTP-only subprocess and never touches this browser.
 
-For a long-running/manual collection launched from MCP or another temporary shell, start the existing collection runner inside JMM's user-service scope so the visible Chromium process survives after the calling shell exits:
+For a long-running/manual collection launched from MCP or another temporary shell, use the detached collection launcher so the visible Chromium process and collection continue after the calling shell exits:
 
 ```bash
 scripts/start_collection_service.sh --trigger manual --days 3 --backfill-existing-jds --max-runtime-minutes 0
@@ -100,4 +100,4 @@ For a Windows/WSL terminal that should stay open and show the daily run live, us
 scripts/run_collection_terminal.sh --trigger manual
 ```
 
-The systemd launcher still writes the same stdout stream to the journal, while `logs/collection.log` remains the durable source regardless of how the run was launched.
+The detached launcher writes the same stdout stream to `logs/collection-service.log`; `logs/collection.log` remains the durable source regardless of how the run was launched.
