@@ -33,8 +33,10 @@ export WAYLAND_DISPLAY="${WAYLAND_DISPLAY:-wayland-0}"
 export XDG_RUNTIME_DIR="${XDG_RUNTIME_DIR:-/run/user/$(id -u)}"
 
 rm -f "$PID_FILE"
+# The API holds fd 9 for data/api-service.lock. Close that inherited descriptor
+# so the browser cannot keep the API lock after the API process exits.
 nohup "$ROOT/scripts/run_browser_service.sh" \
-  >>"$LOG_DIR/browser-service.log" 2>&1 </dev/null &
+  >>"$LOG_DIR/browser-service.log" 2>&1 </dev/null 9>&- &
 echo "$!" >"$PID_FILE"
 
 for _ in $(seq 1 40); do
