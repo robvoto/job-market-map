@@ -10,7 +10,7 @@ Use for project filesystem/tool access and whenever a connector call is unreliab
 ## Source of truth
 - Job Market Map repo: `/home/robvoto/projects/job-market-map`.
 - A local coding runtime that already has direct repository shell/filesystem access (e.g. Claude Code) should use that native access instead of a connector. The same safety rules still apply.
-- In a connector-based runtime without direct repo access, use the authorised Sheets/repo connector documented for that runtime (for example, the `rob-human` MCP server's `sheets_read_rows` / `sheets_update_cell` tools, or an equivalent). Do not silently switch connectors mid-task; if the primary path fails, report the exact failure before escalating.
+- In a connector-based runtime without direct repo access, use the authorised Sheets/repo connector documented for that runtime (for example, the documented Sheets/repo tools exposed by the currently authorised connector). Do not silently switch connectors mid-task; if the primary path fails, report the exact failure before escalating.
 - For canonical backlog access specifically, follow `.agents/skills/backlog-management/SKILL.md`, which pins the spreadsheet ID and tab name.
 
 ## Failure handling

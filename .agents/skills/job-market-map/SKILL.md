@@ -92,7 +92,7 @@ Market lifecycle is rich/current -> archived/compacted -> neutral tombstone. Ret
 Every parser, partition, dedupe, cursor, retention, settings or API-contract bug gets a regression test. Update docs with architecture/API changes in the same commit. Source parser failures must be explicit; never silently fall back to JD opening.
 
 ## Scheduler / service / backup rule
-Use the project-owned in-app scheduler. Scheduled and manual collection both invoke the same collection-cycle runner. Supported runtime entrypoints are single-instance: API via `data/api-service.lock`, persistent browser via `data/browser-service.lock`/its fixed user-service unit, and collection via `data/collection.lock`.
+Use the project-owned in-app scheduler. Scheduled and manual collection both invoke the same collection-cycle runner. Supported local runtime entrypoints are single-instance: API via `data/api-service.lock`, the persistent browser via `scripts/start_browser_service.sh` and the `data/browser-service.lock` owned by `scripts/run_browser_service.sh`, and collection via `data/collection.lock`. AWS systemd units are deployment-only and do not start the local runtime.
 
 ### Runtime ownership
 Rob owns starting, stopping and restarting the local JMM runtime because he wants the live terminal/log visibility himself.
