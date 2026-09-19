@@ -76,21 +76,15 @@ A collection failure must leave prior successful ingests intact and enough curso
 
 ## Run/resume whole-state SEEK map
 
-Prefer bounded resumable execution:
+Use Admin's **Run SEEK now** control for a normal manual run. It invokes the same singleton-locked `scripts.run_collection_cycle` runner used by the scheduler, creates the configured pre-run backup, resumes unfinished coverage, and drains normal JD batches. Do not invoke the old state-only wrapper: it bypassed the collection process manager and has been removed.
 
-```bash
-uv run python -m scripts.run_seek_market_map --state ACT --max-partitions 1
-```
-
-The admin default partition chunk is intentionally small so ChatGPT/Claude tool-call limits cannot invalidate a whole-state run. Completed partitions are skipped; split parents delegate to unfinished children; persisted leaf memberships survive interruption and may be recovered without re-downloading.
-
-Use `--fresh` only when intentionally discarding resume behaviour for a fresh coverage pass.
+The admin default partition chunk is intentionally small so tool-call limits cannot invalidate a whole-state run. Completed partitions are skipped; split parents delegate to unfinished children; persisted leaf memberships survive interruption and may be recovered without re-downloading.
 
 Current enabled scope is NSW + ACT + QLD. Check `/v3/coverage/seek` afterwards; any `INCOMPLETE*` or `FAILED` state means current coverage is not proven complete. `NOT_RUN` means no current coverage workspace exists; Admin renders that as **Waiting for next run** and, when available, shows the archived previous coverage result. For the latest live recovery point, read local-only `docs/CURRENT_STATE.md` if present. That handoff is intentionally not tracked in Git.
 
 ### Collection logging
 
-Every collection runner writes timestamped progress to `logs/collection.log` and to stdout. The file rotates at 10 MB and keeps five previous files. Normal scheduled collection is card-only. JD sweep events appear only for an explicit maintenance run using `--backfill-existing-jds`; ordinary JD acquisition is on demand through JMM-003.
+Every collection runner writes timestamped progress to `logs/collection.log` and to stdout. The file rotates at 10 MB and keeps five previous files. Normal scheduled and manual collection acquires JDs for newly discovered SEEK jobs through bounded batches. The `--backfill-existing-jds` option is maintenance-only and is not part of Admin or scheduled collection.
 
 Admin's **View collection log** link opens the bounded tail of this same durable file at `/v3/admin/log`.
 

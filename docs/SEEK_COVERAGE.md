@@ -76,24 +76,11 @@ Cross-board postings (for example SEEK + LinkedIn) remain separate source rows a
 
 ## Running / resumability
 
-Use bounded resumable chunks. The admin default is one genuinely unfinished partition per state per invocation:
+Use Admin's **Run SEEK now** control for a normal manual run. Admin and the scheduler share the singleton-locked `scripts.run_collection_cycle` runner, so the run can resume unfinished partitions safely, preserve its durable progress, and drain normal JD batches. The removed state-only wrapper was not a supported production path because it bypassed the collection process manager.
 
-```bash
-cd /home/robvoto/projects/job-market-map
-uv run python -m scripts.run_seek_market_map --state ACT --max-partitions 1
-```
-
-Completed partitions are skipped without consuming the budget. Already-split parents delegate directly to unfinished children. If an interrupted leaf already persisted enough memberships to satisfy its reported count, the next run can finalize it as `COMPLETE_RECOVERED` without re-downloading it.
-
-`--max-partitions` limits one execution window; it is **not** a coverage limit. Use `--fresh` only for an intentional re-crawl, not normal continuation.
+Completed partitions are skipped without consuming the configured budget. Already-split parents delegate directly to unfinished children. If an interrupted leaf already persisted enough memberships to satisfy its reported count, the next normal run can finalize it as `COMPLETE_RECOVERED` without re-downloading it.
 
 JMM keeps its own visible long-lived Chromium service and profile (`data/playwright_jmm_seek_user_data`). It is separate from Rob's normal Chrome and Job Hunter's SEEK profile. Collection invocations attach to the same already-running JMM browser so human-verification/session state is preserved instead of triggering a fresh browser challenge on every retry.
-
-Selected states:
-
-```bash
-uv run python -m scripts.run_seek_market_map --state NSW --state ACT
-```
 
 ## Monitoring
 

@@ -34,19 +34,15 @@ The UI intentionally does not contain a button that kills its own web service, b
 
 This does not create operating-system startup persistence. After Windows/WSL restarts, run `./scripts/service.sh start` again.
 
-## AWS deployment target
+## AWS boundary
 
-When JMM is deployed with Job Hunter, keep it as a **separate long-running Python service on the same EC2 host**:
+JMM is currently a local-only service. Job Hunter's AWS deployment intentionally does not run JMM and must not be configured with a deployed or same-host JMM URL. Local Job Hunter uses:
 
 ```text
-Job Hunter  127.0.0.1:8765
-JMM         127.0.0.1:8770
-JH -> JMM   JOB_HUNTER_MARKET_MAP_BASE_URL=http://127.0.0.1:8770/v3
+JOB_HUNTER_MARKET_MAP_BASE_URL=http://127.0.0.1:8770/v3
 ```
 
-JMM does not need a public listener. Keep `market.db`, backups and the SEEK Chromium profile on persistent storage. Do not move JMM to Lambda: the scheduler, SQLite state and long-lived SEEK browser/session are intentionally process-persistent. LinkedIn remains HTTP-only and does not use Chromium.
-
-On the current EC2 host, reuse the existing persistent EBS volume mounted at `/var/lib/job-hunter`; JMM owns `/var/lib/job-hunter/job-market-map/` beneath it. Code stays at `/home/ubuntu/job-market-map`. `scripts/ec2/install-job-market-map.sh` creates the persistent links/venv, installs JMM's own Playwright Chromium bundle there, and installs the two systemd units: `job-market-map.service` and `job-market-map-browser.service`.
+The scheduler, SQLite state and long-lived SEEK browser/session are process-persistent, so JMM is not a Lambda workload. LinkedIn remains HTTP-only and does not use Chromium. The `scripts/ec2/` files are deployment templates for a separately approved future AWS deployment; they are not part of the current local runtime.
 
 ## Admin collection controls
 
@@ -71,7 +67,7 @@ The Admin page provides:
 
 Supported JMM runtime entrypoints are single-instance:
 - API/Admin service: `data/api-service.lock`;
-- persistent browser runner: `data/browser-service.lock` plus its fixed systemd user unit;
+- persistent browser runner: `data/browser-service.lock` and the direct launcher;
 - collector: `data/collection.lock`.
 
 A manual Run Now and a scheduled run cannot overlap. Starting the supported API/browser launchers again reuses or refuses the existing instance rather than creating another JMM runtime process.
