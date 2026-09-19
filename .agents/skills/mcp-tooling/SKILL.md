@@ -15,6 +15,7 @@ Use for project filesystem/tool access and whenever a connector call is unreliab
 
 ## Failure handling
 - One failed tool/MCP call does **not** prove the connector or resource is unavailable.
+- A rejected file patch (`old_text not found`, failed hunk, or equivalent) is a validation stop. Re-read the exact current file, construct a new context-checked patch, and verify the diff; never retry stale patch text.
 - Inspect the actual error and retry with a smaller, safer command before concluding a path is broken.
 - For every Python command in this repository, use `uv run python ...`, `uv run pytest ...`, or another `uv run ...` command. Never invoke a bare `python`, `python3`, `pytest`, or `ruff`. `uv` creates/reuses this repo's own `.venv`; do not reach into another project's `.venv`.
 - A large Sheets read can exceed a tool's output-token limit and get redirected to a file; when that happens, probe the saved file's structure (e.g. with `jq`) before extracting the specific rows needed rather than re-reading the whole payload into context.

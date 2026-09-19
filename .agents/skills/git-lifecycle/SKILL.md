@@ -12,9 +12,9 @@ Use this whenever code work is started or finished, or whenever the human asks a
 ## Operator contract
 The human should not need to remember Git mechanics.
 
-- Never push to the remote (`origin/main`) without the human's explicit approval in the current turn, even after implementation is validated and committed locally.
-- `commit` alone never means `push`, and `push` alone never means the human has reviewed the change beyond what they asked for.
-- If approval intent is unclear, ask one concise question: "Committed locally on `main`. Push to `origin/main` now?"
+- Completed intended work is committed and pushed automatically after validation, including to `origin/main` when the checked-out branch is `main`, unless the human explicitly says not to push.
+- Do not wait for a second approval when the human has already requested automatic commit/push.
+- Stop and ask only for a genuine safety gate: unrelated changes, destructive actions, force-pushes, deployment/restart, credentials/external messages, or unresolved conflicting work.
 - Only create a task branch/worktree when the human asks for isolation, or when concurrent work on this repo is known to be in progress. Otherwise, commit directly to the checked-out branch (normally `main`) as the existing history does.
 
 ## Before committing

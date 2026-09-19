@@ -40,6 +40,9 @@ Use `.agents/skills/instruction-maintenance/SKILL.md` whenever changing agent in
 - Job Market Map is neutral/global market infrastructure only; it does not own personal activity/outcomes — see `.agents/skills/job-market-map/SKILL.md`.
 - Do not claim completion without validation evidence (tests, Ruff, `git diff --check`).
 - Preserve unrelated work when other agents or sessions may be active.
+- Before editing, inspect the exact current target file and apply a narrow, context-checked patch.
+- If a patch hunk or `old_text` does not match, stop and reread the file before creating a new patch; never retry stale patch text.
+- After editing, inspect the diff and run the required validation before reporting completion.
 - Route specialised behaviour through its owning skill instead of expanding this file.
 
 ## Finish report
