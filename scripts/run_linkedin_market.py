@@ -58,7 +58,7 @@ def main(argv: list[str] | None = None) -> int:
     try:
         with collection_run_lock(args.trigger, source="linkedin"):
             log.info(
-                "LinkedIn standalone run started days=%s hours_old=%s cycle_key=%s",
+                "LinkedIn collection run started days=%s hours_old=%s cycle_key=%s",
                 days,
                 hours_old,
                 args.cycle_key,
@@ -79,7 +79,7 @@ def main(argv: list[str] | None = None) -> int:
                 should_stop=stop.is_set,
                 deadline_reached=deadline_reached,
             )
-            log.info("LinkedIn standalone run finished result=%s", asdict(result))
+            log.info("LinkedIn collection run finished result=%s", asdict(result))
             print(json.dumps(asdict(result), indent=2, sort_keys=True), flush=True)
     except CollectionAlreadyRunning as exc:
         print(str(exc), flush=True)
