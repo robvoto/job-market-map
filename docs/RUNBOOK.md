@@ -51,6 +51,13 @@ This uses the production geography-first LinkedIn HTTP path for enabled ACT/NSW/
 ./scripts/start-api.sh
 ```
 
+When this foreground launcher is run from a terminal, it mirrors API/Admin
+output and all scheduled or Admin-started collection subprocess output into
+that same terminal. It also appends the stream to `logs/api.log`; the durable
+collection-specific record remains `logs/collection.log`. The detached
+`./scripts/service.sh start` mode has no live terminal and writes to the log
+files instead.
+
 ## Compact stale data
 
 ```bash

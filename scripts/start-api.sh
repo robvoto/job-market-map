@@ -8,6 +8,16 @@ if ! flock -n 9; then
   echo "JOB_MARKET_MAP_API_ALREADY_RUNNING"
   exit 0
 fi
+
+# Keep the foreground operator terminal as the live console for the whole local
+# JMM service. Collection subprocesses inherit these descriptors, so their
+# progress appears here as well as in the durable logs. The detached service
+# launcher already redirects this script to logs/api.log, so do not add a
+# second tee in that mode.
+if [[ -t 1 ]]; then
+  exec > >(tee -a "$ROOT/logs/api.log") 2>&1
+fi
+
 export JOB_MARKET_MAP_SCHEDULER_SERVICE=1
 PORT="$(uv run python - <<'PY'
 from collector.settings import get_setting

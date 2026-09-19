@@ -75,6 +75,8 @@ class CollectionProcessManager:
                 command,
                 cwd=ROOT,
                 start_new_session=True,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
             )
             self._process = process
             return {
@@ -109,6 +111,8 @@ class CollectionProcessManager:
                 ],
                 cwd=ROOT,
                 start_new_session=True,
+                stdout=sys.stdout,
+                stderr=sys.stderr,
             )
             self._process = process
             return {
