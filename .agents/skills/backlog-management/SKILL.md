@@ -11,7 +11,7 @@ Use when creating, updating, deduplicating, grooming, or analysing Job Market Ma
 - Canonical backlog: Google Sheet `job_market_map_backlog`, worksheet/tab name `Backlog`.
 - Spreadsheet ID: `1UX7xEKgHi1gRkPs9PGqDlWLfWSiMgRKkDKPYTXtygOs`.
 - Do not confuse the spreadsheet file name with the tab name. For Sheets calls, always use `sheet_name="Backlog"`, never `sheet_name="job_market_map_backlog"`.
-- Shared backlog identity: `agent-backlog-access@robvoto-agent-platform-iam.gserviceaccount.com`. The Sheets connector must select this identity for canonical backlog reads and writes. If it reports a different identity, stop and correct the connector configuration before reading or writing the backlog.
+- Shared backlog identity: `agent-backlog-access@robvoto-agent-platform.iam.gserviceaccount.com`. The Sheets connector must select this identity for canonical backlog reads and writes. If it reports a different identity, stop and correct the connector configuration before reading or writing the backlog.
 - This Google Sheet is the only backlog source of truth. Do not create a competing markdown backlog. Local `docs/CURRENT_STATE.md` is operational session handoff only, not a backlog substitute.
 - Read the sheet header row first and update by column name, never by fixed position. Do not add, remove, or rename columns unless explicitly agreed.
 
