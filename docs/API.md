@@ -97,3 +97,8 @@ Blank or `NULL` is not a state and never automatically means false or
 cross-source search consumers; only an explicit `not_present` is treated as
 source-checked absence. Capability `unknown` is conservative and does not mean
 the source is unsupported.
+
+This applies equally to structured filters and field-scoped keyword terms such
+as `q=workplace_type:Hybrid`. An unresolved or not-applicable source row stays
+in that field-scoped result for downstream interpretation; an explicit
+`not_present` row does not match.

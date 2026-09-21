@@ -3,7 +3,12 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
-from collector.field_states import FIELD_STATES, NEUTRAL_FIELDS, normalise_field_states
+from collector.field_states import (
+    FIELD_COLUMNS,
+    FIELD_STATES,
+    NEUTRAL_FIELDS,
+    normalise_field_states,
+)
 from collector.identity import job_identity_key
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -47,6 +52,22 @@ def set_job_field_states(job_id: int, states: dict[str, str], *, evidence_source
                 state = existing[field]
             conn.execute("""INSERT INTO job_field_states(job_id,field_name,state,evidence_source,checked_at)
                 VALUES(?,?,?,?,?) ON CONFLICT(job_id,field_name) DO UPDATE SET state=excluded.state, evidence_source=excluded.evidence_source, checked_at=excluded.checked_at""", (int(job_id), field, state, evidence_source, checked_at))
+
+
+def _backfill_field_states(conn: sqlite3.Connection) -> None:
+    """Give pre-JMM-019 jobs explicit conservative states without guessing."""
+
+    columns = ", ".join(["id", *FIELD_COLUMNS.values()])
+    for row in conn.execute(f"SELECT {columns} FROM jobs").fetchall():
+        for field, column in FIELD_COLUMNS.items():
+            value = row[column]
+            state = "known" if value is not None and str(value).strip() else "unknown"
+            conn.execute(
+                """INSERT OR IGNORE INTO job_field_states(
+                       job_id,field_name,state,evidence_source,checked_at
+                   ) VALUES(?,?,?,'legacy:jobs',datetime('now'))""",
+                (int(row["id"]), field, state),
+            )
 
 
 def resolve_primary_job_id(conn: sqlite3.Connection, job_id: int) -> int:
@@ -547,6 +568,7 @@ def init_db() -> None:
             "last_attempt_seek_slot TEXT",
         )
 
+        _backfill_field_states(conn)
         _migrate_job_observation_state(conn)
         _backfill_identity(conn, "jobs")
         _backfill_identity(conn, "job_tombstones")

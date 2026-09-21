@@ -231,6 +231,18 @@ _SEARCH_FIELDS = {
     "workplace_type": ("workplace_type",), "apply_method": ("apply_method",),
     "description": ("teaser_text", "raw_card_text", "full_description"),
 }
+_SEARCH_STATE_FIELDS = {
+    "title": "title",
+    "company": "company",
+    "employer": "company",
+    "location": "location",
+    "classification": "classification",
+    "subclassification": "subclassification",
+    "employment_type": "employment_type",
+    "workplace_type": "workplace_type",
+    "apply_method": "apply_method",
+    "description": "description",
+}
 _SEARCH_DEFAULT_FIELDS = (
     "title", "employer", "location", "classification_text", "subclassification_text",
     "employment_type", "workplace_type", "apply_method", "teaser_text", "raw_card_text",
@@ -347,6 +359,17 @@ def _search_sql(node: object, params: list[object]) -> str:
     for column in columns:
         clauses.append(f"COALESCE(vacancy_job.{column}, '') LIKE ? ESCAPE '\\'")
         params.append(like)
+    state_field = _SEARCH_STATE_FIELDS.get(field)
+    if state_field:
+        # A field-scoped query keeps source rows whose value is unresolved or
+        # not applicable. Missing state rows are legacy/unevaluated evidence
+        # and therefore have the same semantics as ``unknown``.
+        clauses.append(
+            "EXISTS (SELECT 1 FROM job_field_states q_state "
+            "WHERE q_state.job_id=vacancy_job.id AND q_state.field_name=? "
+            "AND q_state.state IN ('unknown','not_applicable'))"
+        )
+        params.append(state_field)
     return "(" + " OR ".join(clauses) + ")"
 
 

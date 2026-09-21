@@ -342,6 +342,35 @@ def test_search_is_bounded_and_supports_neutral_filters(tmp_path, monkeypatch):
         assert [item["title"] for item in expression["items"]] == ["Delivery Manager", "Analyst"]
 
 
+def test_field_scoped_q_preserves_unknown_and_not_applicable_source_rows(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            states = (("seek", "known"), ("apsjobs", "unknown"), ("future-board", "not_applicable"), ("linkedin", "not_present"))
+            for index, (source, state) in enumerate(states, start=1):
+                job_id = conn.execute(
+                    """INSERT INTO jobs(source,source_job_id,canonical_url,title,workplace_type)
+                       VALUES(?,?,?,?,?)""",
+                    (source, str(index), f"https://{source}.test/{index}", f"Role {index}", "Hybrid" if state == "known" else None),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (job_id, "workplace_type", state, "2026-09-10"),
+                )
+
+        structured = client.get(
+            "/v3/jobs/search", params={"workplace_type": "Hybrid", "limit": 10}
+        ).json()
+        scoped = client.get(
+            "/v3/jobs/search", params={"q": "workplace_type:Hybrid", "limit": 10}
+        ).json()
+        assert [item["title"] for item in structured["items"]] == ["Role 1", "Role 2", "Role 3"]
+        assert [item["title"] for item in scoped["items"]] == ["Role 1", "Role 2", "Role 3"]
+
+
 def test_search_rejects_pathological_query_and_limit(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         too_many_terms = " OR ".join(f"term{i}" for i in range(17))
