@@ -356,20 +356,38 @@ def _search_sql(node: object, params: list[object]) -> str:
     columns = _SEARCH_FIELDS.get(field, _SEARCH_DEFAULT_FIELDS)
     like = _search_like(value)
     clauses = []
-    for column in columns:
-        clauses.append(f"COALESCE(vacancy_job.{column}, '') LIKE ? ESCAPE '\\'")
-        params.append(like)
     state_field = _SEARCH_STATE_FIELDS.get(field)
     if state_field:
+        value_clauses = []
+        for column in columns:
+            value_clauses.append(f"COALESCE(vacancy_job.{column}, '') LIKE ? ESCAPE '\\'")
+            params.append(like)
+        clauses.append(
+            "((" + " OR ".join(value_clauses) + ") AND "
+            "EXISTS (SELECT 1 FROM job_field_states known_state "
+            "WHERE known_state.job_id=vacancy_job.id AND known_state.field_name=? "
+            "AND known_state.state='known'))"
+        )
+        params.append(state_field)
         # A field-scoped query keeps source rows whose value is unresolved or
         # not applicable. Missing state rows are legacy/unevaluated evidence
-        # and therefore have the same semantics as ``unknown``.
+        # and therefore have the same semantics as ``unknown``. Explicit
+        # ``not_present`` is authoritative even when an older value remains.
         clauses.append(
             "EXISTS (SELECT 1 FROM job_field_states q_state "
             "WHERE q_state.job_id=vacancy_job.id AND q_state.field_name=? "
             "AND q_state.state IN ('unknown','not_applicable'))"
         )
         params.append(state_field)
+        clauses.append(
+            "NOT EXISTS (SELECT 1 FROM job_field_states missing_state "
+            "WHERE missing_state.job_id=vacancy_job.id AND missing_state.field_name=?)"
+        )
+        params.append(state_field)
+    else:
+        for column in columns:
+            clauses.append(f"COALESCE(vacancy_job.{column}, '') LIKE ? ESCAPE '\\'")
+            params.append(like)
     return "(" + " OR ".join(clauses) + ")"
 
 
@@ -651,13 +669,14 @@ def search_jobs(
         if values:
             state_field = filter_state_fields[parameter]
             linked_clauses.append("(" + " OR ".join(
-                f"(LOWER(COALESCE(vacancy_job.{column},'')) LIKE ? ESCAPE '\\' "
+                f"((LOWER(COALESCE(vacancy_job.{column},'')) LIKE ? ESCAPE '\\' "
+                "AND EXISTS (SELECT 1 FROM job_field_states known_state WHERE known_state.job_id=vacancy_job.id AND known_state.field_name=? AND known_state.state='known')) "
                 "OR EXISTS (SELECT 1 FROM job_field_states filter_state WHERE filter_state.job_id=vacancy_job.id AND filter_state.field_name=? AND filter_state.state IN ('unknown','not_applicable')) "
                 "OR NOT EXISTS (SELECT 1 FROM job_field_states missing_state WHERE missing_state.job_id=vacancy_job.id AND missing_state.field_name=?))"
                 for _ in values
             ) + ")")
             for value in values:
-                linked_params.extend((_search_like(value.casefold()), state_field, state_field))
+                linked_params.extend((_search_like(value.casefold()), state_field, state_field, state_field))
 
     if parsed_queries:
         query_clauses = []

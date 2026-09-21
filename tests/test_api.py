@@ -350,7 +350,7 @@ def test_field_scoped_q_preserves_unknown_and_not_applicable_source_rows(tmp_pat
                 job_id = conn.execute(
                     """INSERT INTO jobs(source,source_job_id,canonical_url,title,workplace_type)
                        VALUES(?,?,?,?,?)""",
-                    (source, str(index), f"https://{source}.test/{index}", f"Role {index}", "Hybrid" if state == "known" else None),
+                    (source, str(index), f"https://{source}.test/{index}", f"Role {index}", "Hybrid" if state in {"known", "not_present"} else None),
                 ).lastrowid
                 conn.execute(
                     "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
@@ -369,6 +369,37 @@ def test_field_scoped_q_preserves_unknown_and_not_applicable_source_rows(tmp_pat
         ).json()
         assert [item["title"] for item in structured["items"]] == ["Role 1", "Role 2", "Role 3"]
         assert [item["title"] for item in scoped["items"]] == ["Role 1", "Role 2", "Role 3"]
+
+
+def test_not_present_state_overrides_a_stale_stored_value(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        result = ingest_card(
+            CardObservation(
+                source="seek", source_job_id="stale-1", canonical_url="https://seek.test/stale-1",
+                title="Stale workplace state", workplace_type="Hybrid",
+            )
+        )
+        ingest_card(
+            CardObservation(
+                source="seek", source_job_id="stale-1", canonical_url="https://seek.test/stale-1",
+                title="Stale workplace state", field_states={"workplace_type": "not_present"},
+            )
+        )
+        with db.connect() as conn:
+            stored = conn.execute(
+                "SELECT workplace_type FROM jobs WHERE id=?", (result.observation_job_id,)
+            ).fetchone()["workplace_type"]
+        assert stored == "Hybrid"
+        assert db.get_job_field_states(result.observation_job_id)["workplace_type"] == "not_present"
+
+        structured = client.get(
+            "/v3/jobs/search", params={"workplace_type": "Hybrid", "limit": 10}
+        ).json()
+        scoped = client.get(
+            "/v3/jobs/search", params={"q": "workplace_type:Hybrid", "limit": 10}
+        ).json()
+        assert structured["items"] == []
+        assert scoped["items"] == []
 
 
 def test_search_rejects_pathological_query_and_limit(tmp_path, monkeypatch):

@@ -101,4 +101,5 @@ the source is unsupported.
 This applies equally to structured filters and field-scoped keyword terms such
 as `q=workplace_type:Hybrid`. An unresolved or not-applicable source row stays
 in that field-scoped result for downstream interpretation; an explicit
-`not_present` row does not match.
+`not_present` row does not match, even if an older stored value is retained as
+evidence.
