@@ -346,11 +346,15 @@ def test_salary_search_requires_and_respects_period_and_currency(tmp_path, monke
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         with db.connect() as conn:
             rows = (
-                ("annual", "AUD", "year", 100000, 120000),
-                ("hourly", "AUD", "hour", 100, 120),
-                ("unknown-currency", None, "year", 100000, 120000),
+                ("annual", "AUD", "year", 100000, 120000, "known"),
+                ("hourly", "AUD", "hour", 100, 120, "known"),
+                ("unknown-currency", None, "year", 100000, 120000, "known"),
+                ("stale-state", "AUD", "year", 100000, 120000, "not_present"),
+                ("unknown-state", "AUD", "year", 100000, 120000, "unknown"),
+                ("not-applicable-state", "AUD", "year", 100000, 120000, "not_applicable"),
+                ("unknown-period", "AUD", None, 100000, 120000, "known"),
             )
-            for index, (title, currency, period, minimum, maximum) in enumerate(rows, start=1):
+            for index, (title, currency, period, minimum, maximum, field_state) in enumerate(rows, start=1):
                 job_id = conn.execute(
                     """INSERT INTO jobs(source,source_job_id,canonical_url,title,
                                salary_normalized_state,salary_min_amount,salary_max_amount,
@@ -362,8 +366,28 @@ def test_salary_search_requires_and_respects_period_and_currency(tmp_path, monke
                     "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
                     (job_id, "2026-09-10", "2026-09-10"),
                 )
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (job_id, "salary", field_state, "2026-09-10"),
+                )
 
         assert client.get("/v3/jobs/search", params={"salary_min": 100000}).status_code == 400
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": "nan", "salary_period": "year", "salary_currency": "AUD"},
+        ).status_code == 422
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 120000, "salary_max": 100000, "salary_period": "year", "salary_currency": "AUD"},
+        ).status_code == 400
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 100000, "salary_period": "fortnight", "salary_currency": "AUD"},
+        ).status_code == 400
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 100000, "salary_period": "year", "salary_currency": "money"},
+        ).status_code == 400
         result = client.get(
             "/v3/jobs/search",
             params={"salary_min": 110000, "salary_max": 115000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
@@ -371,11 +395,100 @@ def test_salary_search_requires_and_respects_period_and_currency(tmp_path, monke
         assert result.status_code == 200
         assert [item["title"] for item in result.json()["items"]] == ["annual"]
 
+        upper_bound_only = client.get(
+            "/v3/jobs/search",
+            params={"salary_max": 105000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
+        ).json()
+        assert [item["title"] for item in upper_bound_only["items"]] == ["annual"]
+
         hourly_period = client.get(
             "/v3/jobs/search",
             params={"salary_min": 110, "salary_period": "hour", "salary_currency": "AUD", "limit": 10},
         ).json()
         assert [item["title"] for item in hourly_period["items"]] == ["hourly"]
+
+
+def test_salary_search_linked_source_does_not_hide_matching_salary_evidence(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            primary_id = conn.execute(
+                """INSERT INTO jobs(
+                       source,source_job_id,canonical_url,title
+                   ) VALUES('seek','seek-primary','https://seek.test/primary','Canonical role')"""
+            ).lastrowid
+            alias_id = conn.execute(
+                """INSERT INTO jobs(
+                       source,source_job_id,canonical_url,title,primary_job_id,
+                       salary_normalized_state,salary_min_amount,salary_max_amount,
+                       salary_period,salary_currency
+                   ) VALUES('apsjobs','aps-alias','https://aps.test/alias','APS role',?,
+                            'known',100000,120000,'year','AUD')""",
+                (primary_id,),
+            ).lastrowid
+            for job_id in (primary_id, alias_id):
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+            conn.execute(
+                "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                (alias_id, "salary", "known", "2026-09-10"),
+            )
+
+        response = client.get(
+            "/v3/jobs/search",
+            params={
+                "salary_min": 110000,
+                "salary_period": "year",
+                "salary_currency": "AUD",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert [item["id"] for item in payload["items"]] == [primary_id]
+        assert payload["items"][0]["salary_normalized"]["state"] == "unknown"
+        assert payload["items"][0]["matched_sources"] == [
+            {"id": alias_id, "source": "apsjobs", "source_job_id": "aps-alias"}
+        ]
+
+
+def test_salary_search_pagination_keeps_snapshot_and_filter(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            for index in range(1, 4):
+                job_id = conn.execute(
+                    """INSERT INTO jobs(
+                           source,source_job_id,canonical_url,title,
+                           salary_normalized_state,salary_min_amount,salary_max_amount,
+                           salary_period,salary_currency
+                       ) VALUES('seek',?,?,?,?,?,?,?,?)""",
+                    (str(index), f"https://seek.test/{index}", f"Salary role {index}",
+                     "known", 100000, 120000, "year", "AUD"),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (job_id, "salary", "known", "2026-09-10"),
+                )
+
+        params = {"salary_min": 110000, "salary_period": "year", "salary_currency": "AUD", "limit": 2}
+        first = client.get("/v3/jobs/search", params=params).json()
+        assert first["total"] == 3
+        assert first["has_more"] is True
+        assert [item["title"] for item in first["items"]] == ["Salary role 1", "Salary role 2"]
+        assert all(item["matched_sources"] for item in first["items"])
+
+        second = client.get(
+            "/v3/jobs/search",
+            params={**params, "after_id": first["next_cursor"], "through_id": first["snapshot_max_id"]},
+        ).json()
+        assert second["total"] == 3
+        assert second["has_more"] is False
+        assert [item["title"] for item in second["items"]] == ["Salary role 3"]
 
 
 def test_field_scoped_q_preserves_unknown_and_not_applicable_source_rows(tmp_path, monkeypatch):

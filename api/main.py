@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
@@ -642,6 +643,10 @@ def search_jobs(
         salary_currency = str(salary_currency).strip().upper()
         if not re.fullmatch(r"[A-Z]{3}", salary_currency):
             raise HTTPException(400, "salary_currency must be a three-letter code")
+        if salary_min is not None and not math.isfinite(salary_min):
+            raise HTTPException(400, "salary_min must be finite")
+        if salary_max is not None and not math.isfinite(salary_max):
+            raise HTTPException(400, "salary_max must be finite")
         if salary_min is not None and salary_max is not None and salary_min > salary_max:
             raise HTTPException(400, "salary_min must not exceed salary_max")
 
@@ -678,6 +683,7 @@ def search_jobs(
         linked_clauses.extend(
             [
                 "vacancy_job.salary_normalized_state='known'",
+                "EXISTS (SELECT 1 FROM job_field_states salary_state WHERE salary_state.job_id=vacancy_job.id AND salary_state.field_name='salary' AND salary_state.state='known')",
                 "vacancy_job.salary_period=?",
                 "vacancy_job.salary_currency=?",
             ]
@@ -763,6 +769,25 @@ def search_jobs(
                 page_ids,
             ).fetchall()
         page_ids = [int(row["id"]) for row in rows]
+        matched_sources_by_primary: dict[int, list[dict[str, object]]] = {}
+        if page_ids:
+            placeholders = ",".join("?" for _ in page_ids)
+            matched_source_rows = conn.execute(
+                "SELECT COALESCE(vacancy_job.primary_job_id,vacancy_job.id) AS primary_id, "
+                "vacancy_job.id AS matched_job_id, vacancy_job.source, vacancy_job.source_job_id "
+                + linked_from_where
+                + f" AND COALESCE(vacancy_job.primary_job_id,vacancy_job.id) IN ({placeholders}) "
+                "ORDER BY primary_id ASC, vacancy_job.id ASC",
+                (*linked_params, *page_ids),
+            ).fetchall()
+            for matched_source in matched_source_rows:
+                matched_sources_by_primary.setdefault(int(matched_source["primary_id"]), []).append(
+                    {
+                        "id": int(matched_source["matched_job_id"]),
+                        "source": matched_source["source"],
+                        "source_job_id": matched_source["source_job_id"],
+                    }
+                )
         lifecycle_by_id: dict[int, dict[str, object]] = {}
         if page_ids:
             placeholders = ",".join("?" for _ in page_ids)
@@ -797,6 +822,7 @@ def search_jobs(
     for row in rows:
         item = dict(row)
         item.update(lifecycle_by_id.get(int(item["id"]), {}))
+        item["matched_sources"] = matched_sources_by_primary.get(int(item["id"]), [])
         payload_rows.append(item)
     elapsed_ms = round((perf_counter() - started) * 1000, 1)
     collection_logger().info(
