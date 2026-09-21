@@ -51,10 +51,12 @@ For one stable multi-page consumer run, the first feed response returns `snapsho
 ## Stateless filtered search
 
 ```text
-GET /v3/jobs/search?q=<role-term>&source=<board>&geography_code=<code>&posted_after=<timestamp>
+GET /v3/jobs/search?q=<role-term>&source=<board>&geography_code=<code>&location=<location>&classification=<classification>&subclassification=<subclassification>&employment_type=<type>&workplace_type=<arrangement>&apply_method=<method>&company=<employer>&posted_after=<timestamp>
 ```
 
-The `q`, `source`, and `geography_code` parameters may be repeated. The filters are evaluated together against any active linked source row, while the response contains each matching canonical vacancy once. The response's `total` counts those canonical vacancies within the fixed snapshot and does not change with `after_id`. `after_id` and `through_id` provide stateless pagination; filtered search does not create or advance a consumer checkpoint.
+All filter parameters may be repeated. The endpoint always returns one bounded page; its default and hard maximum are controlled by JMM admin settings, including when `q` is empty. The filters are evaluated together against any active linked source row, while the response contains each matching canonical vacancy once. The response's `total` counts those canonical vacancies within the fixed snapshot and does not change with `after_id`. `after_id` and `through_id` provide stateless pagination; filtered search does not create or advance a consumer checkpoint.
+
+Repeated `q` expressions are ORed. Inside one expression, `AND` binds more tightly than `OR`; parentheses, quoted phrases, and neutral field scopes (`title`, `company`/`employer`, `location`, `classification`, `subclassification`, `employment_type`, `workplace_type`, `apply_method`, and `description`) are supported. The grammar is deliberately bounded and deterministic; JMM does not perform personal fit, ranking, history, or LLM interpretation.
 
 ## Canonical JD retrieval
 

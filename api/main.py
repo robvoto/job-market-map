@@ -1,8 +1,10 @@
 from __future__ import annotations
 
 import json
+import re
 from contextlib import asynccontextmanager
 from datetime import UTC, datetime, timedelta
+from time import perf_counter
 from typing import Annotated
 
 from fastapi import FastAPI, HTTPException, Query
@@ -40,7 +42,11 @@ from collector.query_admin import add_query, set_query_active
 from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
 from collector.retention import apply_retention
-from collector.run_logging import configure_collection_logging, read_collection_log_tail
+from collector.run_logging import (
+    collection_logger,
+    configure_collection_logging,
+    read_collection_log_tail,
+)
 from collector.run_stats import population_stats
 from collector.scheduler import SCHEDULER, SchedulerService
 from collector.seek_cycle import enabled_state_codes
@@ -209,6 +215,136 @@ def _limit(requested: int | None) -> int:
     if requested > maximum:
         raise HTTPException(400, f"limit exceeds admin maximum of {maximum}")
     return requested
+
+
+_SEARCH_TOKEN_RE = re.compile(
+    r'''\s*(?:(AND|OR)\b|([()])|([A-Za-z_][A-Za-z0-9_]*:"(?:[^"\\]|\\.)*")|([A-Za-z_][A-Za-z0-9_]*:[^\s()]+)|("(?:[^"\\]|\\.)*")|([^\s()]+))''',
+    re.IGNORECASE,
+)
+_SEARCH_FIELDS = {
+    "title": ("title",), "company": ("employer",), "employer": ("employer",),
+    "location": ("location",), "classification": ("classification_text",),
+    "subclassification": ("subclassification_text",), "employment_type": ("employment_type",),
+    "workplace_type": ("workplace_type",), "apply_method": ("apply_method",),
+    "description": ("teaser_text", "raw_card_text", "full_description"),
+}
+_SEARCH_DEFAULT_FIELDS = (
+    "title", "employer", "location", "classification_text", "subclassification_text",
+    "employment_type", "workplace_type", "apply_method", "teaser_text", "raw_card_text",
+    "full_description",
+)
+_SEARCH_MAX_TERMS = 16
+
+
+def _search_unquote(value: str) -> str:
+    return value[1:-1].replace('\\"', '"').replace('\\\\', '\\')
+
+
+def _search_term(token: str) -> tuple[str, str, bool]:
+    field = ""
+    value = token
+    if ":" in token and not token.startswith('"'):
+        candidate, value = token.split(":", 1)
+        field = candidate.casefold()
+        if field not in _SEARCH_FIELDS:
+            raise HTTPException(400, f"unsupported search field: {candidate}")
+        if not value:
+            raise HTTPException(400, "field-scoped search terms must have a value")
+    exact = value.startswith('"') and value.endswith('"')
+    if exact:
+        value = _search_unquote(value)
+    value = " ".join(value.split()).strip()
+    if not value:
+        raise HTTPException(400, "search terms must not be empty")
+    return field, value, exact
+
+
+def _parse_search_expression(expression: str) -> tuple[object, int]:
+    normalized = " ".join(str(expression).split()).strip()
+    if not normalized:
+        raise HTTPException(400, "search expressions must not be empty")
+    if not re.search(r"\b(?:AND|OR)\b|[()]|[A-Za-z_][A-Za-z0-9_]*:", normalized, re.IGNORECASE):
+        field, value, exact = _search_term(normalized)
+        return ("term", field, value, exact), 1
+    tokens: list[tuple[str, str]] = []
+    position = 0
+    for match in _SEARCH_TOKEN_RE.finditer(normalized):
+        if match.start() != position and normalized[position:match.start()].strip():
+            raise HTTPException(400, "malformed search expression")
+        position = match.end()
+        if match.group(1):
+            tokens.append((match.group(1).upper(), match.group(1).upper()))
+        elif match.group(2):
+            tokens.append((match.group(2), match.group(2)))
+        else:
+            tokens.append(("TERM", next(group for group in match.groups()[2:] if group is not None)))
+    if normalized[position:].strip() or not tokens:
+        raise HTTPException(400, "malformed search expression")
+    index = 0
+    term_count = 0
+
+    def parse_primary() -> tuple[object, int]:
+        nonlocal index, term_count
+        if index >= len(tokens):
+            raise HTTPException(400, "expected a search term")
+        kind, value = tokens[index]
+        if kind == "(":
+            index += 1
+            node, count = parse_or()
+            if index >= len(tokens) or tokens[index][0] != ")":
+                raise HTTPException(400, "unclosed search group")
+            index += 1
+            return node, count
+        if kind != "TERM":
+            raise HTTPException(400, "expected a search term")
+        index += 1
+        term_count += 1
+        if term_count > _SEARCH_MAX_TERMS:
+            raise HTTPException(400, f"search expression exceeds {_SEARCH_MAX_TERMS} terms")
+        field, text, exact = _search_term(value)
+        return ("term", field, text, exact), 1
+
+    def parse_and() -> tuple[object, int]:
+        nonlocal index
+        node, count = parse_primary()
+        while index < len(tokens) and tokens[index][0] == "AND":
+            index += 1
+            right, right_count = parse_primary()
+            node, count = ("and", node, right), count + right_count
+        return node, count
+
+    def parse_or() -> tuple[object, int]:
+        nonlocal index
+        node, count = parse_and()
+        while index < len(tokens) and tokens[index][0] == "OR":
+            index += 1
+            right, right_count = parse_and()
+            node, count = ("or", node, right), count + right_count
+        return node, count
+
+    node, count = parse_or()
+    if index != len(tokens):
+        raise HTTPException(400, "unexpected token in search expression")
+    return node, count
+
+
+def _search_like(value: str) -> str:
+    return "%" + value.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+
+
+def _search_sql(node: object, params: list[object]) -> str:
+    kind = node[0]
+    if kind in {"and", "or"}:
+        operator = " AND " if kind == "and" else " OR "
+        return "(" + _search_sql(node[1], params) + operator + _search_sql(node[2], params) + ")"
+    _, field, value, _exact = node
+    columns = _SEARCH_FIELDS.get(field, _SEARCH_DEFAULT_FIELDS)
+    like = _search_like(value)
+    clauses = []
+    for column in columns:
+        clauses.append(f"COALESCE(vacancy_job.{column}, '') LIKE ? ESCAPE '\\'")
+        params.append(like)
+    return "(" + " OR ".join(clauses) + ")"
 
 
 @app.get("/", include_in_schema=False)
@@ -397,9 +533,16 @@ def new_jobs(days: int = Query(1, ge=0, le=30), limit: int | None = Query(None, 
 @app.get(f"/{API_VERSION}/jobs/search")
 @app.get("/jobs/search", include_in_schema=False)
 def search_jobs(
-    q: Annotated[list[str] | None, Query()] = None,
+    q: Annotated[list[str] | None, Query(max_length=300)] = None,
     source: Annotated[list[str] | None, Query()] = None,
     geography_code: Annotated[list[str] | None, Query()] = None,
+    location: Annotated[list[str] | None, Query()] = None,
+    classification: Annotated[list[str] | None, Query()] = None,
+    subclassification: Annotated[list[str] | None, Query()] = None,
+    employment_type: Annotated[list[str] | None, Query()] = None,
+    workplace_type: Annotated[list[str] | None, Query()] = None,
+    apply_method: Annotated[list[str] | None, Query()] = None,
+    company: Annotated[list[str] | None, Query()] = None,
     posted_after: str | None = None,
     after_id: int = Query(0, ge=0),
     through_id: int | None = Query(None, ge=0),
@@ -407,16 +550,21 @@ def search_jobs(
     limit: int | None = Query(None, ge=1),
     include_raw: bool = False,
 ):
-    """Search canonical vacancies using filters evaluated on active source rows.
+    """Search canonical vacancies using neutral, snapshot-bounded filters.
 
-    JH supplies its existing board search terms and geography scope here. A
-    canonical vacancy is returned once, but matching is intentionally evaluated
-    against any linked active source row so a non-primary board posting can
-    satisfy the selected search scope.
+    Repeated ``q`` expressions are ORed for backward compatibility. Within an
+    expression, ``AND`` binds more tightly than ``OR``; quoted phrases and
+    field scopes such as ``title:"delivery manager"`` are deterministic. JH
+    owns personal fit and decision policy; JMM only searches neutral evidence.
     """
+    started = perf_counter()
     resolved_limit = _limit(limit)
-    terms = [" ".join(str(value).split()).strip() for value in q or []]
-    terms = [term for term in terms if term]
+    expressions = [str(value).strip() for value in q or [] if str(value).strip()]
+    if len(expressions) > _SEARCH_MAX_TERMS:
+        raise HTTPException(400, f"search supports at most {_SEARCH_MAX_TERMS} q expressions")
+    if any(len(expression) > 300 for expression in expressions):
+        raise HTTPException(400, "search expressions must be 300 characters or shorter")
+    parsed_queries = [_parse_search_expression(expression) for expression in expressions]
     sources = [str(value).strip().casefold() for value in source or [] if str(value).strip()]
     geographies = [str(value).strip().upper() for value in geography_code or [] if str(value).strip()]
 
@@ -429,9 +577,14 @@ def search_jobs(
 
     linked_clauses = [
         "vacancy_job.id <= ?",
-        "COALESCE(vacancy_state.archived,0)=0",
-        source_status_is_active_sql("vacancy_job.source_status"),
     ]
+    if not include_archived:
+        linked_clauses.extend(
+            [
+                "COALESCE(vacancy_state.archived,0)=0",
+                source_status_is_active_sql("vacancy_job.source_status"),
+            ]
+        )
     linked_params: list[object] = [snapshot_max_id]
     if sources:
         placeholders = ",".join("?" for _ in sources)
@@ -444,16 +597,31 @@ def search_jobs(
     if posted_after:
         linked_clauses.append("(vacancy_job.posted_at IS NULL OR vacancy_job.posted_at>=?)")
         linked_params.append(posted_after)
-    if terms:
-        term_clauses: list[str] = []
-        for term in terms:
-            term_clauses.append(
-                "(vacancy_job.title LIKE ? OR vacancy_job.employer LIKE ? "
-                "OR vacancy_job.raw_card_text LIKE ?)"
+
+    filter_columns = {
+        "location": "location",
+        "classification": "classification_text",
+        "subclassification": "subclassification_text",
+        "employment_type": "employment_type",
+        "workplace_type": "workplace_type",
+        "apply_method": "apply_method",
+        "company": "employer",
+    }
+    for parameter, column in filter_columns.items():
+        values = [str(value).strip() for value in (locals()[parameter] or []) if str(value).strip()]
+        if values:
+            linked_clauses.append(
+                "(" + " OR ".join(f"LOWER(COALESCE(vacancy_job.{column},'')) LIKE ? ESCAPE '\\'" for _ in values) + ")"
             )
-            like = f"%{term}%"
-            linked_params.extend([like, like, like])
-        linked_clauses.append("(" + " OR ".join(term_clauses) + ")")
+            linked_params.extend(_search_like(value.casefold()) for value in values)
+
+    if parsed_queries:
+        query_clauses = []
+        for node, _term_count in parsed_queries:
+            query_params: list[object] = []
+            query_clauses.append(_search_sql(node, query_params))
+            linked_params.extend(query_params)
+        linked_clauses.append("(" + " OR ".join(query_clauses) + ")")
 
     linked_from_where = (
         " FROM jobs vacancy_job "
@@ -527,6 +695,11 @@ def search_jobs(
         item = dict(row)
         item.update(lifecycle_by_id.get(int(item["id"]), {}))
         payload_rows.append(item)
+    elapsed_ms = round((perf_counter() - started) * 1000, 1)
+    collection_logger().info(
+        "JMM_SEARCH page total=%d page_size=%d returned=%d has_more=%s after_id=%d through_id=%d q_expressions=%d elapsed_ms=%.1f",
+        total, resolved_limit, len(rows), has_more, after_id, snapshot_max_id, len(parsed_queries), elapsed_ms,
+    )
     return {
         "api_version": API_VERSION,
         "schema_version": SCHEMA_VERSION,

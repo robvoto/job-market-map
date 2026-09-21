@@ -304,6 +304,51 @@ def test_search_matches_filters_on_any_active_linked_source_and_returns_primary_
         assert second_page.json()["total"] == 1
 
 
+def test_search_is_bounded_and_supports_neutral_filters(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            for index, title in enumerate(("Delivery Manager", "Project Manager", "Analyst"), start=1):
+                job_id = conn.execute(
+                    """INSERT INTO jobs(
+                           source,source_job_id,canonical_url,title,employer,location,
+                           geography_code,classification_text,subclassification_text,
+                           employment_type,workplace_type,apply_method,teaser_text
+                       ) VALUES('seek',?,?,?,?,?,?,?,?,?,?,?,?)""",
+                    (str(index), f"https://seek.test/{index}", title, "Acme", "Sydney NSW", "NSW",
+                     "Information & Communication Technology", "Project Management", "Full time",
+                     "Hybrid", "quick_apply", f"Neutral teaser for {title}"),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+
+        first = client.get("/v3/jobs/search", params={"limit": 2}).json()
+        assert first["total"] == 3
+        assert len(first["items"]) == 2
+        assert first["has_more"] is True
+
+        filtered = client.get(
+            "/v3/jobs/search",
+            params={"classification": "Information & Communication Technology", "workplace_type": "Hybrid",
+                    "company": "acme", "limit": 10},
+        ).json()
+        assert filtered["total"] == 3
+
+        expression = client.get(
+            "/v3/jobs/search",
+            params={"q": 'title:"Delivery Manager" OR title:Analyst', "limit": 10},
+        ).json()
+        assert [item["title"] for item in expression["items"]] == ["Delivery Manager", "Analyst"]
+
+
+def test_search_rejects_pathological_query_and_limit(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        too_many_terms = " OR ".join(f"term{i}" for i in range(17))
+        assert client.get("/v3/jobs/search", params={"q": too_many_terms}).status_code == 400
+        assert client.get("/v3/jobs/search", params={"limit": 5001}).status_code == 400
+
+
 
 def test_feed_derives_vacancy_freshness_across_linked_sources(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
