@@ -78,3 +78,22 @@ Admin UI: `/admin`.
 ## Compatibility
 
 Internal SQLite tables are not a public contract. Breaking semantics require another API version. Consumers must not silently fall back to direct SQLite writes.
+
+## Field states and source capabilities
+
+`GET /v3/capabilities/fields` exposes the neutral searchable fields, the four
+field states, and source capability metadata for `seek`, `linkedin`, `apsjobs`
+and `future` adapters. Job payloads include a complete `field_states` map.
+
+The states are explicit:
+
+- `known`: source-backed evidence supplied a value; boolean `false` is still known.
+- `not_present`: the relevant source evidence was checked and did not provide a value.
+- `unknown`: JMM cannot determine the value safely.
+- `not_applicable`: the field does not apply to that source/adapter.
+
+Blank or `NULL` is not a state and never automatically means false or
+`not_present`. `unknown` and `not_applicable` remain available to neutral
+cross-source search consumers; only an explicit `not_present` is treated as
+source-checked absence. Capability `unknown` is conservative and does not mean
+the source is unsupported.

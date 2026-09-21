@@ -5,11 +5,12 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
-from collector.db import connect, get_primary_job_id, init_db
+from collector.db import connect, get_primary_job_id, init_db, set_job_field_states
 from collector.duplicates import (
     fingerprints,
     refresh_duplicate_links,
 )
+from collector.field_states import states_for_observation
 from collector.identity import job_identity_key
 from collector.models import CardObservation
 
@@ -299,6 +300,15 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             )
 
     observation_job_id = job_id
+    # Persist outside the ingestion transaction because this helper opens its
+    # own connection. A blank observation is unknown and cannot erase prior
+    # source evidence.
+    set_job_field_states(
+        job_id,
+        states_for_observation(obs),
+        evidence_source=f"{source}:card",
+        checked_at=captured_at,
+    )
     source_row_created = created
     refresh_duplicate_links(observation_job_id)
     primary_job_id = get_primary_job_id(observation_job_id)

@@ -24,9 +24,11 @@ from collector.db import (
     connect,
     get_job_by_identity_key,
     get_job_by_source_id,
+    get_job_field_states,
     get_job_jd,
     init_db,
 )
+from collector.field_states import FIELD_STATES, NEUTRAL_FIELDS, capabilities_for_source
 from collector.geographies import (
     list_geographies,
     seed_geographies,
@@ -67,7 +69,7 @@ from collector.settings import (
 from collector.source_status import source_status_is_active_sql
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -139,6 +141,7 @@ def _tags(value: str | None) -> list[str]:
 def _job_payload(row, *, include_raw: bool = True) -> dict:
     item = dict(row)
     item["card_tags"] = _tags(item.pop("card_tags_json", None))
+    item["field_states"] = get_job_field_states(int(item["id"]))
     for key in (
         "reposted",
         "easy_apply",
@@ -345,6 +348,14 @@ def _search_sql(node: object, params: list[object]) -> str:
         clauses.append(f"COALESCE(vacancy_job.{column}, '') LIKE ? ESCAPE '\\'")
         params.append(like)
     return "(" + " OR ".join(clauses) + ")"
+
+
+@app.get(f"/{API_VERSION}/capabilities/fields")
+@app.get("/capabilities/fields", include_in_schema=False)
+def field_capabilities():
+    """Expose the neutral field/state contract for current and future adapters."""
+    sources = {source: capabilities_for_source(source) for source in ("seek", "linkedin", "apsjobs", "future")}
+    return {"api_version": API_VERSION, "schema_version": SCHEMA_VERSION, "field_states": list(FIELD_STATES), "fields": list(NEUTRAL_FIELDS), "sources": sources}
 
 
 @app.get("/", include_in_schema=False)
@@ -607,13 +618,23 @@ def search_jobs(
         "apply_method": "apply_method",
         "company": "employer",
     }
+    filter_state_fields = {
+        "location": "location", "classification": "classification",
+        "subclassification": "subclassification", "employment_type": "employment_type",
+        "workplace_type": "workplace_type", "apply_method": "apply_method", "company": "company",
+    }
     for parameter, column in filter_columns.items():
         values = [str(value).strip() for value in (locals()[parameter] or []) if str(value).strip()]
         if values:
-            linked_clauses.append(
-                "(" + " OR ".join(f"LOWER(COALESCE(vacancy_job.{column},'')) LIKE ? ESCAPE '\\'" for _ in values) + ")"
-            )
-            linked_params.extend(_search_like(value.casefold()) for value in values)
+            state_field = filter_state_fields[parameter]
+            linked_clauses.append("(" + " OR ".join(
+                f"(LOWER(COALESCE(vacancy_job.{column},'')) LIKE ? ESCAPE '\\' "
+                "OR EXISTS (SELECT 1 FROM job_field_states filter_state WHERE filter_state.job_id=vacancy_job.id AND filter_state.field_name=? AND filter_state.state IN ('unknown','not_applicable')) "
+                "OR NOT EXISTS (SELECT 1 FROM job_field_states missing_state WHERE missing_state.job_id=vacancy_job.id AND missing_state.field_name=?))"
+                for _ in values
+            ) + ")")
+            for value in values:
+                linked_params.extend((_search_like(value.casefold()), state_field, state_field))
 
     if parsed_queries:
         query_clauses = []

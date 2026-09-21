@@ -35,6 +35,7 @@ class CardObservation:
     rank: int | None = None
     page_number: int | None = None
     captured_at: str | None = None
+    field_states: dict[str, str] | None = None
 
     def as_dict(self) -> dict[str, Any]:
         return asdict(self)

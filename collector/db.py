@@ -3,6 +3,7 @@ from __future__ import annotations
 import sqlite3
 from pathlib import Path
 
+from collector.field_states import FIELD_STATES, NEUTRAL_FIELDS, normalise_field_states
 from collector.identity import job_identity_key
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -25,6 +26,27 @@ def connect() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA journal_mode = WAL")
     return conn
+
+def get_job_field_states(job_id: int) -> dict[str, str]:
+    """Return a complete state map; an unrecorded legacy field is unknown."""
+    with connect() as conn:
+        rows = conn.execute("SELECT field_name, state FROM job_field_states WHERE job_id=?", (int(job_id),)).fetchall()
+    result = {field: "unknown" for field in NEUTRAL_FIELDS}
+    for row in rows:
+        if row["field_name"] in result and row["state"] in FIELD_STATES:
+            result[row["field_name"]] = row["state"]
+    return result
+
+def set_job_field_states(job_id: int, states: dict[str, str], *, evidence_source: str, checked_at: str, preserve_unknown: bool = True) -> None:
+    """Persist states, retaining prior evidence when a later observation is blank."""
+    normalised = normalise_field_states(states)
+    with connect() as conn:
+        existing = {row["field_name"]: row["state"] for row in conn.execute("SELECT field_name, state FROM job_field_states WHERE job_id=?", (int(job_id),)).fetchall()}
+        for field, state in normalised.items():
+            if preserve_unknown and state == "unknown" and field in existing:
+                state = existing[field]
+            conn.execute("""INSERT INTO job_field_states(job_id,field_name,state,evidence_source,checked_at)
+                VALUES(?,?,?,?,?) ON CONFLICT(job_id,field_name) DO UPDATE SET state=excluded.state, evidence_source=excluded.evidence_source, checked_at=excluded.checked_at""", (int(job_id), field, state, evidence_source, checked_at))
 
 
 def resolve_primary_job_id(conn: sqlite3.Connection, job_id: int) -> int:
@@ -247,6 +269,14 @@ def store_job_jd_once(
         if existing is None:
             raise KeyError(f"job {job_id} not found")
         if str(existing["full_description"] or "").strip():
+            conn.execute(
+                """INSERT INTO job_field_states(job_id,field_name,state,evidence_source,checked_at)
+                   VALUES(?, 'description', 'known', ?, ?)
+                   ON CONFLICT(job_id,field_name) DO UPDATE SET
+                       state='known', evidence_source=excluded.evidence_source,
+                       checked_at=excluded.checked_at""",
+                (primary_job_id, existing["jd_source"] or source, existing["jd_fetched_at"] or fetched_at),
+            )
             if existing["jd_fetched_at"] and existing["jd_source"]:
                 _record_successful_jd_fetch(conn, existing)
             conn.execute(
@@ -273,6 +303,14 @@ def store_job_jd_once(
             "SELECT id, identity_key, source, source_job_id, canonical_url, full_description, jd_fetched_at, jd_source FROM jobs WHERE id=?",
             (primary_job_id,),
         ).fetchone()
+        conn.execute(
+            """INSERT INTO job_field_states(job_id,field_name,state,evidence_source,checked_at)
+               VALUES(?, 'description', 'known', ?, ?)
+               ON CONFLICT(job_id,field_name) DO UPDATE SET
+                   state='known', evidence_source=excluded.evidence_source,
+                   checked_at=excluded.checked_at""",
+            (primary_job_id, source, fetched_at),
+        )
         _record_successful_jd_fetch(conn, stored)
         conn.execute(
             "DELETE FROM jd_enrichment_queue WHERE job_id IN (SELECT id FROM jobs WHERE id=? OR primary_job_id=?)",

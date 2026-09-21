@@ -138,6 +138,19 @@ CREATE TABLE IF NOT EXISTS collection_runs (
     metadata_json TEXT
 );
 
+-- Semantic state is separate from the value in jobs. NULL/blank alone is
+-- never interpreted as false or as proof that a source omitted a field.
+CREATE TABLE IF NOT EXISTS job_field_states (
+    job_id INTEGER NOT NULL REFERENCES jobs(id) ON DELETE CASCADE,
+    field_name TEXT NOT NULL,
+    state TEXT NOT NULL CHECK(state IN ('known','not_present','unknown','not_applicable')),
+    evidence_source TEXT,
+    checked_at TEXT NOT NULL,
+    PRIMARY KEY(job_id, field_name)
+);
+CREATE INDEX IF NOT EXISTS idx_job_field_states_field_state
+    ON job_field_states(field_name, state);
+
 CREATE INDEX IF NOT EXISTS idx_collection_runs_source_started ON collection_runs(source, started_at);
 
 CREATE TABLE IF NOT EXISTS collection_cursors (

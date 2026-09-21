@@ -107,4 +107,13 @@ Any incomplete/failed partition means that geography is not proven complete.
 
 ## Failure behaviour
 
+## Field-state semantics
+
+Every job payload carries `field_states`. Consumers must inspect the state
+before treating a blank value as absent or false. `known`, `not_present`,
+`unknown`, and `not_applicable` are distinct; only the first two assert a
+source-backed conclusion. `unknown` means JMM could not determine the value,
+while `not_applicable` means the field does not apply to that adapter. Neither
+state excludes a source from cross-source results.
+
 If Job Market Map is unavailable, report the feed failure. Do not silently switch to direct SQLite access. If JH-305 is unavailable, do not invent personal-history state in Job Market Map; use the currently authorised legacy history source or report the missing dependency.

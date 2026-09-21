@@ -52,6 +52,15 @@ Date integrity: no APSJobs result/detail adapter currently exposes a validated p
 
 Do not mark APSJobs coverage complete until its card/result parser and exhaustion rules are implemented and measured.
 
+The field-capability endpoint reports APSJobs fields as `unknown` until a
+neutral adapter proves what the source supplies. This is deliberately not
+`not_applicable`: lack of an adapter is not evidence that APSJobs cannot
+provide a field.
+
+All source adapters use the same four explicit field states. A blank card
+value defaults to `unknown`; adapters may emit `not_present` or
+`not_applicable` only when the relevant source evidence justifies it.
+
 ## Additional sources
 
 New sources should be added when they materially increase coverage or reach roles not well represented on SEEK/LinkedIn. Every new source needs:

@@ -14,7 +14,7 @@ from collector.run_lock import lock_status
 from collector.settings import get_setting
 
 PROMOTION_DIR = db.ROOT / "exports" / "aws-promotion"
-SCHEMA_VERSION = 9
+SCHEMA_VERSION = 10
 
 
 @dataclass(frozen=True)
