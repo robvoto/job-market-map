@@ -87,7 +87,7 @@ and `future` adapters. Job payloads include a complete `field_states` map and a
 `salary_normalized` object. The latter is populated only from deterministic,
 testable source text; `salary_text` remains the source evidence. Its `state` is
 `known`, `not_present`, `unknown`, or `not_applicable`, and `period` and
-qualifiers remain null unless explicitly proven.
+qualifiers remain null unless explicitly proven. `field_states.salary` describes whether raw source salary evidence is present; `salary_normalized.state` separately describes whether that raw evidence could be normalized safely.
 
 The states are explicit:
 

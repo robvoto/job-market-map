@@ -250,7 +250,7 @@ def ingest_card(obs: CardObservation) -> IngestResult:
         stored_row = dict(
             conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         )
-        salary_result = store_salary_normalization(conn, job_id, stored_row["salary_text"])
+        store_salary_normalization(conn, job_id, stored_row["salary_text"])
         explicit_salary_state = (obs.field_states or {}).get("salary")
         if explicit_salary_state in {"unknown", "not_present", "not_applicable"}:
             conn.execute(
@@ -314,8 +314,6 @@ def ingest_card(obs: CardObservation) -> IngestResult:
     # own connection. A blank observation is unknown and cannot erase prior
     # source evidence.
     states = states_for_observation(obs)
-    if not (obs.field_states and "salary" in obs.field_states) and _clean(obs.salary_text):
-        states["salary"] = salary_result.state
     set_job_field_states(
         job_id,
         states,

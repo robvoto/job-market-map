@@ -2,7 +2,7 @@
 
 ## `jobs`
 
-Current neutral source-vacancy rows. Fields describe the source vacancy itself: source/source job ID, stable `identity_key`, URL, title, employer, geography/location, raw `salary_text`, deterministic salary normalization (`salary_normalized` state, comparable numeric range, period, explicit currency and package/super qualifier), employment/workplace type, exact source `posted_at` when available, source status/expiry/apply method, classifications, card evidence and fingerprints. Raw salary evidence is always retained; ambiguous or period-less values are not guessed.
+Current neutral source-vacancy rows. Fields describe the source vacancy itself: source/source job ID, stable `identity_key`, URL, title, employer, geography/location, raw `salary_text`, deterministic salary normalization (`salary_normalized` state, comparable numeric range, period, explicit currency and package/super qualifier), employment/workplace type, exact source `posted_at` when available, source status/expiry/apply method, classifications, card evidence and fingerprints. Raw salary evidence is always retained. Raw-field presence and normalization confidence are separate: a source value such as `Competitive` is raw salary evidence (`field_states.salary=known`) but its deterministic normalized state is `unknown`. Period-less numeric values keep a null period rather than inventing one.
 
 Collector-computed lifecycle fields are deliberately **not** stored on this master row. Relative labels such as `3h ago` are capture evidence only and must never be converted into a canonical posting date.
 
