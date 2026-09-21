@@ -99,7 +99,10 @@ case "${1:-status}" in
     nohup ./scripts/start-api.sh >>logs/api.log 2>&1 &
     pid=$!
     echo "$pid" > "$PID_FILE"
-    for _ in $(seq 1 20); do
+    # First start after a bounded schema/data migration can legitimately take
+    # longer than the steady-state path. Keep this bounded, but do not report a
+    # false failure while the verified managed process is still starting.
+    for _ in $(seq 1 120); do
       if health_ok "$port"; then
         echo "JOB_MARKET_MAP_SERVICE_STARTED pid=${pid} admin=${base}/admin"
         exit 0
