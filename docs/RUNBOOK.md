@@ -1,5 +1,7 @@
 # Runbook
 
+**Agent lifecycle note:** the start/stop/restart commands in this document are operator references. Agents must follow the Runtime ownership rule in `.agents/skills/job-market-map/SKILL.md`: read-only status/health/log inspection is allowed, but JMM runtime state must not be changed without fresh explicit approval for that exact target and action.
+
 ## Start the Admin + in-app scheduler service
 
 ```bash

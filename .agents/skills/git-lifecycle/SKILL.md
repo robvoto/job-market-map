@@ -27,6 +27,7 @@ The human should not need to remember Git mechanics.
 - Completed intended work is committed and pushed automatically after validation, then integrated into `main` when safe, unless the human explicitly says not to push or not to integrate.
 - Do not wait for a second approval when the human has already requested automatic commit/push.
 - Stop and ask only for a genuine safety gate: unrelated changes, destructive actions, force-pushes, deployment/restart, credentials/external messages, or unresolved conflicting work.
+- JMM runtime lifecycle is one of those safety gates and is owned by `.agents/skills/job-market-map/SKILL.md`: Git integration never authorises starting, stopping, restarting, reloading, killing, or otherwise changing JMM runtime state.
 - Before integrating, fetch `origin/main` again. If it advanced, incorporate it into the task branch and revalidate rather than overwriting or force-pushing another agent's work.
 
 ## Before committing

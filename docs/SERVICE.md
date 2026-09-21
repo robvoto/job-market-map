@@ -1,5 +1,7 @@
 # Admin Service, Scheduler and Backups
 
+**Agent lifecycle note:** the start/stop/restart commands in this document are operator references. Agents must follow the Runtime ownership rule in `.agents/skills/job-market-map/SKILL.md`: read-only status/health/log inspection is allowed, but JMM runtime state must not be changed without fresh explicit approval for that exact target and action.
+
 ## Why this exists
 
 Job Market Map uses one **in-app scheduler** for two source rhythms: SEEK whole-state runs every 12 hours and short rolling LinkedIn-only refreshes.
