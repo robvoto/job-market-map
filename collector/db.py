@@ -10,6 +10,7 @@ from collector.field_states import (
     normalise_field_states,
 )
 from collector.identity import job_identity_key
+from collector.salary import backfill_salary_normalization
 
 ROOT = Path(__file__).resolve().parents[1]
 DB_PATH = ROOT / "data" / "market.db"
@@ -539,6 +540,12 @@ def init_db() -> None:
             conn, "jobs", "exact_card_fingerprint", "exact_card_fingerprint TEXT"
         )
         _ensure_column(conn, "jobs", "primary_job_id", "primary_job_id INTEGER")
+        _ensure_column(conn, "jobs", "salary_normalized_state", "salary_normalized_state TEXT")
+        _ensure_column(conn, "jobs", "salary_min_amount", "salary_min_amount REAL")
+        _ensure_column(conn, "jobs", "salary_max_amount", "salary_max_amount REAL")
+        _ensure_column(conn, "jobs", "salary_period", "salary_period TEXT")
+        _ensure_column(conn, "jobs", "salary_currency", "salary_currency TEXT")
+        _ensure_column(conn, "jobs", "salary_qualifier", "salary_qualifier TEXT")
         _ensure_column(conn, "jobs", "identity_key", "identity_key TEXT")
         _ensure_column(conn, "job_tombstones", "identity_key", "identity_key TEXT")
         _ensure_column(conn, "queries", "geography_code", "geography_code TEXT")
@@ -585,6 +592,7 @@ def init_db() -> None:
         )
 
         _backfill_field_states(conn)
+        backfill_salary_normalization(conn)
         _migrate_job_observation_state(conn)
         _backfill_identity(conn, "jobs")
         _backfill_identity(conn, "job_tombstones")

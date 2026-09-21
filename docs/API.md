@@ -83,7 +83,11 @@ Internal SQLite tables are not a public contract. Breaking semantics require ano
 
 `GET /v3/capabilities/fields` exposes the neutral searchable fields, the four
 field states, and source capability metadata for `seek`, `linkedin`, `apsjobs`
-and `future` adapters. Job payloads include a complete `field_states` map.
+and `future` adapters. Job payloads include a complete `field_states` map and a
+`salary_normalized` object. The latter is populated only from deterministic,
+testable source text; `salary_text` remains the source evidence. Its `state` is
+`known`, `not_present`, `unknown`, or `not_applicable`, and `period` and
+qualifiers remain null unless explicitly proven.
 
 The states are explicit:
 

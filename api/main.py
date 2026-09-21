@@ -142,6 +142,14 @@ def _job_payload(row, *, include_raw: bool = True) -> dict:
     item = dict(row)
     item["card_tags"] = _tags(item.pop("card_tags_json", None))
     item["field_states"] = get_job_field_states(int(item["id"]))
+    item["salary_normalized"] = {
+        "state": item.pop("salary_normalized_state", None),
+        "min_amount": item.pop("salary_min_amount", None),
+        "max_amount": item.pop("salary_max_amount", None),
+        "period": item.pop("salary_period", None),
+        "currency": item.pop("salary_currency", None),
+        "qualifier": item.pop("salary_qualifier", None),
+    }
     for key in (
         "reposted",
         "easy_apply",

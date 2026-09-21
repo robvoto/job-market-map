@@ -13,6 +13,7 @@ from collector.duplicates import (
 from collector.field_states import states_for_observation
 from collector.identity import job_identity_key
 from collector.models import CardObservation
+from collector.salary import store_salary_normalization
 
 TRACKING_QUERY_KEYS = {
     "ref",
@@ -249,6 +250,15 @@ def ingest_card(obs: CardObservation) -> IngestResult:
         stored_row = dict(
             conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         )
+        salary_result = store_salary_normalization(conn, job_id, stored_row["salary_text"])
+        explicit_salary_state = (obs.field_states or {}).get("salary")
+        if explicit_salary_state in {"unknown", "not_present", "not_applicable"}:
+            conn.execute(
+                """UPDATE jobs SET salary_normalized_state=?, salary_min_amount=NULL,
+                          salary_max_amount=NULL, salary_period=NULL,
+                          salary_currency=NULL, salary_qualifier=NULL WHERE id=?""",
+                (explicit_salary_state, job_id),
+            )
         core_fingerprint, exact_card_fingerprint = fingerprints(stored_row)
         conn.execute(
             "UPDATE jobs SET core_fingerprint=?, exact_card_fingerprint=? WHERE id=?",
@@ -303,9 +313,12 @@ def ingest_card(obs: CardObservation) -> IngestResult:
     # Persist outside the ingestion transaction because this helper opens its
     # own connection. A blank observation is unknown and cannot erase prior
     # source evidence.
+    states = states_for_observation(obs)
+    if not (obs.field_states and "salary" in obs.field_states) and _clean(obs.salary_text):
+        states["salary"] = salary_result.state
     set_job_field_states(
         job_id,
-        states_for_observation(obs),
+        states,
         evidence_source=f"{source}:card",
         checked_at=captured_at,
     )
