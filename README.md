@@ -1,5 +1,7 @@
 # Job Market Map
 
+[![CI](https://github.com/robvoto/job-market-map/actions/workflows/ci.yml/badge.svg)](https://github.com/robvoto/job-market-map/actions/workflows/ci.yml)
+
 Neutral local job-market infrastructure shared by Rob's job-search agents.
 
 ## Purpose
