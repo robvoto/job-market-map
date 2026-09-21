@@ -317,6 +317,9 @@ def test_completed_linkedin_campaign_seeds_and_drains_jd_queue_before_complete(
 
     assert result.status == "COMPLETE"
     assert result.detail_attempted == 3
+    assert result.detail_cached == 0
     assert result.detail_stored == 3
     assert result.detail_failed == 0
+    assert result.detail_unavailable == 0
+    assert result.detail_remaining == 0
     assert events == [("cleanup", "linkedin"), ("seed", "linkedin"), ("drain", "linkedin")]

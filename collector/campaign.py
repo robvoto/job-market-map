@@ -8,7 +8,7 @@ from dataclasses import asdict, dataclass
 from collector.cursors import get_cursor
 from collector.geographies import list_geographies
 from collector.jd_batch import enrich_pending_jds
-from collector.jd_queue import seed_new_missing_since
+from collector.jd_queue import pending_primary_ids, seed_new_missing_since
 from collector.job_retirement import cleanup_observed_terminal_families
 from collector.query_admin import list_queries
 from collector.run_logging import collection_logger
@@ -50,8 +50,11 @@ class LinkedInCampaignResult:
     unique_new_jobs: int
     duplicate_observations: int
     detail_attempted: int
+    detail_cached: int
     detail_stored: int
     detail_failed: int
+    detail_unavailable: int
+    detail_remaining: int
     card_elapsed_seconds: float
     jd_elapsed_seconds: float
     elapsed_seconds: float
@@ -228,8 +231,11 @@ def run_linkedin_campaign(
             unique_new_jobs=0,
             duplicate_observations=0,
             detail_attempted=0,
+            detail_cached=0,
             detail_stored=0,
             detail_failed=0,
+            detail_unavailable=0,
+            detail_remaining=0,
             card_elapsed_seconds=0.0,
             jd_elapsed_seconds=0.0,
             elapsed_seconds=time.perf_counter() - started,
@@ -331,7 +337,8 @@ def run_linkedin_campaign(
 
     complete, capped, terminal = _progress_counts(runs, cycle_key)
     card_elapsed_seconds = time.perf_counter() - started
-    detail_attempted = detail_stored = detail_failed = 0
+    detail_attempted = detail_cached = detail_stored = detail_failed = 0
+    detail_unavailable = detail_remaining = 0
     jd_elapsed_seconds = 0.0
     if runs and complete == len(runs):
         cycle_started_at = str(state.get("started_at") or "")
@@ -354,12 +361,30 @@ def run_linkedin_campaign(
         )
         jd_elapsed_seconds = time.perf_counter() - jd_started
         detail_attempted = jd_result.candidates
+        detail_cached = jd_result.cached
         detail_stored = jd_result.stored
         detail_failed = jd_result.failed
-        if jd_result.failed:
+        detail_unavailable = jd_result.unavailable
+        detail_remaining = len(
+            pending_primary_ids(source="linkedin", queued_since=cycle_started_at)
+        )
+        collection_logger().info(
+            "LinkedIn JD enrichment summary candidates=%s cached=%s stored=%s "
+            "failed=%s unavailable=%s remaining=%s",
+            detail_attempted,
+            detail_cached,
+            detail_stored,
+            detail_failed,
+            detail_unavailable,
+            detail_remaining,
+        )
+        if jd_result.failed or detail_remaining:
             collection_logger().error(
-                "LinkedIn JD enrichment incomplete failed=%s candidates=%s stored=%s",
-                jd_result.failed, jd_result.candidates, jd_result.stored,
+                "LinkedIn JD enrichment incomplete failed=%s remaining=%s candidates=%s stored=%s",
+                jd_result.failed,
+                detail_remaining,
+                jd_result.candidates,
+                jd_result.stored,
             )
             status = "PARTIAL_FAILURE"
         else:
@@ -394,8 +419,11 @@ def run_linkedin_campaign(
         unique_new_jobs=new_jobs,
         duplicate_observations=duplicates,
         detail_attempted=detail_attempted,
+        detail_cached=detail_cached,
         detail_stored=detail_stored,
         detail_failed=detail_failed,
+        detail_unavailable=detail_unavailable,
+        detail_remaining=detail_remaining,
         card_elapsed_seconds=card_elapsed_seconds,
         jd_elapsed_seconds=jd_elapsed_seconds,
         elapsed_seconds=time.perf_counter() - started,
