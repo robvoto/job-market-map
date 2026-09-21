@@ -92,6 +92,7 @@ class _FakeResponse:
 
 def test_linkedin_detail_client_uses_cookie_jar_session():
     from urllib.request import HTTPCookieProcessor
+
     from collector import linkedin_detail
 
     assert any(
@@ -140,6 +141,7 @@ def test_linkedin_detail_spaces_requests(monkeypatch):
 def test_linkedin_detail_429_activates_cooldown_without_rehitting_source(monkeypatch):
     from io import BytesIO
     from urllib.error import HTTPError
+
     from collector import linkedin_detail
 
     now = [100.0]

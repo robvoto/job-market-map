@@ -12,9 +12,15 @@ from collector.db import (
     store_job_jd_once,
     update_job_source_facts,
 )
-from collector.job_retirement import retire_known_terminal_family, retire_terminal_source_job
+from collector.job_retirement import (
+    retire_known_terminal_family,
+    retire_terminal_source_job,
+)
 from collector.run_logging import collection_logger
-from collector.source_status import TERMINAL_SOURCE_STATUSES, source_status_is_active_sql
+from collector.source_status import (
+    TERMINAL_SOURCE_STATUSES,
+    source_status_is_active_sql,
+)
 
 
 class JDEnrichmentError(RuntimeError):
@@ -116,10 +122,7 @@ def get_or_enrich_job_jd(job_id: int, *, source: str | None = None) -> dict[str,
     requested_source = str(source or "").strip().casefold()
 
     with _ENRICH_LOCK:
-        try:
-            primary_job_id = get_primary_job_id(job_id)
-        except KeyError:
-            raise
+        primary_job_id = get_primary_job_id(job_id)
 
         surviving_primary = retire_known_terminal_family(primary_job_id)
         if surviving_primary is None:

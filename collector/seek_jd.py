@@ -15,7 +15,10 @@ from collector.browser_broker import (
     select_page,
 )
 from collector.db import connect, store_job_jd_once, update_job_source_facts
-from collector.job_retirement import retire_known_terminal_family, retire_terminal_source_job
+from collector.job_retirement import (
+    retire_known_terminal_family,
+    retire_terminal_source_job,
+)
 from collector.run_logging import collection_logger
 from collector.settings import get_setting
 from collector.source_status import source_status_is_active_sql
