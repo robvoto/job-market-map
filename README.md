@@ -16,6 +16,14 @@ It does **not** answer:
 
 Fit and application judgement belong to consumers.
 
+## Engineering highlights
+
+- **Neutral market-data boundary** — JMM records what sources published; candidate fit and application decisions remain in consumers such as Job Hunter.
+- **Canonical vacancy identity** — repeated source observations and cross-post evidence are deduplicated without destroying provenance.
+- **Write-once JD reuse** — validated job descriptions are cached and reused so consumers do not repeatedly reopen the same vacancy.
+- **Source-specific collection behind a stable API** — SEEK, LinkedIn, and future adapters remain isolated from the `/v3` consumer contract.
+- **Operational resilience** — collection is resumable, observable, backed up, and designed to fail closed when source evidence is incomplete or unsafe.
+
 ## Core rules
 
 1. **Cards first; zero JD opening in neutral mapping.**
@@ -103,3 +111,7 @@ Start once in the background:
 Admin: `http://127.0.0.1:8770/admin`
 
 The Admin page shows human-readable run times, collector/browser/scheduler health, latest-run status, current/previous SEEK coverage, backup status and a direct collection-log link. Automatic collection has an emergency master switch plus independent SEEK and LinkedIn scheduler switches: SEEK uses its daily local-time slot while LinkedIn uses its rolling geography cadence. The API service, browser service and collector each have a single-instance guard. A verified SQLite online backup is created before each collection by default. See `docs/SERVICE.md`.
+
+## Licence
+
+Licensed under the GNU General Public License v3.0. See [`LICENSE`](LICENSE).
