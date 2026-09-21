@@ -127,6 +127,9 @@ def test_explicit_legacy_jd_backfill_runs_once_after_card_coverage(monkeypatch):
     monkeypatch.setattr(runner, "update_scheduler_state", lambda **_kwargs: None)
     monkeypatch.setattr(runner, "close_browser", lambda: None)
     monkeypatch.setattr(runner, "close_tab", lambda *_a, **_k: None)
+    monkeypatch.setattr(runner, "population_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(runner, "build_run_stats", lambda *_a, **_k: {})
+    monkeypatch.setattr(runner, "log_run_summary", lambda *_a, **_k: None)
     monkeypatch.setattr(
         runner,
         "get_setting",

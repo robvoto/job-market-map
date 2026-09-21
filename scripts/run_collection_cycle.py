@@ -14,7 +14,7 @@ from collector.jd_queue import mark_pending_deferred, pending_primary_ids
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock
 from collector.run_logging import LOG_PATH, configure_collection_logging
 from collector.run_stats import build_run_stats, log_run_summary, population_stats
-from collector.scheduler import SchedulerService
+from collector.scheduler import SYDNEY, SchedulerService
 from collector.seek_cycle import (
     all_states_complete,
     enabled_state_codes,
@@ -131,7 +131,7 @@ def main(argv: list[str] | None = None) -> int:
 
     stop_event = Event()
     run_started = time.monotonic()
-    run_started_local = datetime.now().astimezone()
+    run_started_local = datetime.now().astimezone(SYDNEY)
     baseline_stats = None
     run_codes: list[str] = []
     run_partitions_processed = 0
@@ -427,7 +427,7 @@ def main(argv: list[str] | None = None) -> int:
                 days=days,
                 default_days=default_days,
                 started_at=run_started_local,
-                finished_at=datetime.now().astimezone(),
+                finished_at=datetime.now().astimezone(SYDNEY),
             )
             if args.trigger == "scheduled":
                 update_scheduler_state(

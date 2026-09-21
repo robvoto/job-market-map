@@ -5,6 +5,7 @@ import math
 import os
 import threading
 from datetime import datetime, timedelta
+from zoneinfo import ZoneInfo
 
 from collector.db import connect
 from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
@@ -18,6 +19,7 @@ from collector.source_campaign import get_cycle
 
 LINKEDIN_TERMINAL_STATUSES = {"COMPLETE", "INCOMPLETE_CAP", "PARTIAL_FAILURE"}
 log = logging.getLogger(__name__)
+SYDNEY = ZoneInfo("Australia/Sydney")
 
 
 class SchedulerService:
@@ -47,7 +49,7 @@ class SchedulerService:
 
     @staticmethod
     def seek_slot(now: datetime | None = None) -> datetime:
-        current = now or datetime.now().astimezone()
+        current = now or datetime.now().astimezone(SYDNEY)
         hour = int(get_setting("scheduler.daily_hour"))
         minute = int(get_setting("scheduler.daily_minute"))
         interval = int(get_setting("scheduler.seek_interval_hours"))
@@ -144,7 +146,7 @@ class SchedulerService:
         )
 
     def due_now(self, now: datetime | None = None) -> bool:
-        current = now or datetime.now().astimezone()
+        current = now or datetime.now().astimezone(SYDNEY)
         if not bool(get_setting("scheduler.enabled")) or not bool(
             get_setting("scheduler.seek_enabled")
         ):
@@ -161,7 +163,7 @@ class SchedulerService:
 
     @staticmethod
     def linkedin_slot(now: datetime | None = None) -> datetime:
-        current = now or datetime.now().astimezone()
+        current = now or datetime.now().astimezone(SYDNEY)
         interval = int(get_setting("scheduler.linkedin_interval_hours"))
         slot_hour = (current.hour // interval) * interval
         return current.replace(hour=slot_hour, minute=0, second=0, microsecond=0)
@@ -174,7 +176,7 @@ class SchedulerService:
     def linkedin_due_context(
         cls, now: datetime | None = None
     ) -> tuple[bool, str, datetime]:
-        current = now or datetime.now().astimezone()
+        current = now or datetime.now().astimezone(SYDNEY)
         slot = cls.linkedin_slot(current)
         target_cycle = cls.linkedin_cycle_key(current)
         if (
@@ -197,7 +199,7 @@ class SchedulerService:
         return True, target_cycle, slot
 
     def status(self) -> dict:
-        now = datetime.now().astimezone()
+        now = datetime.now().astimezone(SYDNEY)
         start, window_end = self.schedule_window(now)
         state = scheduler_state()
         slot_key = f"seek:{start.isoformat(timespec='minutes')}"
@@ -236,7 +238,7 @@ class SchedulerService:
         }
 
     def _tick(self) -> None:
-        now = datetime.now().astimezone()
+        now = datetime.now().astimezone(SYDNEY)
         update_scheduler_state(heartbeat_at=now.isoformat(timespec="seconds"))
         linkedin_due, linkedin_cycle, _ = self.linkedin_due_context(now)
         if linkedin_due:
