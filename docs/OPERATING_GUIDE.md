@@ -39,6 +39,34 @@ and never changes the Job Hunter database. Normal JMM collection remains a separ
 
 ## Goal
 
+## Posting-date completeness audit
+
+Run the read-only audit against the configured JMM database when checking date
+coverage or before a historical repair:
+
+```bash
+uv run python scripts/audit_posted_at.py
+```
+
+Use `--db /path/to/market.db` when auditing a separate live runtime database
+from an isolated worktree.
+
+The report separates exact `jobs.posted_at` values, bounded LinkedIn repair
+candidates, and missing rows with no supported repair path. It does not infer
+dates from relative labels, `first_seen_at`, `last_seen_at`, or Job Hunter
+timestamps. Historical repair is source-specific and bounded:
+
+```bash
+uv run python scripts/repair_posted_at.py --source linkedin --limit 100
+```
+
+Pass the same explicit `--db` path when the repair is intentionally approved
+against a separate runtime database.
+
+This repair command is idempotent and records an explicit unavailable/closed
+outcome. Do not run it as part of normal collection or while another collection
+stage is using the same runtime database.
+
 Build the broadest useful **neutral** local map of jobs discoverable through the sources and query combinations we choose, then incrementally add new cards each day.
 
 ## Initial full-map run

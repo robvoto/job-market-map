@@ -15,6 +15,8 @@ Mechanics:
 
 Captured card data currently includes title, employer, source ID, URL, relative posted text, exact UTC `listingDate`, employment type, location, work arrangement, visible salary, teaser, classification/subclassification, selected card tags and raw card evidence. The exact timestamp is read from SEEK's embedded `SEEK_REDUX_DATA.results.results.jobs[]` search state and matched to the visible card by source job ID.
 
+Date integrity: the card's exact `listingDate` is the primary published-date field. When a detail page is opened, `listedAt.dateTimeUtc` is an additional exact source field; it may fill a blank but never replaces a non-empty canonical date. Relative labels remain evidence only. `scripts/audit_posted_at.py` reports source-level completeness without modifying the database.
+
 Known SEEK IDs are linked to current coverage without full re-ingest. Exact card `listingDate` is stored as canonical `posted_at`; relative labels such as `3h ago` remain raw evidence. If a canonical SEEK identity has no successful JD-fetch marker, its job page is opened once. JMM stores the full neutral JD and fills missing neutral detail facts exposed by the source page; the detail page's `listedAt.dateTimeUtc` remains a second source for the same posting timestamp when present. The permanent marker prevents normal future refetches after a successful detail capture. During JMM-007, this happens progressively inside the same pass: resumed/discovered jobs are JD-caught-up before coverage is allowed to run far ahead, and pass completion requires both coverage completion and zero required JD remainder.
 
 Extra fresh runs inside 24 hours use the exact ordered card timestamps to stop after crossing a conservative prior-run cutoff. This optimization is fail-closed and does not replace the normal full 1-day daily reconciliation.
@@ -38,11 +40,15 @@ Mechanics are based on Job Hunter's proven implementation:
 
 Existing LinkedIn rows are not bulk re-fetched merely to fill these fields. Unknown stays unknown unless a vacancy is fetched later for a valid enrichment reason.
 
+Date integrity: the card's exact `<time datetime>` value and the detail page's exact `<time datetime>` value are the only supported published-date fields. The bounded `scripts/repair_posted_at.py --source linkedin --limit N` path may inspect missing historical rows; it records unavailable/closed outcomes and never derives a date from relative text or observation timestamps.
+
 The old browser/snapshot LinkedIn path has been removed. LinkedIn has no Playwright/Chromium runtime dependency.
 
 ## APSJobs
 
 Status: registry entries exist; neutral collector not yet implemented.
+
+Date integrity: no APSJobs result/detail adapter currently exposes a validated published-date field. Existing APSJobs rows without `posted_at` are reported as missing source evidence; first-seen/last-seen and imported Job Hunter observation times are not substitutes.
 
 Do not mark APSJobs coverage complete until its card/result parser and exhaustion rules are implemented and measured.
 
