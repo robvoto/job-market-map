@@ -55,19 +55,35 @@ def set_job_field_states(job_id: int, states: dict[str, str], *, evidence_source
 
 
 def _backfill_field_states(conn: sqlite3.Connection) -> None:
-    """Give pre-JMM-019 jobs explicit conservative states without guessing."""
+    """Give pre-JMM-019 jobs explicit conservative states without repeated full scans."""
 
-    columns = ", ".join(["id", *FIELD_COLUMNS.values()])
-    for row in conn.execute(f"SELECT {columns} FROM jobs").fetchall():
-        for field, column in FIELD_COLUMNS.items():
-            value = row[column]
-            state = "known" if value is not None and str(value).strip() else "unknown"
-            conn.execute(
-                """INSERT OR IGNORE INTO job_field_states(
-                       job_id,field_name,state,evidence_source,checked_at
-                   ) VALUES(?,?,?,'legacy:jobs',datetime('now'))""",
-                (int(row["id"]), field, state),
-            )
+    placeholders = ",".join("?" for _ in NEUTRAL_FIELDS)
+    job_count = int(conn.execute("SELECT COUNT(*) FROM jobs").fetchone()[0])
+    state_count = int(
+        conn.execute(
+            f"SELECT COUNT(*) FROM job_field_states WHERE field_name IN ({placeholders})",
+            NEUTRAL_FIELDS,
+        ).fetchone()[0]
+    )
+    if state_count == job_count * len(NEUTRAL_FIELDS):
+        return
+
+    for field, column in FIELD_COLUMNS.items():
+        conn.execute(
+            f"""INSERT OR IGNORE INTO job_field_states(
+                   job_id,field_name,state,evidence_source,checked_at
+               )
+               SELECT id, ?,
+                      CASE
+                          WHEN {column} IS NOT NULL
+                           AND TRIM(CAST({column} AS TEXT)) <> ''
+                          THEN 'known'
+                          ELSE 'unknown'
+                      END,
+                      'legacy:jobs', datetime('now')
+                 FROM jobs""",
+            (field,),
+        )
 
 
 def resolve_primary_job_id(conn: sqlite3.Connection, job_id: int) -> int:
