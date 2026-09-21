@@ -36,6 +36,7 @@ def test_linkedin_adapter_reuses_http_detail_helper_and_never_browser(monkeypatc
 
 def test_linkedin_adapter_marks_closed_posting_terminal(monkeypatch):
     import pytest
+
     from collector import linkedin_jd_adapter
     from collector.jd_enrichment import JDSourcePostingUnavailableError
 

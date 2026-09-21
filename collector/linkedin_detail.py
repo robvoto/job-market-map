@@ -6,12 +6,12 @@ from dataclasses import dataclass
 from html import unescape
 from html.parser import HTMLParser
 from http.cookiejar import CookieJar
+from threading import Lock
 from urllib.error import HTTPError, URLError
 from urllib.parse import unquote
 from urllib.request import HTTPCookieProcessor, Request, build_opener
 
 from collector.settings import get_setting
-from threading import Lock
 
 HEADER_CLASS_TOKENS = {
     "job-details-jobs-unified-top-card__container",

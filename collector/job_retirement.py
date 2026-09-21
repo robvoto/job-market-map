@@ -229,7 +229,7 @@ def cleanup_observed_terminal_families(*, source: str, observed_since: str) -> i
 
 def purge_terminal_jobs(*, posted_since: str | None = None) -> int:
     """Remove already-known terminal rows, optionally limited to a posted-at window."""
-    params: list[object] = list(sorted(TERMINAL_SOURCE_STATUSES))
+    params: list[object] = sorted(TERMINAL_SOURCE_STATUSES)
     where = f"source_status IN ({','.join('?' for _ in params)})"
     if posted_since:
         where += " AND datetime(posted_at) >= datetime(?)"
