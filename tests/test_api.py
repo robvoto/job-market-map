@@ -342,6 +342,42 @@ def test_search_is_bounded_and_supports_neutral_filters(tmp_path, monkeypatch):
         assert [item["title"] for item in expression["items"]] == ["Delivery Manager", "Analyst"]
 
 
+def test_salary_search_requires_and_respects_period_and_currency(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            rows = (
+                ("annual", "AUD", "year", 100000, 120000),
+                ("hourly", "AUD", "hour", 100, 120),
+                ("unknown-currency", None, "year", 100000, 120000),
+            )
+            for index, (title, currency, period, minimum, maximum) in enumerate(rows, start=1):
+                job_id = conn.execute(
+                    """INSERT INTO jobs(source,source_job_id,canonical_url,title,
+                               salary_normalized_state,salary_min_amount,salary_max_amount,
+                               salary_period,salary_currency)
+                       VALUES('seek',?,?,?,?,?,?,?,?)""",
+                    (str(index), f"https://seek.test/salary/{index}", title, "known", minimum, maximum, period, currency),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+
+        assert client.get("/v3/jobs/search", params={"salary_min": 100000}).status_code == 400
+        result = client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 110000, "salary_max": 115000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
+        )
+        assert result.status_code == 200
+        assert [item["title"] for item in result.json()["items"]] == ["annual"]
+
+        hourly_period = client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 110, "salary_period": "hour", "salary_currency": "AUD", "limit": 10},
+        ).json()
+        assert [item["title"] for item in hourly_period["items"]] == ["hourly"]
+
+
 def test_field_scoped_q_preserves_unknown_and_not_applicable_source_rows(tmp_path, monkeypatch):
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         with db.connect() as conn:

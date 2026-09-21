@@ -604,6 +604,10 @@ def search_jobs(
     apply_method: Annotated[list[str] | None, Query()] = None,
     company: Annotated[list[str] | None, Query()] = None,
     posted_after: str | None = None,
+    salary_min: float | None = Query(None, ge=0),
+    salary_max: float | None = Query(None, ge=0),
+    salary_period: str | None = None,
+    salary_currency: str | None = None,
     after_id: int = Query(0, ge=0),
     through_id: int | None = Query(None, ge=0),
     include_archived: bool = False,
@@ -627,6 +631,19 @@ def search_jobs(
     parsed_queries = [_parse_search_expression(expression) for expression in expressions]
     sources = [str(value).strip().casefold() for value in source or [] if str(value).strip()]
     geographies = [str(value).strip().upper() for value in geography_code or [] if str(value).strip()]
+
+    salary_requested = salary_min is not None or salary_max is not None
+    if salary_requested:
+        if not salary_period or not salary_currency:
+            raise HTTPException(400, "salary_min/salary_max require salary_period and salary_currency")
+        salary_period = str(salary_period).strip().casefold()
+        if salary_period not in {"hour", "day", "week", "month", "year"}:
+            raise HTTPException(400, "salary_period must be hour, day, week, month or year")
+        salary_currency = str(salary_currency).strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", salary_currency):
+            raise HTTPException(400, "salary_currency must be a three-letter code")
+        if salary_min is not None and salary_max is not None and salary_min > salary_max:
+            raise HTTPException(400, "salary_min must not exceed salary_max")
 
     with connect() as conn:
         snapshot_max_id = (
@@ -657,6 +674,21 @@ def search_jobs(
     if posted_after:
         linked_clauses.append("(vacancy_job.posted_at IS NULL OR vacancy_job.posted_at>=?)")
         linked_params.append(posted_after)
+    if salary_requested:
+        linked_clauses.extend(
+            [
+                "vacancy_job.salary_normalized_state='known'",
+                "vacancy_job.salary_period=?",
+                "vacancy_job.salary_currency=?",
+            ]
+        )
+        linked_params.extend((salary_period, salary_currency))
+        if salary_min is not None:
+            linked_clauses.append("vacancy_job.salary_max_amount IS NOT NULL AND vacancy_job.salary_max_amount>=?")
+            linked_params.append(salary_min)
+        if salary_max is not None:
+            linked_clauses.append("vacancy_job.salary_min_amount IS NOT NULL AND vacancy_job.salary_min_amount<=?")
+            linked_params.append(salary_max)
 
     filter_columns = {
         "location": "location",
