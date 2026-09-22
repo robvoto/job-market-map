@@ -264,6 +264,7 @@ def parse_seek_dom_cards(
     page_number: int = 1,
     captured_at: str | None = None,
     geography_code: str | None = None,
+    search_window_hours: int | None = None,
 ) -> list[CardObservation]:
     """Build neutral observations from SEEK's stable job-card DOM selectors."""
     observations: list[CardObservation] = []
@@ -288,6 +289,7 @@ def parse_seek_dom_cards(
                 workplace_type=str(card.get("workplace_type") or "").strip() or None,
                 posted_text=str(card.get("posted_text") or "").strip() or None,
                 posted_at=str(card.get("posted_at") or "").strip() or None,
+                search_window_hours=search_window_hours,
                 teaser_text=str(card.get("teaser_text") or "").strip() or None,
                 raw_card_text=str(card.get("raw_card_text") or "").strip() or None,
                 classification_text=str(card.get("classification_text") or "").strip()

@@ -37,7 +37,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 10
+        assert payload["schema_version"] == 12
         assert payload["snapshot_max_id"] == 3
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
@@ -346,23 +346,23 @@ def test_salary_search_requires_and_respects_period_and_currency(tmp_path, monke
     with client_for_tmp_db(tmp_path, monkeypatch) as client:
         with db.connect() as conn:
             rows = (
-                ("annual", "AUD", "year", 100000, 120000, "known"),
-                ("hourly", "AUD", "hour", 100, 120, "known"),
-                ("unknown-currency", None, "year", 100000, 120000, "known"),
-                ("stale-state", "AUD", "year", 100000, 120000, "not_present"),
-                ("unknown-state", "AUD", "year", 100000, 120000, "unknown"),
-                ("not-applicable-state", "AUD", "year", 100000, 120000, "not_applicable"),
-                ("unknown-period", "AUD", None, 100000, 120000, "known"),
-                ("up-to", "AUD", "year", None, 150000, "known"),
-                ("from", "AUD", "year", 120000, None, "known"),
+                ("annual", "AUD", "year", 100000, 120000, "known", "range"),
+                ("hourly", "AUD", "hour", 100, 120, "known", "range"),
+                ("unknown-currency", None, "year", 100000, 120000, "known", "range"),
+                ("stale-state", "AUD", "year", 100000, 120000, "not_present", "range"),
+                ("unknown-state", "AUD", "year", 100000, 120000, "unknown", "range"),
+                ("not-applicable-state", "AUD", "year", 100000, 120000, "not_applicable", "range"),
+                ("unknown-period", "AUD", None, 100000, 120000, "known", "range"),
+                ("up-to", "AUD", "year", None, 150000, "known", "up_to"),
+                ("from", "AUD", "year", 120000, None, "known", "from"),
             )
-            for index, (title, currency, period, minimum, maximum, field_state) in enumerate(rows, start=1):
+            for index, (title, currency, period, minimum, maximum, field_state, bound) in enumerate(rows, start=1):
                 job_id = conn.execute(
                     """INSERT INTO jobs(source,source_job_id,canonical_url,title,
                                salary_normalized_state,salary_min_amount,salary_max_amount,
-                               salary_period,salary_currency)
-                       VALUES('seek',?,?,?,?,?,?,?,?)""",
-                    (str(index), f"https://seek.test/salary/{index}", title, "known", minimum, maximum, period, currency),
+                               salary_period,salary_currency,salary_bound)
+                       VALUES('seek',?,?,?,?,?,?,?,?,?)""",
+                    (str(index), f"https://seek.test/salary/{index}", title, "known", minimum, maximum, period, currency, bound),
                 ).lastrowid
                 conn.execute(
                     "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
@@ -398,31 +398,46 @@ def test_salary_search_requires_and_respects_period_and_currency(tmp_path, monke
             params={"salary_min": 110000, "salary_max": 115000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
         )
         assert result.status_code == 200
-        assert [item["title"] for item in result.json()["items"]] == ["annual", "up-to"]
+        assert {item["title"] for item in result.json()["items"]} == {
+            "annual", "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to",
+        }
 
         upper_bound_only = client.get(
             "/v3/jobs/search",
             params={"salary_max": 105000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
         ).json()
-        assert [item["title"] for item in upper_bound_only["items"]] == ["annual", "up-to"]
+        assert {item["title"] for item in upper_bound_only["items"]} == {
+            "annual", "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to",
+        }
 
         lower_bound_only = client.get(
             "/v3/jobs/search",
             params={"salary_min": 160000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
         ).json()
-        assert [item["title"] for item in lower_bound_only["items"]] == ["from"]
+        assert {item["title"] for item in lower_bound_only["items"]} == {
+            "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "from",
+        }
 
         upper_bound_open = client.get(
             "/v3/jobs/search",
             params={"salary_max": 99999, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
         ).json()
-        assert [item["title"] for item in upper_bound_open["items"]] == ["up-to"]
+        assert {item["title"] for item in upper_bound_open["items"]} == {
+            "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to",
+        }
 
         hourly_period = client.get(
             "/v3/jobs/search",
             params={"salary_min": 110, "salary_period": "hour", "salary_currency": "AUD", "limit": 10},
         ).json()
-        assert [item["title"] for item in hourly_period["items"]] == ["hourly"]
+        assert {item["title"] for item in hourly_period["items"]} == {
+            "annual", "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to", "from",
+        }
 
 
 def test_salary_search_linked_source_does_not_hide_matching_salary_evidence(tmp_path, monkeypatch):
@@ -437,9 +452,9 @@ def test_salary_search_linked_source_does_not_hide_matching_salary_evidence(tmp_
                 """INSERT INTO jobs(
                        source,source_job_id,canonical_url,title,primary_job_id,geography_code,location,
                        salary_normalized_state,salary_min_amount,salary_max_amount,
-                       salary_period,salary_currency
+                       salary_period,salary_currency,salary_bound
                    ) VALUES('apsjobs','aps-alias','https://aps.test/alias','APS role',?,'NSW','Canberra ACT',
-                            'known',100000,120000,'year','AUD')""",
+                            'known',100000,120000,'year','AUD','range')""",
                 (primary_id,),
             ).lastrowid
             for job_id in (primary_id, alias_id):
@@ -474,9 +489,16 @@ def test_salary_search_linked_source_does_not_hide_matching_salary_evidence(tmp_
         payload = response.json()
         assert [item["id"] for item in payload["items"]] == [primary_id]
         assert payload["items"][0]["salary_normalized"]["state"] == "unknown"
-        assert payload["items"][0]["matched_sources"] == [
-            {"id": alias_id, "source": "apsjobs", "source_job_id": "aps-alias"}
-        ]
+        matched = payload["items"][0]["matched_sources"]
+        assert matched[0]["id"] == alias_id
+        assert matched[0]["source"] == "apsjobs"
+        assert matched[0]["salary_normalized"] == {
+            "state": "known", "min_amount": 100000.0, "max_amount": 120000.0,
+            "period": "year", "currency": "AUD", "qualifier": None,
+            "bound": "range",
+        }
+        assert matched[0]["salary_field_state"] == "known"
+        assert matched[0]["salary_match_basis"] == "comparable_overlap"
 
 
 def test_salary_search_pagination_keeps_snapshot_and_filter(tmp_path, monkeypatch):
@@ -487,10 +509,10 @@ def test_salary_search_pagination_keeps_snapshot_and_filter(tmp_path, monkeypatc
                     """INSERT INTO jobs(
                            source,source_job_id,canonical_url,title,
                            salary_normalized_state,salary_min_amount,salary_max_amount,
-                           salary_period,salary_currency
-                       ) VALUES('seek',?,?,?,?,?,?,?,?)""",
+                           salary_period,salary_currency,salary_bound
+                       ) VALUES('seek',?,?,?,?,?,?,?,?,?)""",
                     (str(index), f"https://seek.test/{index}", f"Salary role {index}",
-                     "known", 100000, 120000, "year", "AUD"),
+                     "known", 100000, 120000, "year", "AUD", "range"),
                 ).lastrowid
                 conn.execute(
                     "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",

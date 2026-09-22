@@ -96,11 +96,20 @@ class _JobSpyProgressSession:
 
 
 def _card_posted_at(card) -> str | None:
-    """Read LinkedIn's explicit card date when JobSpy leaves date_posted empty."""
+    """Read LinkedIn's exact machine date when JobSpy leaves date_posted empty."""
     time_tag = card.find("time")
     if time_tag is None:
         return None
     value = str(time_tag.get("datetime") or "").strip()
+    return value or None
+
+
+def _card_posted_text(card) -> str | None:
+    """Retain LinkedIn's visible relative date label as source evidence."""
+    time_tag = card.find("time")
+    if time_tag is None:
+        return None
+    value = " ".join(time_tag.get_text(" ", strip=True).split())
     return value or None
 
 
@@ -165,6 +174,7 @@ def _fetch_exact_linkedin_page(search_params: dict, progress_send_conn) -> list[
         job = scraper._process_job(card, job_id, False)
         if job is not None:
             row = _jobpost_to_row(job)
+            row["posted_text"] = _card_posted_text(card)
             if not row.get("date_posted"):
                 row["date_posted"] = _card_posted_at(card)
             rows.append(row)
@@ -407,6 +417,7 @@ def ingest_linkedin_geography_page(
                 rank=fetched.start_offset + row_index,
                 offset=fetched.start_offset,
                 page_size=LINKEDIN_PAGE_SIZE,
+                search_window_hours=hours_old,
             )
             existing = _existing_job(observation.source_job_id or "")
             if existing is not None:
@@ -682,6 +693,7 @@ def collect_linkedin_chunk(
                     rank=start_offset + row_index,
                     offset=start_offset,
                     page_size=results_wanted,
+                    search_window_hours=max(1, int(days)) * 24,
                 )
                 existing = _existing_job(observation.source_job_id or "")
                 if existing is not None:

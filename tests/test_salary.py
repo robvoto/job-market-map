@@ -10,6 +10,7 @@ def test_normalizes_explicit_annual_range_and_super():
         "period": "year",
         "currency": "AUD",
         "qualifier": "plus_super",
+        "bound": "range",
     }
 
 
@@ -33,6 +34,8 @@ def test_one_sided_bounds_are_not_falsely_exact():
     lower = normalize_salary("From $120,000 per annum")
     assert (upper.minimum, upper.maximum, upper.period) == (None, 150000, "year")
     assert (lower.minimum, lower.maximum, lower.period) == (120000, None, "year")
+    assert upper.bound == "up_to"
+    assert lower.bound == "from"
 
 
 def test_period_tokens_require_real_boundaries():
@@ -51,7 +54,10 @@ def test_amount_parser_supports_grouped_decimals_without_truncating():
 def test_ambiguous_or_missing_salary_is_not_guessed():
     assert normalize_salary("Competitive").state == "unknown"
     assert normalize_salary("$100 - $200").period is None
-    assert normalize_salary(None).state == "not_present"
+    assert normalize_salary(None).state == "unknown"
+    assert normalize_salary(" ").state == "unknown"
+    assert normalize_salary(None, field_state="unknown").state == "unknown"
+    assert normalize_salary(None, field_state="not_present").state == "not_present"
     assert normalize_salary("N/A").state == "not_applicable"
 
 
@@ -112,3 +118,84 @@ def test_non_super_percentage_modifier_fails_closed():
     super_value = normalize_salary("$127,105-$137,584 per annum + 12% Superannuation")
     assert super_value.state == "known"
     assert super_value.qualifier == "plus_super"
+
+
+def test_real_parser_failures_remain_unknown_or_keep_day_scale():
+    daily = normalize_salary("$1k - $1100 p.d.")
+    assert (daily.state, daily.minimum, daily.maximum, daily.period) == (
+        "known", 1000, 1100, "day"
+    )
+    assert normalize_salary("plus 15.4% superannuation").state == "unknown"
+    assert normalize_salary("$65-$75 per year").state == "unknown"
+    assert normalize_salary("$40K-$65K per hour").state == "unknown"
+
+
+def test_supported_period_spellings_and_mixed_suffix_ranges():
+    assert normalize_salary("$40-$60 p/h").period == "hour"
+    assert normalize_salary("$800-$1100 p.d.").period == "day"
+    assert normalize_salary("$100-$120k p.a.").minimum == 100000
+    low_suffix_only = normalize_salary("$1k-$1100 p.d.")
+    assert (low_suffix_only.minimum, low_suffix_only.maximum) == (1000, 1100)
+
+
+def test_salary_shape_and_australian_context_are_explicit():
+    up_to = normalize_salary("Up to $150k + super", default_currency="AUD")
+    assert (up_to.state, up_to.minimum, up_to.maximum, up_to.bound) == (
+        "known", None, 150000, "up_to"
+    )
+    assert up_to.currency == "AUD"
+    assert up_to.period is None
+    assert normalize_salary("$150k", default_currency=None).currency is None
+
+
+def test_seek_australian_canonical_host_proves_aud(tmp_path, monkeypatch):
+    from collector import db
+    from collector.ingest import ingest_card
+    from collector.models import CardObservation
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    result = ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="au-host-currency",
+            canonical_url="https://au.seek.com/job/94548001",
+            title="Role",
+            salary_text="$120k-$150k p.a.",
+        )
+    )
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT salary_currency,salary_period,salary_bound FROM jobs WHERE id=?",
+            (result.observation_job_id,),
+        ).fetchone()
+    assert tuple(row) == ("AUD", "year", "range")
+
+
+def test_blank_salary_observation_does_not_create_not_present(tmp_path, monkeypatch):
+    from collector import db
+    from collector.ingest import ingest_card
+    from collector.models import CardObservation
+
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    result = ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="blank-salary",
+            canonical_url="https://www.seek.com.au/job/blank-salary",
+            title="Role",
+            salary_text="",
+        )
+    )
+    with db.connect() as conn:
+        row = conn.execute(
+            "SELECT salary_normalized_state,salary_min_amount,salary_bound FROM jobs WHERE id=?",
+            (result.observation_job_id,),
+        ).fetchone()
+        state = conn.execute(
+            "SELECT state FROM job_field_states WHERE job_id=? AND field_name='salary'",
+            (result.observation_job_id,),
+        ).fetchone()["state"]
+    assert row["salary_normalized_state"] == "unknown"
+    assert row["salary_min_amount"] is None
+    assert row["salary_bound"] is None
+    assert state == "unknown"

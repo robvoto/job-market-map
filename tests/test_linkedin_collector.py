@@ -42,6 +42,7 @@ def test_linkedin_card_date_fallback_does_not_infer_relative_text():
     ).find("div")
 
     assert linkedin_collector._card_posted_at(card) is None
+    assert linkedin_collector._card_posted_text(card) == "3 days ago"
 
 
 def _detail(

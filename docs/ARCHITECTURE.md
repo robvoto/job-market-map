@@ -82,8 +82,7 @@ Incorrectly collapsing two live vacancies is more damaging than temporarily reta
 
 ## Freshness model
 
-`jobs.posted_at` is a source fact: the exact source posting timestamp when the source exposes one.
-Do not derive it from relative UI labels such as `3h ago` or `Listed four hours ago`.
+`jobs.posted_at` stores the best deterministic freshness evidence available. Exact source dates/times take precedence; supported relative labels are converted from the card's capture time, and an explicit source-query window can provide a conservative lower bound when no source date is exposed. `jobs.posted_at_basis` distinguishes `source_exact`, `source_relative` and `search_window_bound`; the original label and window remain in `card_captures.raw_json`. A window boundary is not an exact posting instant. SEEK's incremental pagination cutoff remains exact-timestamp-only and never uses a derived value.
 
 Collector lifecycle belongs in `job_observation_state`, not the canonical `jobs` master row:
 `first_seen_at`, `last_seen_at`, `capture_count`, `archived`, and `compacted_at` are operational JMM bookkeeping.

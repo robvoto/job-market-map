@@ -205,6 +205,7 @@ CANONICAL_DETAIL_FACT_COLUMNS = (
     "employment_type",
     "workplace_type",
     "posted_at",
+    "posted_at_basis",
     "expires_at",
     "source_status",
     "apply_method",
@@ -235,7 +236,44 @@ def update_job_source_facts(job_id: int, **facts: object) -> dict[str, object]:
         assignments: list[str] = []
         values: list[object] = []
         row_keys = set(row.keys())
+        incoming_posted_at = facts.get("posted_at")
+        incoming_basis = str(facts.get("posted_at_basis") or "source_exact")
+        posting_updated = False
+        if incoming_posted_at is not None:
+            current_posted_at = row["posted_at"] if "posted_at" in row_keys else None
+            current_basis = str(row["posted_at_basis"] or "") if "posted_at_basis" in row_keys else ""
+            ranks = {"source_exact": 3, "source_relative": 2, "search_window_bound": 1}
+            state = conn.execute(
+                "SELECT state FROM job_field_states WHERE job_id=? AND field_name='posted_at'",
+                (job_id,),
+            ).fetchone()
+            current_date_valid = bool(
+                current_posted_at
+                and conn.execute(
+                    "SELECT julianday(?) IS NOT NULL", (current_posted_at,)
+                ).fetchone()[0]
+            )
+            current_rank = (
+                0
+                if (state and state["state"] == "not_present")
+                or (current_posted_at and not current_date_valid)
+                else ranks.get(current_basis, 3 if current_date_valid else 0)
+            )
+            better_exact_precision = (
+                incoming_basis == current_basis == "source_exact"
+                and len(str(incoming_posted_at)) > len(str(current_posted_at or ""))
+            )
+            if (
+                not current_posted_at
+                or ranks.get(incoming_basis, 0) > current_rank
+                or better_exact_precision
+            ):
+                assignments.extend(("posted_at=?", "posted_at_basis=?"))
+                values.extend((incoming_posted_at, incoming_basis))
+                posting_updated = True
         for column in CANONICAL_DETAIL_FACT_COLUMNS:
+            if column in {"posted_at", "posted_at_basis"}:
+                continue
             incoming = facts.get(column)
             if incoming is None:
                 continue
@@ -257,6 +295,14 @@ def update_job_source_facts(job_id: int, **facts: object) -> dict[str, object]:
             conn.execute(
                 f"UPDATE jobs SET {', '.join(assignments)} WHERE id=?",
                 (*values, job_id),
+            )
+        if posting_updated:
+            conn.execute(
+                """INSERT INTO job_field_states(job_id,field_name,state,evidence_source,checked_at)
+                   VALUES(?, 'posted_at', 'known', 'source_detail', datetime('now'))
+                   ON CONFLICT(job_id,field_name) DO UPDATE SET state='known',
+                       evidence_source=excluded.evidence_source,checked_at=excluded.checked_at""",
+                (job_id,),
             )
         stored = conn.execute(
             "SELECT * FROM jobs WHERE id=?", (job_id,)
@@ -532,6 +578,7 @@ def init_db() -> None:
         _ensure_column(conn, "jobs", "jd_source", "jd_source TEXT")
         _ensure_column(conn, "jobs", "geography_code", "geography_code TEXT")
         _ensure_column(conn, "jobs", "posted_at", "posted_at TEXT")
+        _ensure_column(conn, "jobs", "posted_at_basis", "posted_at_basis TEXT")
         _ensure_column(conn, "jobs", "expires_at", "expires_at TEXT")
         _ensure_column(conn, "jobs", "source_status", "source_status TEXT")
         _ensure_column(conn, "jobs", "apply_method", "apply_method TEXT")
@@ -546,6 +593,7 @@ def init_db() -> None:
         _ensure_column(conn, "jobs", "salary_period", "salary_period TEXT")
         _ensure_column(conn, "jobs", "salary_currency", "salary_currency TEXT")
         _ensure_column(conn, "jobs", "salary_qualifier", "salary_qualifier TEXT")
+        _ensure_column(conn, "jobs", "salary_bound", "salary_bound TEXT")
         _ensure_column(conn, "jobs", "identity_key", "identity_key TEXT")
         _ensure_column(conn, "job_tombstones", "identity_key", "identity_key TEXT")
         _ensure_column(conn, "queries", "geography_code", "geography_code TEXT")

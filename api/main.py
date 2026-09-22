@@ -70,7 +70,7 @@ from collector.settings import (
 from collector.source_status import source_status_is_active_sql
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 12
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -150,6 +150,7 @@ def _job_payload(row, *, include_raw: bool = True) -> dict:
         "period": item.pop("salary_period", None),
         "currency": item.pop("salary_currency", None),
         "qualifier": item.pop("salary_qualifier", None),
+        "bound": item.pop("salary_bound", None),
     }
     for key in (
         "reposted",
@@ -607,10 +608,22 @@ def search_jobs(
     apply_method: Annotated[list[str] | None, Query()] = None,
     company: Annotated[list[str] | None, Query()] = None,
     posted_after: str | None = None,
-    salary_min: float | None = Query(None, ge=0),
-    salary_max: float | None = Query(None, ge=0),
-    salary_period: str | None = None,
-    salary_currency: str | None = None,
+    salary_min: float | None = Query(
+        None, ge=0,
+        description="Lower edge of the requested salary interval. Unknown or incomparable job salary facts remain in results.",
+    ),
+    salary_max: float | None = Query(
+        None, ge=0,
+        description="Upper edge of the requested salary interval. Unknown or incomparable job salary facts remain in results.",
+    ),
+    salary_period: str | None = Query(
+        None,
+        description="Comparison unit: hour, day, week, month, or year. JMM never converts between periods; jobs with missing or different units remain eligible.",
+    ),
+    salary_currency: str | None = Query(
+        None,
+        description="Three-letter comparison currency. JMM never converts currencies; jobs with missing or different currencies remain eligible.",
+    ),
     after_id: int = Query(0, ge=0),
     through_id: int | None = Query(None, ge=0),
     include_archived: bool = False,
@@ -733,21 +746,36 @@ def search_jobs(
         )
         linked_params.append(posted_after_value)
     if salary_requested:
-        linked_clauses.extend(
-            [
-                "vacancy_job.salary_normalized_state='known'",
-                "EXISTS (SELECT 1 FROM job_field_states salary_state WHERE salary_state.job_id=vacancy_job.id AND salary_state.field_name='salary' AND salary_state.state='known')",
-                "vacancy_job.salary_period=?",
-                "vacancy_job.salary_currency=?",
-            ]
+        # A salary constraint is a neutral eligibility search. Exclude only
+        # when canonical facts are known and comparable and prove non-overlap.
+        # Unknown values, period/currency mismatches, and stale raw field states
+        # stay visible for downstream review; no unit conversion is attempted.
+        comparable_salary = (
+            "vacancy_job.salary_normalized_state='known' "
+            "AND EXISTS (SELECT 1 FROM job_field_states salary_state "
+            "WHERE salary_state.job_id=vacancy_job.id "
+            "AND salary_state.field_name='salary' AND salary_state.state='known') "
+            "AND vacancy_job.salary_period=? "
+            "AND vacancy_job.salary_currency=? "
+            "AND vacancy_job.salary_bound IN ('exact','range','from','up_to')"
         )
-        linked_params.extend((salary_period, salary_currency))
+        overlap_parts: list[str] = []
+        overlap_params: list[object] = []
         if salary_min is not None:
-            linked_clauses.append("(vacancy_job.salary_max_amount IS NULL OR vacancy_job.salary_max_amount>=?)")
-            linked_params.append(salary_min)
+            overlap_parts.append(
+                "(vacancy_job.salary_max_amount IS NULL OR vacancy_job.salary_max_amount>=?)"
+            )
+            overlap_params.append(salary_min)
         if salary_max is not None:
-            linked_clauses.append("(vacancy_job.salary_min_amount IS NULL OR vacancy_job.salary_min_amount<=?)")
-            linked_params.append(salary_max)
+            overlap_parts.append(
+                "(vacancy_job.salary_min_amount IS NULL OR vacancy_job.salary_min_amount<=?)"
+            )
+            overlap_params.append(salary_max)
+        linked_clauses.append(
+            f"(NOT COALESCE(({comparable_salary}),0) "
+            f"OR ({' AND '.join(overlap_parts)}))"
+        )
+        linked_params.extend((salary_period, salary_currency, *overlap_params))
 
     filter_columns = {
         "location": "location",
@@ -827,20 +855,50 @@ def search_jobs(
             placeholders = ",".join("?" for _ in page_ids)
             matched_source_rows = conn.execute(
                 "SELECT COALESCE(vacancy_job.primary_job_id,vacancy_job.id) AS primary_id, "
-                "vacancy_job.id AS matched_job_id, vacancy_job.source, vacancy_job.source_job_id "
+                "vacancy_job.id AS matched_job_id, vacancy_job.source, vacancy_job.source_job_id, "
+                "vacancy_job.salary_normalized_state,vacancy_job.salary_min_amount, "
+                "vacancy_job.salary_max_amount,vacancy_job.salary_period, "
+                "vacancy_job.salary_currency,vacancy_job.salary_qualifier, "
+                "vacancy_job.salary_bound, "
+                "(SELECT salary_state.state FROM job_field_states salary_state "
+                "WHERE salary_state.job_id=vacancy_job.id "
+                "AND salary_state.field_name='salary') AS salary_field_state "
                 + linked_from_where
                 + f" AND COALESCE(vacancy_job.primary_job_id,vacancy_job.id) IN ({placeholders}) "
                 "ORDER BY primary_id ASC, vacancy_job.id ASC",
                 (*linked_params, *page_ids),
             ).fetchall()
             for matched_source in matched_source_rows:
-                matched_sources_by_primary.setdefault(int(matched_source["primary_id"]), []).append(
-                    {
-                        "id": int(matched_source["matched_job_id"]),
-                        "source": matched_source["source"],
-                        "source_job_id": matched_source["source_job_id"],
+                matched_item: dict[str, object] = {
+                    "id": int(matched_source["matched_job_id"]),
+                    "source": matched_source["source"],
+                    "source_job_id": matched_source["source_job_id"],
+                }
+                if salary_requested:
+                    normalized = {
+                        "state": matched_source["salary_normalized_state"],
+                        "min_amount": matched_source["salary_min_amount"],
+                        "max_amount": matched_source["salary_max_amount"],
+                        "period": matched_source["salary_period"],
+                        "currency": matched_source["salary_currency"],
+                        "qualifier": matched_source["salary_qualifier"],
+                        "bound": matched_source["salary_bound"],
                     }
-                )
+                    matched_item["salary_normalized"] = normalized
+                    matched_item["salary_field_state"] = matched_source["salary_field_state"] or "unknown"
+                    comparable = (
+                        normalized["state"] == "known"
+                        and matched_item["salary_field_state"] == "known"
+                        and normalized["period"] == salary_period
+                        and normalized["currency"] == salary_currency
+                        and normalized["bound"] in {"exact", "range", "from", "up_to"}
+                    )
+                    matched_item["salary_match_basis"] = (
+                        "comparable_overlap" if comparable else "uncertain_preserved"
+                    )
+                matched_sources_by_primary.setdefault(
+                    int(matched_source["primary_id"]), []
+                ).append(matched_item)
         lifecycle_by_id: dict[int, dict[str, object]] = {}
         if page_ids:
             placeholders = ",".join("?" for _ in page_ids)

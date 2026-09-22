@@ -79,6 +79,29 @@ def _known_seek_card_changed(existing: dict, card) -> bool:
         stored_easy_apply = existing.get("easy_apply")
         if stored_easy_apply is None or bool(stored_easy_apply) != bool(easy_apply):
             return True
+    incoming_date = bool(
+        getattr(card, "posted_at", None)
+        or getattr(card, "posted_text", None)
+        or getattr(card, "search_window_hours", None)
+    )
+    if incoming_date:
+        if existing.get("posted_at_state") == "not_present":
+            return True
+        current_basis = str(existing.get("posted_at_basis") or "")
+        current_rank = {
+            "source_exact": 3,
+            "source_relative": 2,
+            "search_window_bound": 1,
+        }.get(current_basis, 3 if existing.get("posted_at") else 0)
+        incoming_rank = (
+            3
+            if getattr(card, "posted_at", None)
+            else 2
+            if getattr(card, "posted_text", None)
+            else 1
+        )
+        if incoming_rank > current_rank or not existing.get("posted_at"):
+            return True
     return False
 
 
@@ -188,6 +211,16 @@ def _page_url(url: str, page: int) -> str:
     else:
         query.pop("page", None)
     return urlunsplit((parts.scheme, parts.netloc, parts.path, urlencode(query), ""))
+
+
+def _search_window_hours(url: str) -> int | None:
+    """Return SEEK's explicit date-range window, when the URL proves one."""
+    values = dict(parse_qsl(urlsplit(url).query, keep_blank_values=True))
+    try:
+        days = int(values.get("daterange", ""))
+    except ValueError:
+        return None
+    return days * 24 if days > 0 else None
 
 
 def _same_seek_page(actual_url: str, expected_url: str) -> bool:
@@ -479,6 +512,7 @@ def _collect_leaf(
             query_location=None,
             page_number=page,
             geography_code=geography_code,
+            search_window_hours=_search_window_hours(url),
         )
         page_cards, cutoff_reached, page_oldest_at = _incremental_page_cards(
             cards, active_cutoff, previous_oldest_at
@@ -515,7 +549,10 @@ def _collect_leaf(
                 existing_by_source_id = {
                     str(row["source_job_id"]): dict(row)
                     for row in conn.execute(
-                        f"SELECT * FROM jobs WHERE source='seek' AND source_job_id IN ({placeholders})",
+                        f"""SELECT j.*,fs.state AS posted_at_state FROM jobs j
+                              LEFT JOIN job_field_states fs
+                                ON fs.job_id=j.id AND fs.field_name='posted_at'
+                             WHERE j.source='seek' AND j.source_job_id IN ({placeholders})""",
                         source_ids,
                     )
                 }
@@ -548,11 +585,6 @@ def _collect_leaf(
                         """,
                         (job_id, now, now),
                     )
-                    if getattr(card, "posted_at", None):
-                        conn.execute(
-                            "UPDATE jobs SET posted_at=COALESCE(posted_at, ?) WHERE id=?",
-                            (card.posted_at, job_id),
-                        )
             with connect() as conn:
                 conn.execute(
                     "INSERT OR IGNORE INTO seek_partition_jobs(partition_id,job_id,first_seen_at) VALUES(?,?,?)",
