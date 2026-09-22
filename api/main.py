@@ -4,7 +4,7 @@ import json
 import math
 import re
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from time import perf_counter
 from typing import Annotated
 
@@ -258,6 +258,8 @@ _SEARCH_DEFAULT_FIELDS = (
     "full_description",
 )
 _SEARCH_MAX_TERMS = 16
+_SEARCH_MAX_FILTER_VALUES = 100
+_SEARCH_MAX_FILTER_VALUE_LENGTH = 300
 
 
 def _search_unquote(value: str) -> str:
@@ -633,7 +635,40 @@ def search_jobs(
     sources = [str(value).strip().casefold() for value in source or [] if str(value).strip()]
     geographies = [str(value).strip().upper() for value in geography_code or [] if str(value).strip()]
 
+    repeated_filters = {
+        "source": sources,
+        "geography_code": geographies,
+        "location": [str(value).strip() for value in location or [] if str(value).strip()],
+        "classification": [str(value).strip() for value in classification or [] if str(value).strip()],
+        "subclassification": [str(value).strip() for value in subclassification or [] if str(value).strip()],
+        "employment_type": [str(value).strip() for value in employment_type or [] if str(value).strip()],
+        "workplace_type": [str(value).strip() for value in workplace_type or [] if str(value).strip()],
+        "apply_method": [str(value).strip() for value in apply_method or [] if str(value).strip()],
+        "company": [str(value).strip() for value in company or [] if str(value).strip()],
+    }
+    for name, values in repeated_filters.items():
+        if len(values) > _SEARCH_MAX_FILTER_VALUES:
+            raise HTTPException(400, f"{name} supports at most {_SEARCH_MAX_FILTER_VALUES} values")
+        if any(len(value) > _SEARCH_MAX_FILTER_VALUE_LENGTH for value in values):
+            raise HTTPException(400, f"{name} values must be {_SEARCH_MAX_FILTER_VALUE_LENGTH} characters or shorter")
+
+    posted_after_value: str | None = None
+    if posted_after is not None:
+        raw_posted_after = posted_after.strip()
+        if len(raw_posted_after) > 64:
+            raise HTTPException(400, "posted_after must be 64 characters or shorter")
+        try:
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_posted_after):
+                posted_after_value = date.fromisoformat(raw_posted_after).isoformat()
+            else:
+                parsed_posted_after = datetime.fromisoformat(raw_posted_after)
+                posted_after_value = parsed_posted_after.isoformat()
+        except (ValueError, OverflowError) as exc:
+            raise HTTPException(400, "posted_after must be an ISO date or timestamp") from exc
+
     salary_requested = salary_min is not None or salary_max is not None
+    if not salary_requested and (salary_period is not None or salary_currency is not None):
+        raise HTTPException(400, "salary_period and salary_currency require salary_min or salary_max")
     if salary_requested:
         if not salary_period or not salary_currency:
             raise HTTPException(400, "salary_min/salary_max require salary_period and salary_currency")
@@ -674,11 +709,29 @@ def search_jobs(
         linked_params.extend(sources)
     if geographies:
         placeholders = ",".join("?" for _ in geographies)
-        linked_clauses.append(f"vacancy_job.geography_code IN ({placeholders})")
+        linked_clauses.append(
+            "((vacancy_job.geography_code IN (" + placeholders + ") "
+            "AND EXISTS (SELECT 1 FROM job_field_states geo_known WHERE geo_known.job_id=vacancy_job.id "
+            "AND geo_known.field_name='geography_code' AND geo_known.state='known')) "
+            "OR EXISTS (SELECT 1 FROM job_field_states geo_unknown WHERE geo_unknown.job_id=vacancy_job.id "
+            "AND geo_unknown.field_name='geography_code' AND geo_unknown.state IN ('unknown','not_applicable')) "
+            "OR NOT EXISTS (SELECT 1 FROM job_field_states geo_missing WHERE geo_missing.job_id=vacancy_job.id "
+            "AND geo_missing.field_name='geography_code'))"
+        )
         linked_params.extend(geographies)
-    if posted_after:
-        linked_clauses.append("(vacancy_job.posted_at IS NULL OR vacancy_job.posted_at>=?)")
-        linked_params.append(posted_after)
+    if posted_after_value is not None:
+        linked_clauses.extend(
+            [
+                (
+                    "EXISTS (SELECT 1 FROM job_field_states posted_known "
+                    "WHERE posted_known.job_id=vacancy_job.id "
+                    "AND posted_known.field_name='posted_at' AND posted_known.state='known')"
+                ),
+                "julianday(vacancy_job.posted_at) IS NOT NULL",
+                "julianday(vacancy_job.posted_at)>=julianday(?)",
+            ]
+        )
+        linked_params.append(posted_after_value)
     if salary_requested:
         linked_clauses.extend(
             [
@@ -690,10 +743,10 @@ def search_jobs(
         )
         linked_params.extend((salary_period, salary_currency))
         if salary_min is not None:
-            linked_clauses.append("vacancy_job.salary_max_amount IS NOT NULL AND vacancy_job.salary_max_amount>=?")
+            linked_clauses.append("(vacancy_job.salary_max_amount IS NULL OR vacancy_job.salary_max_amount>=?)")
             linked_params.append(salary_min)
         if salary_max is not None:
-            linked_clauses.append("vacancy_job.salary_min_amount IS NOT NULL AND vacancy_job.salary_min_amount<=?")
+            linked_clauses.append("(vacancy_job.salary_min_amount IS NULL OR vacancy_job.salary_min_amount<=?)")
             linked_params.append(salary_max)
 
     filter_columns = {
