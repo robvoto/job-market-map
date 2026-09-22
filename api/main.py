@@ -44,6 +44,7 @@ from collector.jd_enrichment import (
 from collector.query_admin import add_query, set_query_active
 from collector.query_admin import list_queries as admin_list_queries
 from collector.query_registry import sync_registry
+from collector.readiness import consumer_readiness
 from collector.retention import apply_retention
 from collector.run_logging import (
     collection_logger,
@@ -433,6 +434,11 @@ def health():
     with connect() as conn:
         conn.execute("SELECT 1").fetchone()
     return {"ok": True, "api_version": API_VERSION, "schema_version": SCHEMA_VERSION}
+
+
+@app.get(f"/{API_VERSION}/readiness")
+def readiness():
+    return {"api_version": API_VERSION, "schema_version": SCHEMA_VERSION, **consumer_readiness()}
 
 
 @app.get(f"/{API_VERSION}/stats")
