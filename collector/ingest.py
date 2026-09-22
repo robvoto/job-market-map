@@ -13,6 +13,7 @@ from collector.duplicates import (
 from collector.field_states import states_for_observation
 from collector.identity import job_identity_key
 from collector.models import CardObservation
+from collector.posting_dates import normalize_posting_date
 from collector.salary import store_salary_normalization
 
 TRACKING_QUERY_KEYS = {
@@ -105,7 +106,7 @@ def ingest_card(obs: CardObservation) -> IngestResult:
     with connect() as conn:
         if source_job_id:
             existing = conn.execute(
-                "SELECT id FROM jobs WHERE source = ? AND source_job_id = ?",
+                "SELECT id, posted_at, posted_at_basis FROM jobs WHERE source = ? AND source_job_id = ?",
                 (source, source_job_id),
             ).fetchone()
             tombstone = (
@@ -118,7 +119,7 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             )
         else:
             existing = conn.execute(
-                "SELECT id FROM jobs WHERE source = ? AND canonical_url = ?",
+                "SELECT id, posted_at, posted_at_basis FROM jobs WHERE source = ? AND canonical_url = ?",
                 (source, canonical_url),
             ).fetchone()
             tombstone = (
@@ -130,6 +131,39 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                 else None
             )
 
+        posting_date = normalize_posting_date(
+            posted_at=obs.posted_at,
+            posted_text=obs.posted_text,
+            captured_at=captured_at,
+            search_window_hours=obs.search_window_hours,
+        )
+        posting_value = posting_date.value if posting_date else None
+        posting_basis = posting_date.basis if posting_date else None
+        if existing and str(existing["posted_at"] or "").strip():
+            current_basis = str(existing["posted_at_basis"] or "")
+            candidate_rank = {"source_exact": 3, "source_relative": 2, "search_window_bound": 1}.get(posting_basis, 0)
+            current_state = conn.execute(
+                "SELECT state FROM job_field_states WHERE job_id=? AND field_name='posted_at'",
+                (int(existing["id"]),),
+            ).fetchone()
+            legacy_value = normalize_posting_date(
+                posted_at=str(existing["posted_at"]),
+                posted_text=None,
+                captured_at=captured_at,
+            )
+            current_rank = 0 if current_state and current_state["state"] == "not_present" else {
+                "source_exact": 3,
+                "source_relative": 2,
+                "search_window_bound": 1,
+            }.get(current_basis, 3 if legacy_value else 0)
+            better_exact_precision = (
+                posting_basis == current_basis == "source_exact"
+                and len(posting_value or "") > len(str(existing["posted_at"]))
+            )
+            if not posting_value or (candidate_rank <= current_rank and not better_exact_precision):
+                posting_value = None
+                posting_basis = None
+
         fields = {
             "title": _clean(obs.title),
             "employer": _clean(obs.employer),
@@ -138,7 +172,8 @@ def ingest_card(obs: CardObservation) -> IngestResult:
             "salary_text": _clean(obs.salary_text),
             "employment_type": _clean(obs.employment_type),
             "workplace_type": _clean(obs.workplace_type),
-            "posted_at": _clean(obs.posted_at),
+            "posted_at": posting_value,
+            "posted_at_basis": posting_basis,
             "source_status": _clean(obs.source_status),
             "apply_method": _clean(obs.apply_method),
             "applicant_count": obs.applicant_count,
@@ -183,10 +218,10 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                 """
                 INSERT INTO jobs(
                     source, source_job_id, identity_key, canonical_url, title, employer, location, geography_code,
-                    salary_text, employment_type, workplace_type, posted_at,
+                    salary_text, employment_type, workplace_type, posted_at, posted_at_basis,
                     source_status, apply_method, reposted, applicant_count, easy_apply, teaser_text, raw_card_text,
                     classification_text, subclassification_text, card_tags_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     source,
@@ -201,6 +236,7 @@ def ingest_card(obs: CardObservation) -> IngestResult:
                     fields["employment_type"],
                     fields["workplace_type"],
                     fields["posted_at"],
+                    fields["posted_at_basis"],
                     fields["source_status"],
                     fields["apply_method"],
                     int(bool(obs.reposted)),
@@ -250,15 +286,28 @@ def ingest_card(obs: CardObservation) -> IngestResult:
         stored_row = dict(
             conn.execute("SELECT * FROM jobs WHERE id=?", (job_id,)).fetchone()
         )
-        store_salary_normalization(conn, job_id, stored_row["salary_text"])
         explicit_salary_state = (obs.field_states or {}).get("salary")
-        if explicit_salary_state in {"unknown", "not_present", "not_applicable"}:
-            conn.execute(
-                """UPDATE jobs SET salary_normalized_state=?, salary_min_amount=NULL,
-                          salary_max_amount=NULL, salary_period=NULL,
-                          salary_currency=NULL, salary_qualifier=NULL WHERE id=?""",
-                (explicit_salary_state, job_id),
+        stored_salary_state = conn.execute(
+            "SELECT state FROM job_field_states WHERE job_id=? AND field_name='salary'",
+            (job_id,),
+        ).fetchone()
+        if explicit_salary_state is not None:
+            effective_salary_state = explicit_salary_state
+        elif _clean(obs.salary_text):
+            effective_salary_state = "known"
+        else:
+            effective_salary_state = (
+                stored_salary_state["state"] if stored_salary_state else "unknown"
             )
+        store_salary_normalization(
+            conn,
+            job_id,
+            stored_row["salary_text"],
+            source=source,
+            canonical_url=canonical_url,
+            geography_code=stored_row["geography_code"],
+            field_state=effective_salary_state,
+        )
         core_fingerprint, exact_card_fingerprint = fingerprints(stored_row)
         conn.execute(
             "UPDATE jobs SET core_fingerprint=?, exact_card_fingerprint=? WHERE id=?",
@@ -267,6 +316,15 @@ def ingest_card(obs: CardObservation) -> IngestResult:
 
         query_id = _query_id(conn, obs, captured_at)
         capture_json = dict(obs.raw_json or {})
+        if _clean(obs.posted_at):
+            capture_json.setdefault("posted_at_source", _clean(obs.posted_at))
+        if posting_value and existing and existing["posted_at"]:
+            capture_json["previous_posted_at"] = existing["posted_at"]
+        if posting_date:
+            capture_json["posted_at_basis"] = posting_date.basis
+            capture_json["posted_at_normalized"] = posting_date.value
+        if obs.search_window_hours:
+            capture_json.setdefault("search_window_hours", obs.search_window_hours)
         if _clean(obs.posted_text):
             capture_json.setdefault("posted_text", _clean(obs.posted_text))
         conn.execute(
@@ -314,6 +372,16 @@ def ingest_card(obs: CardObservation) -> IngestResult:
     # own connection. A blank observation is unknown and cannot erase prior
     # source evidence.
     states = states_for_observation(obs)
+    with connect() as conn:
+        stored_posted_at = conn.execute(
+            "SELECT posted_at FROM jobs WHERE id=?", (job_id,)
+        ).fetchone()[0]
+    if normalize_posting_date(
+        posted_at=stored_posted_at, posted_text=None, captured_at=captured_at
+    ):
+        states["posted_at"] = "known"
+    else:
+        states["posted_at"] = "unknown"
     set_job_field_states(
         job_id,
         states,

@@ -134,6 +134,7 @@ def observation_from_jobspy_row(
     offset: int,
     page_size: int,
     captured_at: str | None = None,
+    search_window_hours: int | None = None,
 ) -> CardObservation:
     source_job_id = normalize_linkedin_source_job_id(_value(row, "id"))
     numeric_id = linkedin_numeric_job_id(source_job_id)
@@ -153,8 +154,9 @@ def observation_from_jobspy_row(
     is_remote = _value(row, "is_remote")
     workplace_type = "Remote" if is_remote is True else None
     posted_at = _posted_at(row)
+    posted_text = _text(row, "posted_text")
     raw_card_text = "\n".join(
-        part for part in (title, employer, location, salary, posted_at) if part
+        part for part in (title, employer, location, salary, posted_text, posted_at) if part
     )
 
     return CardObservation(
@@ -168,7 +170,9 @@ def observation_from_jobspy_row(
         salary_text=salary,
         employment_type=employment_type,
         workplace_type=workplace_type,
+        posted_text=posted_text,
         posted_at=posted_at,
+        search_window_hours=search_window_hours,
         raw_card_text=raw_card_text or None,
         raw_json={"jobspy": raw, "offset": offset},
         query_text=query_text,

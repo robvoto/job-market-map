@@ -18,6 +18,7 @@ class CardObservation:
     workplace_type: str | None = None
     posted_text: str | None = None
     posted_at: str | None = None
+    search_window_hours: int | None = None
     source_status: str | None = None
     apply_method: str | None = None
     reposted: bool = False

@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 import json
+import math
 import re
 from contextlib import asynccontextmanager
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, date, datetime, timedelta
 from time import perf_counter
 from typing import Annotated
 
@@ -69,7 +70,7 @@ from collector.settings import (
 from collector.source_status import source_status_is_active_sql
 
 API_VERSION = "v3"
-SCHEMA_VERSION = 10
+SCHEMA_VERSION = 12
 ADMIN_HTML = ROOT / "api" / "admin.html"
 
 
@@ -149,6 +150,7 @@ def _job_payload(row, *, include_raw: bool = True) -> dict:
         "period": item.pop("salary_period", None),
         "currency": item.pop("salary_currency", None),
         "qualifier": item.pop("salary_qualifier", None),
+        "bound": item.pop("salary_bound", None),
     }
     for key in (
         "reposted",
@@ -257,6 +259,8 @@ _SEARCH_DEFAULT_FIELDS = (
     "full_description",
 )
 _SEARCH_MAX_TERMS = 16
+_SEARCH_MAX_FILTER_VALUES = 100
+_SEARCH_MAX_FILTER_VALUE_LENGTH = 300
 
 
 def _search_unquote(value: str) -> str:
@@ -604,6 +608,22 @@ def search_jobs(
     apply_method: Annotated[list[str] | None, Query()] = None,
     company: Annotated[list[str] | None, Query()] = None,
     posted_after: str | None = None,
+    salary_min: float | None = Query(
+        None, ge=0,
+        description="Lower edge of the requested salary interval. Unknown or incomparable job salary facts remain in results.",
+    ),
+    salary_max: float | None = Query(
+        None, ge=0,
+        description="Upper edge of the requested salary interval. Unknown or incomparable job salary facts remain in results.",
+    ),
+    salary_period: str | None = Query(
+        None,
+        description="Comparison unit: hour, day, week, month, or year. JMM never converts between periods; jobs with missing or different units remain eligible.",
+    ),
+    salary_currency: str | None = Query(
+        None,
+        description="Three-letter comparison currency. JMM never converts currencies; jobs with missing or different currencies remain eligible.",
+    ),
     after_id: int = Query(0, ge=0),
     through_id: int | None = Query(None, ge=0),
     include_archived: bool = False,
@@ -627,6 +647,56 @@ def search_jobs(
     parsed_queries = [_parse_search_expression(expression) for expression in expressions]
     sources = [str(value).strip().casefold() for value in source or [] if str(value).strip()]
     geographies = [str(value).strip().upper() for value in geography_code or [] if str(value).strip()]
+
+    repeated_filters = {
+        "source": sources,
+        "geography_code": geographies,
+        "location": [str(value).strip() for value in location or [] if str(value).strip()],
+        "classification": [str(value).strip() for value in classification or [] if str(value).strip()],
+        "subclassification": [str(value).strip() for value in subclassification or [] if str(value).strip()],
+        "employment_type": [str(value).strip() for value in employment_type or [] if str(value).strip()],
+        "workplace_type": [str(value).strip() for value in workplace_type or [] if str(value).strip()],
+        "apply_method": [str(value).strip() for value in apply_method or [] if str(value).strip()],
+        "company": [str(value).strip() for value in company or [] if str(value).strip()],
+    }
+    for name, values in repeated_filters.items():
+        if len(values) > _SEARCH_MAX_FILTER_VALUES:
+            raise HTTPException(400, f"{name} supports at most {_SEARCH_MAX_FILTER_VALUES} values")
+        if any(len(value) > _SEARCH_MAX_FILTER_VALUE_LENGTH for value in values):
+            raise HTTPException(400, f"{name} values must be {_SEARCH_MAX_FILTER_VALUE_LENGTH} characters or shorter")
+
+    posted_after_value: str | None = None
+    if posted_after is not None:
+        raw_posted_after = posted_after.strip()
+        if len(raw_posted_after) > 64:
+            raise HTTPException(400, "posted_after must be 64 characters or shorter")
+        try:
+            if re.fullmatch(r"\d{4}-\d{2}-\d{2}", raw_posted_after):
+                posted_after_value = date.fromisoformat(raw_posted_after).isoformat()
+            else:
+                parsed_posted_after = datetime.fromisoformat(raw_posted_after)
+                posted_after_value = parsed_posted_after.isoformat()
+        except (ValueError, OverflowError) as exc:
+            raise HTTPException(400, "posted_after must be an ISO date or timestamp") from exc
+
+    salary_requested = salary_min is not None or salary_max is not None
+    if not salary_requested and (salary_period is not None or salary_currency is not None):
+        raise HTTPException(400, "salary_period and salary_currency require salary_min or salary_max")
+    if salary_requested:
+        if not salary_period or not salary_currency:
+            raise HTTPException(400, "salary_min/salary_max require salary_period and salary_currency")
+        salary_period = str(salary_period).strip().casefold()
+        if salary_period not in {"hour", "day", "week", "month", "year"}:
+            raise HTTPException(400, "salary_period must be hour, day, week, month or year")
+        salary_currency = str(salary_currency).strip().upper()
+        if not re.fullmatch(r"[A-Z]{3}", salary_currency):
+            raise HTTPException(400, "salary_currency must be a three-letter code")
+        if salary_min is not None and not math.isfinite(salary_min):
+            raise HTTPException(400, "salary_min must be finite")
+        if salary_max is not None and not math.isfinite(salary_max):
+            raise HTTPException(400, "salary_max must be finite")
+        if salary_min is not None and salary_max is not None and salary_min > salary_max:
+            raise HTTPException(400, "salary_min must not exceed salary_max")
 
     with connect() as conn:
         snapshot_max_id = (
@@ -652,11 +722,60 @@ def search_jobs(
         linked_params.extend(sources)
     if geographies:
         placeholders = ",".join("?" for _ in geographies)
-        linked_clauses.append(f"vacancy_job.geography_code IN ({placeholders})")
+        linked_clauses.append(
+            "((vacancy_job.geography_code IN (" + placeholders + ") "
+            "AND EXISTS (SELECT 1 FROM job_field_states geo_known WHERE geo_known.job_id=vacancy_job.id "
+            "AND geo_known.field_name='geography_code' AND geo_known.state='known')) "
+            "OR EXISTS (SELECT 1 FROM job_field_states geo_unknown WHERE geo_unknown.job_id=vacancy_job.id "
+            "AND geo_unknown.field_name='geography_code' AND geo_unknown.state IN ('unknown','not_applicable')) "
+            "OR NOT EXISTS (SELECT 1 FROM job_field_states geo_missing WHERE geo_missing.job_id=vacancy_job.id "
+            "AND geo_missing.field_name='geography_code'))"
+        )
         linked_params.extend(geographies)
-    if posted_after:
-        linked_clauses.append("(vacancy_job.posted_at IS NULL OR vacancy_job.posted_at>=?)")
-        linked_params.append(posted_after)
+    if posted_after_value is not None:
+        linked_clauses.extend(
+            [
+                (
+                    "EXISTS (SELECT 1 FROM job_field_states posted_known "
+                    "WHERE posted_known.job_id=vacancy_job.id "
+                    "AND posted_known.field_name='posted_at' AND posted_known.state='known')"
+                ),
+                "julianday(vacancy_job.posted_at) IS NOT NULL",
+                "julianday(vacancy_job.posted_at)>=julianday(?)",
+            ]
+        )
+        linked_params.append(posted_after_value)
+    if salary_requested:
+        # A salary constraint is a neutral eligibility search. Exclude only
+        # when canonical facts are known and comparable and prove non-overlap.
+        # Unknown values, period/currency mismatches, and stale raw field states
+        # stay visible for downstream review; no unit conversion is attempted.
+        comparable_salary = (
+            "vacancy_job.salary_normalized_state='known' "
+            "AND EXISTS (SELECT 1 FROM job_field_states salary_state "
+            "WHERE salary_state.job_id=vacancy_job.id "
+            "AND salary_state.field_name='salary' AND salary_state.state='known') "
+            "AND vacancy_job.salary_period=? "
+            "AND vacancy_job.salary_currency=? "
+            "AND vacancy_job.salary_bound IN ('exact','range','from','up_to')"
+        )
+        overlap_parts: list[str] = []
+        overlap_params: list[object] = []
+        if salary_min is not None:
+            overlap_parts.append(
+                "(vacancy_job.salary_max_amount IS NULL OR vacancy_job.salary_max_amount>=?)"
+            )
+            overlap_params.append(salary_min)
+        if salary_max is not None:
+            overlap_parts.append(
+                "(vacancy_job.salary_min_amount IS NULL OR vacancy_job.salary_min_amount<=?)"
+            )
+            overlap_params.append(salary_max)
+        linked_clauses.append(
+            f"(NOT COALESCE(({comparable_salary}),0) "
+            f"OR ({' AND '.join(overlap_parts)}))"
+        )
+        linked_params.extend((salary_period, salary_currency, *overlap_params))
 
     filter_columns = {
         "location": "location",
@@ -731,6 +850,55 @@ def search_jobs(
                 page_ids,
             ).fetchall()
         page_ids = [int(row["id"]) for row in rows]
+        matched_sources_by_primary: dict[int, list[dict[str, object]]] = {}
+        if page_ids:
+            placeholders = ",".join("?" for _ in page_ids)
+            matched_source_rows = conn.execute(
+                "SELECT COALESCE(vacancy_job.primary_job_id,vacancy_job.id) AS primary_id, "
+                "vacancy_job.id AS matched_job_id, vacancy_job.source, vacancy_job.source_job_id, "
+                "vacancy_job.salary_normalized_state,vacancy_job.salary_min_amount, "
+                "vacancy_job.salary_max_amount,vacancy_job.salary_period, "
+                "vacancy_job.salary_currency,vacancy_job.salary_qualifier, "
+                "vacancy_job.salary_bound, "
+                "(SELECT salary_state.state FROM job_field_states salary_state "
+                "WHERE salary_state.job_id=vacancy_job.id "
+                "AND salary_state.field_name='salary') AS salary_field_state "
+                + linked_from_where
+                + f" AND COALESCE(vacancy_job.primary_job_id,vacancy_job.id) IN ({placeholders}) "
+                "ORDER BY primary_id ASC, vacancy_job.id ASC",
+                (*linked_params, *page_ids),
+            ).fetchall()
+            for matched_source in matched_source_rows:
+                matched_item: dict[str, object] = {
+                    "id": int(matched_source["matched_job_id"]),
+                    "source": matched_source["source"],
+                    "source_job_id": matched_source["source_job_id"],
+                }
+                if salary_requested:
+                    normalized = {
+                        "state": matched_source["salary_normalized_state"],
+                        "min_amount": matched_source["salary_min_amount"],
+                        "max_amount": matched_source["salary_max_amount"],
+                        "period": matched_source["salary_period"],
+                        "currency": matched_source["salary_currency"],
+                        "qualifier": matched_source["salary_qualifier"],
+                        "bound": matched_source["salary_bound"],
+                    }
+                    matched_item["salary_normalized"] = normalized
+                    matched_item["salary_field_state"] = matched_source["salary_field_state"] or "unknown"
+                    comparable = (
+                        normalized["state"] == "known"
+                        and matched_item["salary_field_state"] == "known"
+                        and normalized["period"] == salary_period
+                        and normalized["currency"] == salary_currency
+                        and normalized["bound"] in {"exact", "range", "from", "up_to"}
+                    )
+                    matched_item["salary_match_basis"] = (
+                        "comparable_overlap" if comparable else "uncertain_preserved"
+                    )
+                matched_sources_by_primary.setdefault(
+                    int(matched_source["primary_id"]), []
+                ).append(matched_item)
         lifecycle_by_id: dict[int, dict[str, object]] = {}
         if page_ids:
             placeholders = ",".join("?" for _ in page_ids)
@@ -765,6 +933,7 @@ def search_jobs(
     for row in rows:
         item = dict(row)
         item.update(lifecycle_by_id.get(int(item["id"]), {}))
+        item["matched_sources"] = matched_sources_by_primary.get(int(item["id"]), [])
         payload_rows.append(item)
     elapsed_ms = round((perf_counter() - started) * 1000, 1)
     collection_logger().info(

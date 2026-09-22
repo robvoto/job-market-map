@@ -29,6 +29,10 @@ def main() -> int:
                 f"{audit['source']}: total={audit['total']} "
                 f"with_posted_at={audit['with_posted_at']} "
                 f"missing={audit['missing_posted_at']} "
+                f"exact={audit['source_exact']} relative={audit['source_relative']} "
+                f"window_bound={audit['search_window_bound']} "
+                f"legacy_basis_unknown={audit['legacy_basis_unknown']} "
+                f"seek_backfill={audit['seek_backfill_candidates']} "
                 f"retryable={audit['retryable_repair_candidates']} "
                 f"without_supported_repair_path={audit['missing_without_supported_repair_path']}"
             )

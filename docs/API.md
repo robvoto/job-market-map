@@ -24,7 +24,13 @@ GET /v3/coverage/seek
 
 `GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. The first page returns `snapshot_max_id`; a multi-page caller may pass that value back as `through_id` on later pages to keep one run on a fixed market boundary. Job payloads contain `identity_key` for stable cross-service correlation.
 
-`GET /v3/jobs/search` is the stateless, bounded filtered-search contract. It accepts repeated `q`, `source`, `geography_code`, `location`, `classification`, `subclassification`, `employment_type`, `workplace_type`, `apply_method`, and `company` parameters plus `posted_after`, `after_id`, and `through_id`. Every response is one admin-bounded page, including an empty/browse-style search; `limit` cannot exceed `api.max_page_size`. Each filter is evaluated against any active linked source row; matching vacancies are returned once as their canonical primary. The response's `total` is the count of those canonical vacancies within the fixed snapshot and is independent of the page cursor. Search does not create or advance a consumer checkpoint.
+`GET /v3/jobs/search` is the stateless, bounded filtered-search contract. It accepts repeated `q`, `source`, `geography_code`, `location`, `classification`, `subclassification`, `employment_type`, `workplace_type`, `apply_method`, and `company` parameters plus `posted_after`, `salary_min`, `salary_max`, `salary_period`, `salary_currency`, `after_id`, and `through_id`. Every response is one admin-bounded page, including an empty/browse-style search; `limit` cannot exceed `api.max_page_size`. Each filter is evaluated against any active linked source row; matching vacancies are returned once as their canonical primary. Each item also includes `matched_sources`, the exact source postings that satisfied all supplied filters, so a match found on an alias is auditable without copying alias fields onto the canonical payload. For salary searches, each matched source also returns its own structured salary facts, raw salary field state, and whether it matched by comparable overlap or was preserved because the facts were uncertain. The response's `total` is the count of those canonical vacancies within the fixed snapshot and is independent of the page cursor. Search does not create or advance a consumer checkpoint.
+
+`posted_after` accepts an ISO date or timestamp. JMM compares parsed SQLite Julian dates, so date-only values and timestamps with offsets are handled as dates/times rather than text. A posting is returned only when its `posted_at` field state is `known` and its stored value is parseable; the response's `posted_at_basis` identifies exact source dates, capture-time conversions of source-relative labels, and conservative source-query freshness bounds. Unknown, not-present, malformed, and missing dates fail closed. Invalid request dates return HTTP 400. A supplied `geography_code` follows neutral field-state semantics: known values must match, while unknown, not-applicable, and legacy rows without a state remain eligible because their geography is not proven different; `not_present` values do not match.
+
+Salary bounds must be accompanied by an explicit `salary_period` (`hour`, `day`, `week`, `month`, or `year`) and three-letter `salary_currency` such as `AUD`; orphan period/currency parameters return HTTP 400. This target period and currency define when numeric comparisons are safe, not a reason to discard other vacancies. JMM never converts or compares `$100/hour` with `$120,000/year`, and it never converts currencies. A known candidate with the same period and currency is tested for inclusive interval overlap. An exact salary has equal lower/upper values, a range has both bounds, `from` has only a lower bound, and `up_to` has only an upper bound. For example, a minimum of `130000 AUD/year` includes `From $150k`, `$140k–$160k`, and `Up to $150k`; it excludes `Up to $120k`. Unknown salary facts, missing/different period or currency, stale/non-known raw salary states, and unparseable legacy rows remain eligible for downstream review. JMM excludes a vacancy only when comparable canonical facts prove its interval cannot meet the requested bound.
+
+Repeated filter values are limited to 100 per parameter and 300 characters per value; excess input returns HTTP 400 before SQL construction. `q` expressions retain their existing stricter expression and length limits.
 
 Repeated `q` expressions are deterministic OR terms. Within one expression, `AND` binds more tightly than `OR`; parentheses, quoted phrases, and field scopes such as `title:"delivery manager"`, `company:acme`, and `description:automation` are supported. Search expressions are intentionally bounded and unsupported field names fail with HTTP 400. JMM does not interpret fit, skills, history, ranking, or LLM meaning.
 
@@ -86,8 +92,12 @@ field states, and source capability metadata for `seek`, `linkedin`, `apsjobs`
 and `future` adapters. Job payloads include a complete `field_states` map and a
 `salary_normalized` object. The latter is populated only from deterministic,
 testable source text; `salary_text` remains the source evidence. Its `state` is
-`known`, `not_present`, `unknown`, or `not_applicable`, and `period` and
-qualifiers remain null unless explicitly proven. `field_states.salary` describes whether raw source salary evidence is present; `salary_normalized.state` separately describes whether that raw evidence could be normalized safely.
+`known`, `not_present`, `unknown`, or `not_applicable`; `bound` is `exact`,
+`range`, `from`, or `up_to` when a numeric shape is proven. Blank text alone is
+`unknown`: `not_present` requires a positive source/card observation. The
+`field_states.salary` value describes whether raw source salary evidence is
+present; `salary_normalized.state` separately describes whether that evidence
+could be normalized safely.
 
 The states are explicit:
 

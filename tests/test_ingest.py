@@ -115,7 +115,7 @@ def test_new_source_row_is_queued_for_jd_once(tmp_path, monkeypatch):
     ]
 
 
-def test_card_text_and_relative_posted_label_never_become_canonical_jd_or_posted_date(tmp_path, monkeypatch):
+def test_card_relative_posting_label_becomes_capture_anchored_date_not_jd(tmp_path, monkeypatch):
     ingest = _use_tmp_db(tmp_path, monkeypatch)
     result = ingest.ingest_card(
         CardObservation(
@@ -136,9 +136,82 @@ def test_card_text_and_relative_posted_label_never_become_canonical_jd_or_posted
             "SELECT raw_json FROM card_captures WHERE job_id=?", (result.job_id,)
         ).fetchone()
     assert job["full_description"] is None
-    assert job["posted_at"] is None
+    assert job["posted_at"] == "2026-09-10T03:11:22+00:00"
+    assert job["posted_at_basis"] == "source_relative"
     assert "posted_text" not in job
     assert '"posted_text": "Listed four hours ago"' in capture[0]
+    assert '"posted_at_basis": "source_relative"' in capture[0]
+
+
+def test_new_source_date_replaces_stale_not_present_value_and_preserves_it_as_evidence(
+    tmp_path, monkeypatch
+):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    first = ingest.ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="stale-date-1",
+            canonical_url="https://au.seek.com/job/94548674",
+            title="Business Analyst",
+            posted_at="2026-09-01T08:00:00Z",
+        )
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "UPDATE job_field_states SET state='not_present' WHERE job_id=? AND field_name='posted_at'",
+            (first.job_id,),
+        )
+    ingest.ingest_card(
+        CardObservation(
+            source="seek",
+            source_job_id="stale-date-1",
+            canonical_url="https://au.seek.com/job/94548674",
+            title="Business Analyst",
+            posted_at="2026-09-10T08:00:00Z",
+        )
+    )
+    with db.connect() as conn:
+        job = conn.execute(
+            "SELECT posted_at,posted_at_basis FROM jobs WHERE id=?", (first.job_id,)
+        ).fetchone()
+        capture = conn.execute(
+            "SELECT raw_json FROM card_captures WHERE job_id=? ORDER BY id DESC LIMIT 1",
+            (first.job_id,),
+        ).fetchone()[0]
+        state = conn.execute(
+            "SELECT state FROM job_field_states WHERE job_id=? AND field_name='posted_at'",
+            (first.job_id,),
+        ).fetchone()[0]
+    assert tuple(job) == ("2026-09-10T08:00:00+00:00", "source_exact")
+    assert '"previous_posted_at": "2026-09-01T08:00:00+00:00"' in capture
+    assert state == "known"
+
+
+def test_proven_search_window_stores_a_bound_when_source_has_no_date_label(
+    tmp_path, monkeypatch
+):
+    ingest = _use_tmp_db(tmp_path, monkeypatch)
+    result = ingest.ingest_card(
+        CardObservation(
+            source="linkedin",
+            source_job_id="window-bound-1",
+            canonical_url="https://www.linkedin.com/jobs/view/78",
+            title="Business Analyst",
+            posted_text="Recently posted",
+            search_window_hours=120,
+            captured_at="2026-09-22T00:00:00+00:00",
+        )
+    )
+    with db.connect() as conn:
+        job = conn.execute(
+            "SELECT posted_at,posted_at_basis FROM jobs WHERE id=?", (result.job_id,)
+        ).fetchone()
+        state = conn.execute(
+            "SELECT state FROM job_field_states WHERE job_id=? AND field_name='posted_at'",
+            (result.job_id,),
+        ).fetchone()[0]
+    assert tuple(job) == ("2026-09-17T00:00:00+00:00", "search_window_bound")
+    assert state == "known"
 
 
 def _rich_observation(*, source: str, source_job_id: str, teaser_text: str):

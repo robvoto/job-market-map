@@ -37,7 +37,7 @@ def test_v3_feed_is_cursor_paginated_and_has_contract_metadata(tmp_path, monkeyp
         assert first.status_code == 200
         payload = first.json()
         assert payload["api_version"] == "v3"
-        assert payload["schema_version"] == 10
+        assert payload["schema_version"] == 12
         assert payload["snapshot_max_id"] == 3
         assert len(payload["items"]) == 2
         assert payload["has_more"] is True
@@ -340,6 +340,267 @@ def test_search_is_bounded_and_supports_neutral_filters(tmp_path, monkeypatch):
             params={"q": 'title:"Delivery Manager" OR title:Analyst', "limit": 10},
         ).json()
         assert [item["title"] for item in expression["items"]] == ["Delivery Manager", "Analyst"]
+
+
+def test_salary_search_requires_and_respects_period_and_currency(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            rows = (
+                ("annual", "AUD", "year", 100000, 120000, "known", "range"),
+                ("hourly", "AUD", "hour", 100, 120, "known", "range"),
+                ("unknown-currency", None, "year", 100000, 120000, "known", "range"),
+                ("stale-state", "AUD", "year", 100000, 120000, "not_present", "range"),
+                ("unknown-state", "AUD", "year", 100000, 120000, "unknown", "range"),
+                ("not-applicable-state", "AUD", "year", 100000, 120000, "not_applicable", "range"),
+                ("unknown-period", "AUD", None, 100000, 120000, "known", "range"),
+                ("up-to", "AUD", "year", None, 150000, "known", "up_to"),
+                ("from", "AUD", "year", 120000, None, "known", "from"),
+            )
+            for index, (title, currency, period, minimum, maximum, field_state, bound) in enumerate(rows, start=1):
+                job_id = conn.execute(
+                    """INSERT INTO jobs(source,source_job_id,canonical_url,title,
+                               salary_normalized_state,salary_min_amount,salary_max_amount,
+                               salary_period,salary_currency,salary_bound)
+                       VALUES('seek',?,?,?,?,?,?,?,?,?)""",
+                    (str(index), f"https://seek.test/salary/{index}", title, "known", minimum, maximum, period, currency, bound),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (job_id, "salary", field_state, "2026-09-10"),
+                )
+
+        assert client.get("/v3/jobs/search", params={"salary_min": 100000}).status_code == 400
+        assert client.get(
+            "/v3/jobs/search", params={"salary_period": "year", "salary_currency": "AUD"}
+        ).status_code == 400
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": "nan", "salary_period": "year", "salary_currency": "AUD"},
+        ).status_code == 422
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 120000, "salary_max": 100000, "salary_period": "year", "salary_currency": "AUD"},
+        ).status_code == 400
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 100000, "salary_period": "fortnight", "salary_currency": "AUD"},
+        ).status_code == 400
+        assert client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 100000, "salary_period": "year", "salary_currency": "money"},
+        ).status_code == 400
+        result = client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 110000, "salary_max": 115000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
+        )
+        assert result.status_code == 200
+        assert {item["title"] for item in result.json()["items"]} == {
+            "annual", "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to",
+        }
+
+        upper_bound_only = client.get(
+            "/v3/jobs/search",
+            params={"salary_max": 105000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
+        ).json()
+        assert {item["title"] for item in upper_bound_only["items"]} == {
+            "annual", "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to",
+        }
+
+        lower_bound_only = client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 160000, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
+        ).json()
+        assert {item["title"] for item in lower_bound_only["items"]} == {
+            "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "from",
+        }
+
+        upper_bound_open = client.get(
+            "/v3/jobs/search",
+            params={"salary_max": 99999, "salary_period": "year", "salary_currency": "AUD", "limit": 10},
+        ).json()
+        assert {item["title"] for item in upper_bound_open["items"]} == {
+            "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to",
+        }
+
+        hourly_period = client.get(
+            "/v3/jobs/search",
+            params={"salary_min": 110, "salary_period": "hour", "salary_currency": "AUD", "limit": 10},
+        ).json()
+        assert {item["title"] for item in hourly_period["items"]} == {
+            "annual", "hourly", "unknown-currency", "stale-state", "unknown-state",
+            "not-applicable-state", "unknown-period", "up-to", "from",
+        }
+
+
+def test_salary_search_linked_source_does_not_hide_matching_salary_evidence(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            primary_id = conn.execute(
+                """INSERT INTO jobs(
+                       source,source_job_id,canonical_url,title
+                   ) VALUES('seek','seek-primary','https://seek.test/primary','Canonical role')"""
+            ).lastrowid
+            alias_id = conn.execute(
+                """INSERT INTO jobs(
+                       source,source_job_id,canonical_url,title,primary_job_id,geography_code,location,
+                       salary_normalized_state,salary_min_amount,salary_max_amount,
+                       salary_period,salary_currency,salary_bound
+                   ) VALUES('apsjobs','aps-alias','https://aps.test/alias','APS role',?,'NSW','Canberra ACT',
+                            'known',100000,120000,'year','AUD','range')""",
+                (primary_id,),
+            ).lastrowid
+            for job_id in (primary_id, alias_id):
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+            conn.execute(
+                "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                (alias_id, "salary", "known", "2026-09-10"),
+            )
+            for field_name in ("geography_code", "location"):
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (alias_id, field_name, "known", "2026-09-10"),
+                )
+
+        response = client.get(
+            "/v3/jobs/search",
+            params={
+                "salary_min": 110000,
+                "salary_period": "year",
+                "salary_currency": "AUD",
+                "q": 'title:"APS role"',
+                "source": "apsjobs",
+                "geography_code": "NSW",
+                "location": "Canberra",
+            },
+        )
+
+        assert response.status_code == 200
+        payload = response.json()
+        assert [item["id"] for item in payload["items"]] == [primary_id]
+        assert payload["items"][0]["salary_normalized"]["state"] == "unknown"
+        matched = payload["items"][0]["matched_sources"]
+        assert matched[0]["id"] == alias_id
+        assert matched[0]["source"] == "apsjobs"
+        assert matched[0]["salary_normalized"] == {
+            "state": "known", "min_amount": 100000.0, "max_amount": 120000.0,
+            "period": "year", "currency": "AUD", "qualifier": None,
+            "bound": "range",
+        }
+        assert matched[0]["salary_field_state"] == "known"
+        assert matched[0]["salary_match_basis"] == "comparable_overlap"
+
+
+def test_salary_search_pagination_keeps_snapshot_and_filter(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            for index in range(1, 4):
+                job_id = conn.execute(
+                    """INSERT INTO jobs(
+                           source,source_job_id,canonical_url,title,
+                           salary_normalized_state,salary_min_amount,salary_max_amount,
+                           salary_period,salary_currency,salary_bound
+                       ) VALUES('seek',?,?,?,?,?,?,?,?,?)""",
+                    (str(index), f"https://seek.test/{index}", f"Salary role {index}",
+                     "known", 100000, 120000, "year", "AUD", "range"),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (job_id, "salary", "known", "2026-09-10"),
+                )
+
+        params = {"salary_min": 110000, "salary_period": "year", "salary_currency": "AUD", "limit": 2}
+        first = client.get("/v3/jobs/search", params=params).json()
+        assert first["total"] == 3
+        assert first["has_more"] is True
+        assert [item["title"] for item in first["items"]] == ["Salary role 1", "Salary role 2"]
+        assert all(item["matched_sources"] for item in first["items"])
+
+        second = client.get(
+            "/v3/jobs/search",
+            params={**params, "after_id": first["next_cursor"], "through_id": first["snapshot_max_id"]},
+        ).json()
+        assert second["total"] == 3
+        assert second["has_more"] is False
+        assert [item["title"] for item in second["items"]] == ["Salary role 3"]
+
+
+def test_search_posted_after_parses_iso_dates_and_honours_field_states(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            rows = (
+                ("date-only", "2026-09-21", "known"),
+                ("offset-before", "2026-09-21T09:30:00+10:00", "known"),
+                ("offset-after", "2026-09-21T00:30:00+00:00", "known"),
+                ("stale-state", "2026-09-22T00:00:00+00:00", "not_present"),
+                ("unknown-state", "2026-09-22T00:00:00+00:00", "unknown"),
+            )
+            for index, (title, posted_at, field_state) in enumerate(rows, start=1):
+                job_id = conn.execute(
+                    "INSERT INTO jobs(source,source_job_id,canonical_url,title,posted_at) VALUES('seek',?,?,?,?)",
+                    (str(index), f"https://seek.test/date/{index}", title, posted_at),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (job_id, "posted_at", field_state, "2026-09-10"),
+                )
+
+        assert client.get("/v3/jobs/search", params={"posted_after": "yesterday"}).status_code == 400
+        assert client.get("/v3/jobs/search", params={"posted_after": "2026-02-30"}).status_code == 400
+        payload = client.get(
+            "/v3/jobs/search", params={"posted_after": "2026-09-21T00:00:00+00:00", "limit": 10}
+        ).json()
+        assert [item["title"] for item in payload["items"]] == ["date-only", "offset-after"]
+
+
+def test_search_rejects_oversized_repeated_filters_before_query(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        response = client.get("/v3/jobs/search", params=[("location", f"location-{i}") for i in range(1200)])
+        assert response.status_code == 400
+
+
+def test_search_geography_filter_preserves_unknown_states_but_not_stale_values(tmp_path, monkeypatch):
+    with client_for_tmp_db(tmp_path, monkeypatch) as client:
+        with db.connect() as conn:
+            rows = (
+                ("known-match", "NSW", "known"),
+                ("unknown", "ACT", "unknown"),
+                ("not-applicable", None, "not_applicable"),
+                ("stale", "NSW", "not_present"),
+            )
+            for index, (title, geography, state) in enumerate(rows, start=1):
+                job_id = conn.execute(
+                    "INSERT INTO jobs(source,source_job_id,canonical_url,title,geography_code) VALUES('seek',?,?,?,?)",
+                    (str(index), f"https://seek.test/geo/{index}", title, geography),
+                ).lastrowid
+                conn.execute(
+                    "INSERT INTO job_observation_state(job_id,first_seen_at,last_seen_at,archived) VALUES(?,?,?,0)",
+                    (job_id, "2026-09-10", "2026-09-10"),
+                )
+                conn.execute(
+                    "INSERT INTO job_field_states(job_id,field_name,state,checked_at) VALUES(?,?,?,?)",
+                    (job_id, "geography_code", state, "2026-09-10"),
+                )
+        payload = client.get("/v3/jobs/search", params={"geography_code": "NSW", "limit": 10}).json()
+        assert [item["title"] for item in payload["items"]] == ["known-match", "unknown", "not-applicable"]
 
 
 def test_field_scoped_q_preserves_unknown_and_not_applicable_source_rows(tmp_path, monkeypatch):

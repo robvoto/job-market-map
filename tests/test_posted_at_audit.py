@@ -18,7 +18,7 @@ def _job(*, source: str, source_job_id: str, posted_at: str | None = None) -> No
     )
 
 
-def test_audit_separates_exact_dates_from_unsupported_or_retryable_rows(
+def test_audit_separates_date_bases_from_unsupported_or_retryable_rows(
     tmp_path, monkeypatch
 ):
     monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
@@ -43,10 +43,11 @@ def test_audit_separates_exact_dates_from_unsupported_or_retryable_rows(
 
     audits = {audit.source: audit for audit in audit_posted_at_completeness()}
     assert audits["seek"].with_posted_at == 1
+    assert audits["seek"].source_exact == 1
     assert audits["seek"].missing_posted_at == 1
     assert audits["seek"].retryable_repair_candidates == 0
     assert audits["seek"].missing_without_supported_repair_path == 1
     assert audits["linkedin"].retryable_repair_candidates == 1
-    assert audits["linkedin"].attempted_without_exact_date == 1
+    assert audits["linkedin"].attempted_without_usable_date == 1
     assert audits["linkedin"].missing_without_supported_repair_path == 1
     assert audits["apsjobs"].missing_without_supported_repair_path == 1

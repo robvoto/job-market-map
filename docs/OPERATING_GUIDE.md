@@ -10,10 +10,9 @@ stay missing rather than being recovered from a KEEP snapshot or arbitrary histo
 Direct history-record identity/title/company/URL values are eligible. Validated source-backed
 `detail_evidence` may also contribute the exact source JD and structured neutral detail facts when its
 source/job identity, canonical URL, provenance and fetch timestamp all match. For SEEK this includes
-exact `listedAt.dateTimeUtc` as `posted_at`, plus source-exposed location, salary, employment type,
-work arrangement, classification/subclassification, expiry/status and apply method. Relative labels
-such as `3h ago` are never promoted into the canonical job row. Existing non-empty JMM market evidence
-wins over bootstrap values.
+exact `listedAt.dateTimeUtc`, or a supported relative label converted using its source capture time,
+plus source-exposed location, salary, employment type, work arrangement, classification/subclassification,
+expiry/status and apply method. Existing non-empty JMM market evidence wins over bootstrap values.
 
 First run the mandatory dry-run:
 
@@ -51,20 +50,37 @@ uv run python scripts/audit_posted_at.py
 Use `--db /path/to/market.db` when auditing a separate live runtime database
 from an isolated worktree.
 
-The report separates exact `jobs.posted_at` values, bounded LinkedIn repair
-candidates, and missing rows with no supported repair path. It does not infer
-dates from relative labels, `first_seen_at`, `last_seen_at`, or Job Hunter
-timestamps. Historical repair is source-specific and bounded:
+The report separates posting-date bases, SEEK rows recoverable from retained
+`captured_at + posted_text` evidence, LinkedIn rows eligible for source recheck,
+and rows with no current repair evidence. It does not infer dates from
+`first_seen_at`, `last_seen_at`, or Job Hunter timestamps. Preview SEEK
+backfill without changing job rows:
 
 ```bash
-uv run python scripts/repair_posted_at.py --source linkedin --limit 100
+uv run python scripts/backfill_posting_dates.py --source seek
 ```
 
-Pass the same explicit `--db` path when the repair is intentionally approved
-against a separate runtime database.
+Apply SEEK evidence backfill after reviewing the preview; the script creates a
+verified SQLite backup first:
 
-This repair command is idempotent and records an explicit unavailable/closed
-outcome. Do not run it as part of normal collection or while another collection
+```bash
+uv run python scripts/backfill_posting_dates.py --source seek --apply
+```
+
+LinkedIn historical dates require current source rechecks because older capture
+rows did not retain relative labels or their query window. Rechecks are bounded
+and require explicit apply:
+
+```bash
+uv run python scripts/backfill_posting_dates.py --source linkedin --limit 100
+uv run python scripts/backfill_posting_dates.py --source linkedin --limit 100 --apply
+```
+
+Use the same explicit `--db /path/to/market.db` for a separate database. The
+exact-only SEEK pagination cutoff remains independent from stored derived dates.
+
+LinkedIn rechecks are idempotent and record an explicit unavailable/closed
+outcome. Do not run them as part of normal collection or while another collection
 stage is using the same runtime database.
 
 Build the broadest useful **neutral** local map of jobs discoverable through the sources and query combinations we choose, then incrementally add new cards each day.

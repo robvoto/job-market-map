@@ -150,6 +150,7 @@ class LinkedInDetailEvidence:
             facts["source_status"] = self.source_status
         if self.posted_at:
             facts["posted_at"] = self.posted_at
+            facts["posted_at_basis"] = "source_exact"
         return {key: value for key, value in facts.items() if value is not None}
 
 

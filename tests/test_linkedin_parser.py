@@ -53,6 +53,28 @@ def test_jobspy_row_maps_only_neutral_discovery_fields():
     assert observation.card_tags is None
 
 
+def test_jobspy_relative_posting_evidence_and_window_are_retained():
+    row = {
+        "id": "li-4464190406",
+        "title": "Business Analyst",
+        "job_url": "https://www.linkedin.com/jobs/view/4464190406",
+        "posted_text": "2 hours ago",
+        "date_posted": None,
+    }
+    observation = observation_from_jobspy_row(
+        row,
+        query_text="",
+        query_location="NSW",
+        geography_code="NSW",
+        rank=1,
+        offset=0,
+        page_size=10,
+        search_window_hours=5,
+    )
+    assert observation.posted_text == "2 hours ago"
+    assert observation.search_window_hours == 5
+
+
 def test_linkedin_explicit_card_location_overrides_search_geography():
     assert linkedin_geography_code("Brisbane, Queensland, Australia", "NSW") == "QLD"
     assert linkedin_geography_code("Canberra, ACT, Australia", "NSW") == "ACT"

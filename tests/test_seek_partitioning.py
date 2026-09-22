@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 
 from collector.models import CardObservation
 from sources.seek import seek_refinement_links, seek_result_count
-from sources.seek_market_map import _page_url, state_url
+from sources.seek_market_map import _known_seek_card_changed, _page_url, state_url
 
 
 def test_incremental_page_cutoff_requires_exact_ordered_seek_dates():
@@ -53,6 +53,29 @@ def test_incremental_page_cutoff_requires_exact_ordered_seek_dates():
         cutoff,
         previous_oldest_at=datetime(2026, 9, 11, 8, 0, tzinfo=UTC),
     ) == (next_page_newer_than_prior_oldest, False, None)
+
+
+def test_known_seek_row_is_reingested_only_to_repair_or_upgrade_date_evidence():
+    card = CardObservation(
+        source="seek",
+        source_job_id="known-date",
+        canonical_url="https://au.seek.com/job/94548676",
+        title="Role",
+        posted_text="Listed two hours ago",
+        search_window_hours=24,
+    )
+    assert _known_seek_card_changed({"posted_at": None}, card)
+    assert _known_seek_card_changed(
+        {"posted_at": "2026-09-01", "posted_at_state": "not_present"}, card
+    )
+    assert not _known_seek_card_changed(
+        {
+            "title": "Role",
+            "posted_at": "2026-09-20T00:00:00Z",
+            "posted_at_basis": "source_exact",
+        },
+        card,
+    )
 
 
 def test_seek_result_count_parses_whole_state_and_classification():

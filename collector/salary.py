@@ -4,11 +4,13 @@ from __future__ import annotations
 
 import re
 import sqlite3
+from collections import Counter
 from dataclasses import dataclass
 from decimal import Decimal, InvalidOperation
+from urllib.parse import urlparse
 
 _NUMBER = r"(?:\d{1,3}(?:,\d{3})+(?:\.\d+)?|\d+(?:\.\d+)?)"
-_AMOUNT = rf"(?<![\w.])(?:\$\s*)?({_NUMBER})(?:\s*([kKmM]))?(?![\w%])"
+_AMOUNT = rf"(?<![\w.])(?:\$\s*)?({_NUMBER})(?:\s*([kKmM]))?(?![\w.%])"
 _AMOUNT_RE = re.compile(_AMOUNT)
 _RANGE_RE = re.compile(
     rf"(?P<low>{_AMOUNT})\s*(?:-|–|to)\s*(?P<high>{_AMOUNT})",
@@ -17,7 +19,7 @@ _RANGE_RE = re.compile(
 _SINGLE_RE = re.compile(rf"(?P<amount>{_AMOUNT})", re.IGNORECASE)
 _CURRENCY_RE = re.compile(r"\b(AUD|NZD|USD|GBP|EUR)\b", re.IGNORECASE)
 _UPPER_BOUND_RE = re.compile(
-    r"\b(?:up\s+to|to|maximum|max(?:imum)?\s+of)\b", re.IGNORECASE
+    r"\b(?:up\s*to|to|maximum|max(?:imum)?\s+of)\b", re.IGNORECASE
 )
 _LOWER_BOUND_RE = re.compile(
     r"\b(?:from|starting\s+(?:at|from)|minimum|min(?:imum)?\s+of)\b",
@@ -26,7 +28,7 @@ _LOWER_BOUND_RE = re.compile(
 _PERIOD_PATTERNS = (
     (
         "hour",
-        r"(?:\bp\.?\s*h\.?(?=\W|$)|\bhourly\b|\bper\s+hour\b|/\s*(?:hour|hr)\b|\bhr\b)",
+        r"(?:\bp\s*/\s*h\.?(?=\W|$)|\bp\.?\s*h\.?(?=\W|$)|\bhourly\b|\bper\s+hour\b|/\s*(?:hour|hr)\b|\bhr\b)",
     ),
     (
         "day",
@@ -73,6 +75,7 @@ _ALLOWED_CONTEXT_WORDS = {
     "hr",
     "includes",
     "inclusive",
+    "inc",
     "incl",
     "m",
     "max",
@@ -122,6 +125,7 @@ class SalaryNormalization:
     period: str | None = None
     currency: str | None = None
     qualifier: str | None = None
+    bound: str | None = None
 
     def as_dict(self) -> dict[str, object | None]:
         return {
@@ -131,6 +135,7 @@ class SalaryNormalization:
             "period": self.period,
             "currency": self.currency,
             "qualifier": self.qualifier,
+            "bound": self.bound,
         }
 
 
@@ -161,7 +166,10 @@ def _period(text: str) -> str | None:
 
 def _qualifier(text: str) -> str | None:
     lower = text.casefold()
-    if re.search(r"\binclusive\s+of\s+super\b|\binc(?:lusive)?\s+super\b", lower):
+    if re.search(
+        r"\binclusive\s+of\s+super\b|\binc\.?\s+super\b|\bincl\.?\s+super\b",
+        lower,
+    ):
         return "includes_super"
     if re.search(
         r"(?:\+|\bplus\b)\s*(?:(?:up\s+to\s+)?\d+(?:\.\d+)?\s*%\s*)?super(?:annuation)?\b",
@@ -190,10 +198,45 @@ def _supported_context(text: str) -> bool:
     return all(word in _ALLOWED_CONTEXT_WORDS for word in words)
 
 
-def normalize_salary(text: str | None) -> SalaryNormalization:
+def _context_currency(
+    *, source: str | None, canonical_url: str | None, geography_code: str | None
+) -> str | None:
+    """Infer AUD only when the canonical Australian SEEK host proves it."""
+    source_name = str(source or "").strip().casefold()
+    host = (urlparse(str(canonical_url or "")).hostname or "").casefold()
+    australian_seek_host = host in {"au.seek.com", "seek.com.au"} or host.endswith(
+        (".au.seek.com", ".seek.com.au")
+    )
+    if source_name == "seek" and australian_seek_host:
+        return "AUD"
+    return None
+
+
+_PLAUSIBLE_RANGES = {
+    # Intentionally wide hard bounds catch unit/suffix corruption without
+    # trying to decide whether an otherwise valid salary is attractive.
+    "hour": (1, 5_000),
+    "day": (10, 50_000),
+    "week": (25, 250_000),
+    "month": (100, 1_000_000),
+    "year": (1_000, 10_000_000),
+}
+
+
+def normalize_salary(
+    text: str | None,
+    *,
+    field_state: str | None = None,
+    default_currency: str | None = None,
+) -> SalaryNormalization:
     """Normalize only mechanically provable salary expressions; otherwise unknown."""
+    state = str(field_state or "").strip().casefold()
+    if state in {"unknown", "not_present", "not_applicable"}:
+        return SalaryNormalization(state)
     if text is None or not str(text).strip():
-        return SalaryNormalization("not_present")
+        # A blank observation does not prove that the source checked and found
+        # no salary. Only an explicit field state can establish not_present.
+        return SalaryNormalization("unknown")
     raw = " ".join(str(text).split()).strip()
     if raw.casefold() in {
         "n/a",
@@ -215,19 +258,23 @@ def normalize_salary(text: str | None) -> SalaryNormalization:
 
     amount_matches = list(_AMOUNT_RE.finditer(raw))
     match = _RANGE_RE.search(raw)
+    bound: str
     try:
         if match:
             if len(amount_matches) != 2:
                 return SalaryNormalization("unknown")
             low_suffix = match.group(3)
             high_suffix = match.group(6)
-            if bool(low_suffix) != bool(high_suffix):
-                shared_suffix = low_suffix or high_suffix
-                low_suffix = high_suffix = shared_suffix
+            # The high endpoint's suffix commonly applies to both (100-120k).
+            # A low-only suffix does not: "1k - 1100 p.d." means 1,000 to
+            # 1,100 per day.
+            if high_suffix and not low_suffix:
+                low_suffix = high_suffix
             low = _number(match.group(2), low_suffix)
             high = _number(match.group(5), high_suffix)
             if low > high:
                 return SalaryNormalization("unknown")
+            bound = "range"
         else:
             if len(amount_matches) != 1:
                 return SalaryNormalization("unknown")
@@ -242,41 +289,52 @@ def normalize_salary(text: str | None) -> SalaryNormalization:
                 return SalaryNormalization("unknown")
             low = None if has_upper_bound else amount
             high = None if has_lower_bound else amount
+            bound = "up_to" if has_upper_bound else "from" if has_lower_bound else "exact"
     except ValueError:
         return SalaryNormalization("unknown")
 
+    period = _period(raw)
+    if period is not None:
+        floor, ceiling = _PLAUSIBLE_RANGES[period]
+        values = [amount for amount in (low, high) if amount is not None]
+        if any(amount < floor or amount > ceiling for amount in values):
+            return SalaryNormalization("unknown")
     currency = _CURRENCY_RE.search(raw)
     return SalaryNormalization(
         "known",
         low,
         high,
-        _period(raw),
-        currency.group(1).upper() if currency else None,
+        period,
+        currency.group(1).upper() if currency else default_currency,
         _qualifier(raw),
+        bound,
     )
 
 
 def backfill_salary_normalization(conn: sqlite3.Connection) -> None:
     """Normalize existing raw salary evidence once, without changing raw text/state."""
     rows = conn.execute(
-        """SELECT j.id, j.salary_text, s.state AS field_state
+        """SELECT j.id, j.salary_text, j.source, j.canonical_url,
+                  j.geography_code, s.state AS field_state
              FROM jobs j
              LEFT JOIN job_field_states s
                ON s.job_id=j.id AND s.field_name='salary'
             WHERE j.salary_normalized_state IS NULL"""
     ).fetchall()
     for row in rows:
-        value = normalize_salary(row["salary_text"])
-        if value.state == "not_present" and row["field_state"] in {
-            "unknown",
-            "not_present",
-            "not_applicable",
-        }:
-            value = SalaryNormalization(row["field_state"])
+        value = normalize_salary(
+            row["salary_text"],
+            field_state=row["field_state"],
+            default_currency=_context_currency(
+                source=row["source"],
+                canonical_url=row["canonical_url"],
+                geography_code=row["geography_code"],
+            ),
+        )
         conn.execute(
             """UPDATE jobs SET salary_normalized_state=?, salary_min_amount=?,
                       salary_max_amount=?, salary_period=?, salary_currency=?,
-                      salary_qualifier=? WHERE id=?""",
+                      salary_qualifier=?, salary_bound=? WHERE id=?""",
             (
                 value.state,
                 value.minimum,
@@ -284,19 +342,35 @@ def backfill_salary_normalization(conn: sqlite3.Connection) -> None:
                 value.period,
                 value.currency,
                 value.qualifier,
+                value.bound,
                 int(row["id"]),
             ),
         )
 
 
 def store_salary_normalization(
-    conn: sqlite3.Connection, job_id: int, text: str | None
+    conn: sqlite3.Connection,
+    job_id: int,
+    text: str | None,
+    *,
+    source: str | None = None,
+    canonical_url: str | None = None,
+    geography_code: str | None = None,
+    field_state: str | None = None,
 ) -> SalaryNormalization:
-    value = normalize_salary(text)
+    value = normalize_salary(
+        text,
+        field_state=field_state,
+        default_currency=_context_currency(
+            source=source,
+            canonical_url=canonical_url,
+            geography_code=geography_code,
+        ),
+    )
     conn.execute(
         """UPDATE jobs SET salary_normalized_state=?, salary_min_amount=?,
                   salary_max_amount=?, salary_period=?, salary_currency=?,
-                  salary_qualifier=? WHERE id=?""",
+                  salary_qualifier=?, salary_bound=? WHERE id=?""",
         (
             value.state,
             value.minimum,
@@ -304,7 +378,92 @@ def store_salary_normalization(
             value.period,
             value.currency,
             value.qualifier,
+            value.bound,
             int(job_id),
         ),
     )
     return value
+
+
+def renormalize_salary_rows(
+    conn: sqlite3.Connection, *, apply: bool = False
+) -> dict[str, object]:
+    """Recompute every normalized salary field from raw text and source state.
+
+    This is deliberately separate from startup migration: callers can preview
+    all changes, take a verified backup, then apply once while collection is
+    quiescent. Raw ``salary_text`` and ``field_states`` are never rewritten.
+    """
+    columns = {row[1] for row in conn.execute("PRAGMA table_info(jobs)")}
+    has_bound = "salary_bound" in columns
+    rows = conn.execute(
+        """SELECT j.id,j.source,j.canonical_url,j.geography_code,j.salary_text,
+                  j.salary_normalized_state,j.salary_min_amount,j.salary_max_amount,
+                  j.salary_period,j.salary_currency,j.salary_qualifier,j.salary_bound,
+                  s.state AS field_state
+             FROM jobs j LEFT JOIN job_field_states s
+               ON s.job_id=j.id AND s.field_name='salary'
+            ORDER BY j.id"""
+    ).fetchall()
+    before = Counter(str(row["salary_normalized_state"] or "<null>") for row in rows)
+    after: Counter[str] = Counter()
+    changes = 0
+    missing_period = 0
+    missing_currency = 0
+    missing_both = 0
+    for row in rows:
+        value = normalize_salary(
+            row["salary_text"],
+            field_state=row["field_state"],
+            default_currency=_context_currency(
+                source=row["source"],
+                canonical_url=row["canonical_url"],
+                geography_code=row["geography_code"],
+            ),
+        )
+        after[value.state] += 1
+        if value.state == "known":
+            missing_period += value.period is None
+            missing_currency += value.currency is None
+            missing_both += value.period is None and value.currency is None
+        old = (
+            row["salary_normalized_state"], row["salary_min_amount"],
+            row["salary_max_amount"], row["salary_period"],
+            row["salary_currency"], row["salary_qualifier"],
+            row["salary_bound"] if has_bound else None,
+        )
+        new = (
+            value.state, value.minimum, value.maximum, value.period,
+            value.currency, value.qualifier, value.bound,
+        )
+        if old != new:
+            changes += 1
+            if apply:
+                conn.execute(
+                    """UPDATE jobs SET salary_normalized_state=?,salary_min_amount=?,
+                              salary_max_amount=?,salary_period=?,salary_currency=?,
+                              salary_qualifier=?,salary_bound=? WHERE id=?""",
+                    (*new, int(row["id"])),
+                )
+    if apply:
+        persisted = Counter(
+            str(row[0] or "<null>")
+            for row in conn.execute(
+                "SELECT salary_normalized_state FROM jobs"
+            ).fetchall()
+        )
+        if persisted != after:
+            raise RuntimeError(
+                "persisted salary state counts differ from computed normalization"
+            )
+    return {
+        "jobs_scanned": len(rows),
+        "changed_rows": changes,
+        "before_by_state": dict(sorted(before.items())),
+        "after_by_state": dict(sorted(after.items())),
+        "known_missing_period": missing_period,
+        "known_missing_currency": missing_currency,
+        "known_missing_both": missing_both,
+        "missing_period_reason": "raw salary evidence contains no single supported period marker",
+        "missing_currency_reason": "no explicit currency code and canonical source context does not prove AUD",
+    }

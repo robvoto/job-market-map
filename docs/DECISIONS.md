@@ -54,7 +54,11 @@
 **Reason:** JMM is the single owner of neutral market evidence. A simple write-once JD avoids duplicate raw JD truth in consumers without introducing history machinery that is not required.
 
 ## ADR-011 — Canonical job rows contain source facts, not collector calculations
-**Decision:** Keep source-vacancy truth on `jobs`. Store collector lifecycle (`first_seen_at`, `last_seen_at`, `capture_count`, `archived`, `compacted_at`) separately in `job_observation_state`. Do not keep relative posting labels such as `3h ago` on the master row and do not derive `posted_at` from them. `jobs.posted_at` is populated only from an exact source timestamp when available.
+**Decision (superseded by posting-freshness evidence rules):** Keep source-vacancy truth on `jobs`. Store collector lifecycle (`first_seen_at`, `last_seen_at`, `capture_count`, `archived`, `compacted_at`) separately in `job_observation_state`. The earlier exact-only policy for `posted_at` was replaced because it discarded usable freshness evidence. Current date handling is defined in the posting-date decision below.
+
+### Posting freshness evidence
+
+**Decision:** Store the best deterministic freshness evidence for every source posting. Prefer exact source dates/times; otherwise convert supported relative labels using the card's `captured_at`; if neither is available, use only an explicit source-query freshness boundary. `jobs.posted_at_basis` distinguishes exact source values, relative conversions and conservative search-window bounds. Preserve original text and query-window evidence in `card_captures.raw_json`. A window bound is not an exact posting instant. SEEK incremental pagination stopping remains exact-timestamp-only and never consumes derived dates. Historical SEEK dates may be recovered from capture time plus retained relative text; LinkedIn rows without retained labels/window evidence require a bounded source recheck. Unknown is used only when no usable evidence exists.
 
 When JMM deliberately opens a source detail page for JD enrichment, that same trusted detail capture may fill other missing neutral source facts such as location, salary, employment/workplace type, source status/expiry, apply method and classification. Missing facts remain missing; existing better JMM evidence is not overwritten.
 

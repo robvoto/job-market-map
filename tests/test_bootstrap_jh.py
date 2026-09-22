@@ -228,7 +228,7 @@ def test_source_backed_seek_detail_imports_exact_market_facts(tmp_path, monkeypa
 
     with db.connect() as conn:
         job = dict(conn.execute("SELECT * FROM jobs").fetchone())
-    assert job["posted_at"] == "2026-09-08T03:14:15.123Z"
+    assert job["posted_at"] == "2026-09-08T03:14:15.123000+00:00"
     assert job["employment_type"] == "Contract/Temp"
     assert job["workplace_type"] == "Hybrid"
     assert job["location"] == "Sydney NSW"
