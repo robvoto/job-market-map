@@ -26,6 +26,11 @@ def _jd_coverage(*, recent_only: bool = False) -> dict[str, int]:
                   JOIN job_observation_state s ON s.job_id=j.id
                  WHERE COALESCE(s.archived, 0)=0
                    AND {active_sql}
+                   AND (:recent_only = 0 OR (
+                           j.source = 'seek'
+                       AND j.posted_at IS NOT NULL
+                       AND julianday(j.posted_at) >= julianday('now', '-3 days')
+                   ))
             ),
             failed_primary AS (
                 SELECT DISTINCT COALESCE(j.primary_job_id, j.id) AS primary_id
@@ -53,11 +58,6 @@ def _jd_coverage(*, recent_only: bool = False) -> dict[str, int]:
               FROM active_primary a
               JOIN jobs p ON p.id=a.primary_id
               LEFT JOIN failed_primary f ON f.primary_id=a.primary_id
-             WHERE (:recent_only = 0 OR (
-                       p.source = 'seek'
-                   AND p.posted_at IS NOT NULL
-                   AND julianday(p.posted_at) >= julianday('now', '-3 days')
-             ))
             """,
             {"recent_only": int(recent_only)},
         ).fetchone()
