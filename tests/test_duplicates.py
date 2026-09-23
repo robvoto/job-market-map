@@ -299,6 +299,46 @@ def test_same_vacancy_accepts_cross_source_specific_locality_without_rich_fields
     assert "same specific locality coffs harbour" in reasons
 
 
+def test_same_vacancy_accepts_canberra_suburb_and_metro_labels_without_dates():
+    """LinkedIn may say Deakin while SEEK says Canberra for the same vacancy."""
+    a = base_row(
+        id=1,
+        source="linkedin",
+        location="Deakin, Australian Capital Territory, Australia",
+        teaser_text=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        posted_at="2026-09-19",
+    )
+    b = base_row(
+        id=2,
+        source="seek",
+        location="Canberra ACT",
+        teaser_text=None,
+        salary_text=None,
+        employment_type=None,
+        workplace_type=None,
+        classification_text=None,
+        subclassification_text=None,
+        posted_at="2026-09-17T05:09:37.000Z",
+    )
+    evidence = same_vacancy_evidence(
+        a,
+        b,
+        teaser_min_similarity=0.90,
+        teaser_min_chars=40,
+        min_secondary_signals=2,
+    )
+    assert evidence is not None
+    confidence, match_type, reasons = evidence
+    assert confidence == 0.96
+    assert match_type == "cross_source_locality"
+    assert "same metro region canberra" in reasons
+
+
 def test_same_vacancy_does_not_treat_state_only_location_as_specific_locality():
     a = base_row(
         id=1,

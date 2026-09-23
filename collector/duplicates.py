@@ -31,6 +31,14 @@ LOCATION_STATE_SUFFIXES = (
     " qld",
     " act",
 )
+# Some boards publish an Australian Capital Territory suburb while another uses
+# the Canberra metro label. Treat those as the same region for cross-board
+# duplicate checks; do not generalise this to every suburb in a state.
+LOCATION_REGION_ALIASES = {
+    "australian capital territory": "canberra",
+    "act": "canberra",
+    "canberra": "canberra",
+}
 
 
 def normalize(value: Any) -> str:
@@ -122,6 +130,28 @@ def specific_locality(value: Any) -> str:
     return locality
 
 
+def location_region(value: Any) -> str:
+    """Return a conservative metro/region key when the source names one."""
+    if value is None:
+        return ""
+    text = normalize(value)
+    for alias, region in LOCATION_REGION_ALIASES.items():
+        if alias in text:
+            return region
+    return ""
+
+
+def _locations_conflict(a: Any, b: Any) -> bool:
+    """Reject only a proven location conflict, not suburb-versus-metro wording."""
+    locality_a = specific_locality(a)
+    locality_b = specific_locality(b)
+    if not locality_a or not locality_b or locality_a == locality_b:
+        return False
+    region_a = location_region(a)
+    region_b = location_region(b)
+    return not (region_a and region_a == region_b)
+
+
 def _teaser_similarity(a: Any, b: Any, *, min_chars: int = 25) -> float | None:
     left, right = normalize(a), normalize(b)
     if len(left) < min_chars or len(right) < min_chars:
@@ -211,7 +241,7 @@ def same_vacancy_evidence(
 
     locality_a = specific_locality(a.get("location"))
     locality_b = specific_locality(b.get("location"))
-    if locality_a and locality_b and locality_a != locality_b:
+    if _locations_conflict(a.get("location"), b.get("location")):
         return None
 
     teaser_similarity = _teaser_similarity(
@@ -226,11 +256,25 @@ def same_vacancy_evidence(
 
     source_a = normalize(a.get("source"))
     source_b = normalize(b.get("source"))
-    if source_a and source_b and source_a != source_b and locality_a and locality_a == locality_b:
+    region_a = location_region(a.get("location"))
+    region_b = location_region(b.get("location"))
+    same_location_region = region_a and region_a == region_b
+    if (
+        source_a
+        and source_b
+        and source_a != source_b
+        and locality_a
+        and (locality_a == locality_b or same_location_region)
+    ):
+        location_reason = (
+            f"same specific locality {locality_a}"
+            if locality_a == locality_b
+            else f"same metro region {region_a}"
+        )
         return (
             0.96,
             "cross_source_locality",
-            reasons + [f"same specific locality {locality_a}"],
+            reasons + [location_reason],
         )
 
     secondary_signals = _secondary_signals(a, b)
