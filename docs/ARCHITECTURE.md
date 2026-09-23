@@ -44,7 +44,7 @@ Other sources --------------------------------------/                 |
                      policy                      policy                            policy
 ```
 
-A source collector may capture a validated JD/detail response during collection, and a consumer may request a missing JD on demand through JMM-003. In both cases the neutral JD belongs in JMM and is reused from there rather than permanently duplicated by the consumer.
+A source collector may capture or enrich a validated JD/detail response inside JMM. Downstream consumers reuse the neutral JD from JMM rather than permanently duplicating it. Job Hunter specifically uses the cached-only `GET /v3/jobs/{id}/jd` path: a 409 is a per-job cache miss and must not trigger consumer-side enrichment or source scraping. JMM also exposes read-only `/v3/readiness` facts so consumers can distinguish cache coverage from degraded source collection.
 
 ## Why SQLite
 
