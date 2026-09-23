@@ -136,7 +136,7 @@ def location_region(value: Any) -> str:
         return ""
     text = normalize(value)
     for alias, region in LOCATION_REGION_ALIASES.items():
-        if alias in text:
+        if re.search(rf"\b{re.escape(alias)}\b", text):
             return region
     return ""
 
@@ -295,27 +295,40 @@ def _cross_source_locality_is_reciprocally_unique(
     current_source = str(current.get("source") or "")
     candidate_source = str(candidate.get("source") or "")
     locality = specific_locality(current.get("location"))
+    region = location_region(current.get("location"))
+    candidate_locality = specific_locality(candidate.get("location"))
+    candidate_region = location_region(candidate.get("location"))
     if (
         not core
         or not locality
         or not current_source
         or not candidate_source
         or current_source == candidate_source
-        or locality != specific_locality(candidate.get("location"))
+        or not (
+            locality == candidate_locality
+            or (region and region == candidate_region)
+        )
     ):
         return False
     rows = conn.execute(
         "SELECT id, source, location FROM jobs WHERE core_fingerprint=? AND source IN (?, ?)",
         (core, current_source, candidate_source),
     ).fetchall()
-    by_source = {current_source: [], candidate_source: []}
+    by_source = {current_source: set(), candidate_source: set()}
     for row in rows:
         source = str(row["source"] or "")
-        if source in by_source and specific_locality(row["location"]) == locality:
-            by_source[source].append(int(row["id"]))
+        row_locality = specific_locality(row["location"])
+        row_region = location_region(row["location"])
+        if source in by_source and (
+            row_locality == locality or (region and row_region == region)
+        ):
+            # Multiple captures of one source posting may already share a
+            # primary. Count vacancy groups, not raw source rows.
+            by_source[source].add(resolve_primary_job_id(conn, int(row["id"])))
     return (
-        by_source[current_source] == [int(current["id"])]
-        and by_source[candidate_source] == [int(candidate["id"])]
+        by_source[current_source] == {resolve_primary_job_id(conn, int(current["id"]))}
+        and by_source[candidate_source]
+        == {resolve_primary_job_id(conn, int(candidate["id"]))}
     )
 
 
@@ -333,12 +346,26 @@ def _group_specific_localities(conn, job_id: int) -> set[str]:
 
 
 def _groups_have_conflicting_localities(conn, job_id: int, candidate_id: int) -> bool:
-    current_localities = _group_specific_localities(conn, job_id)
-    candidate_localities = _group_specific_localities(conn, candidate_id)
-    return bool(
-        current_localities
-        and candidate_localities
-        and current_localities != candidate_localities
+    primary_id = resolve_primary_job_id(conn, job_id)
+    candidate_primary_id = resolve_primary_job_id(conn, candidate_id)
+    current_locations = [
+        row["location"]
+        for row in conn.execute(
+            "SELECT location FROM jobs WHERE id=? OR primary_job_id=?",
+            (primary_id, primary_id),
+        ).fetchall()
+    ]
+    candidate_locations = [
+        row["location"]
+        for row in conn.execute(
+            "SELECT location FROM jobs WHERE id=? OR primary_job_id=?",
+            (candidate_primary_id, candidate_primary_id),
+        ).fetchall()
+    ]
+    return any(
+        _locations_conflict(current_location, candidate_location)
+        for current_location in current_locations
+        for candidate_location in candidate_locations
     )
 
 
@@ -373,6 +400,7 @@ def _same_vacancy_matches(
         confidence, match_type, reasons = evidence
         if (
             match_type == "cross_source_locality"
+            and not any(reason.startswith("same metro region ") for reason in reasons)
             and not _cross_source_locality_is_reciprocally_unique(
                 conn, current, candidate
             )
