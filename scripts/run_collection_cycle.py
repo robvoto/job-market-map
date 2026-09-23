@@ -8,8 +8,8 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 
 from collector.backup import create_backup
-from collector.collection_profile import load_profile, previous_midnight_cutoff
 from collector.browser_broker import close_browser, close_tab, open_tab
+from collector.collection_profile import load_profile, previous_midnight_cutoff
 from collector.jd_batch import enrich_pending_jds
 from collector.jd_queue import mark_pending_deferred, pending_primary_ids
 from collector.run_lock import CollectionAlreadyRunning, collection_run_lock

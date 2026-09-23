@@ -7,6 +7,7 @@ import threading
 from datetime import datetime, timedelta
 from zoneinfo import ZoneInfo
 
+from collector.collection_profile import load_profile
 from collector.db import connect
 from collector.service_manager import PROCESS_MANAGER, CollectionProcessError
 from collector.service_state import (
@@ -15,7 +16,6 @@ from collector.service_state import (
     update_scheduler_state,
 )
 from collector.settings import get_setting
-from collector.collection_profile import load_profile
 from collector.source_campaign import get_cycle
 
 LINKEDIN_TERMINAL_STATUSES = {"COMPLETE", "INCOMPLETE_CAP", "PARTIAL_FAILURE"}
