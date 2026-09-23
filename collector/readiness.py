@@ -54,7 +54,8 @@ def _jd_coverage(*, recent_only: bool = False) -> dict[str, int]:
               JOIN jobs p ON p.id=a.primary_id
               LEFT JOIN failed_primary f ON f.primary_id=a.primary_id
              WHERE (:recent_only = 0 OR (
-                       p.posted_at IS NOT NULL
+                       p.source = 'seek'
+                   AND p.posted_at IS NOT NULL
                    AND julianday(p.posted_at) >= julianday('now', '-3 days')
              ))
             """,
