@@ -12,15 +12,19 @@ http://127.0.0.1:8770/v3
 
 ```text
 GET /v3/health
+GET /v3/readiness
 GET /v3/stats
 GET /v3/feed/jobs
 GET /v3/jobs/new
 GET /v3/jobs/search
 GET /v3/jobs/lookup
 GET /v3/jobs/{id}
+GET /v3/jobs/{id}/jd
 POST /v3/jobs/{id}/jd
 GET /v3/coverage/seek
 ```
+
+`GET /v3/readiness` is the read-only consumer readiness contract. It reports JMM-owned source-run facts for SEEK and LinkedIn (status plus available run timestamps) and mutually exclusive JD coverage counts across active canonical vacancies: `available`, `missing_not_cached`, and `failed`. It does not trigger collection, JD enrichment, retries, or any other mutation. Consumers may use explicit failed/partial/not-run source state to surface degradation, but the endpoint does not define an acceptable cache-miss percentage or invent a freshness threshold.
 
 `GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. The first page returns `snapshot_max_id`; a multi-page caller may pass that value back as `through_id` on later pages to keep one run on a fixed market boundary. Job payloads contain `identity_key` for stable cross-service correlation.
 
@@ -37,6 +41,8 @@ Repeated `q` expressions are deterministic OR terms. Within one expression, `AND
 When JMM has obtained a full JD, job payloads also expose the one current neutral JD as `full_description`, `jd_fetched_at`, and `jd_source`. JMM does not expose JD snapshot/version history.
 
 `GET /v3/jobs/lookup?identity_key=<key>` or `GET /v3/jobs/lookup?source=<source>&source_job_id=<id>` is the exact-identity lookup contract (JMM-009). Exactly one form is required — `identity_key` cannot be combined with `source`/`source_job_id`, and `source`/`source_job_id` must both be present together. It never performs title/employer/raw-text search, fuzzy matching, URL similarity or duplicate inference; a successful lookup returns the same job-detail payload as `GET /v3/jobs/{id}` (job identity, captures, query hits, possible duplicate evidence and any auditable same-vacancy primary link). No exact match returns 404; malformed or conflicting inputs return 400. There is no fallback to `/v3/jobs/search` or direct SQLite access. Source postings assigned to a same vacancy remain independently resolvable — lookup never substitutes the primary for the requested source identity.
+
+`GET /v3/jobs/{id}/jd` is the cached-only JD consumer contract. It never enriches. A cached canonical JD returns HTTP 200 with `full_description`, `jd_fetched_at`, and `jd_source`; a current job without a cached JD returns HTTP 409 `JD not cached yet`; a terminally unavailable vacancy returns HTTP 410. Job Hunter uses this GET-only path and treats an ordinary 409 as a per-job cache miss rather than a JMM outage. Transport/server failures remain infrastructure failures.
 
 `POST /v3/jobs/{id}/jd` is the supported get-or-enrich operation. If the canonical JD already exists, JMM returns it without reopening the source. If it is missing, JMM selects the source adapter, fetches validated neutral source evidence, stores the JD once, records permanent successful-fetch memory, and returns it. SEEK uses JMM's persistent SEEK browser; LinkedIn uses a direct public-HTTP detail helper and has no browser dependency. LinkedIn discovery remains card-first, then newly discovered jobs are queued for JD enrichment. Unsupported sources fail explicitly; consumers must not fetch a JD themselves and write JMM storage directly.
 
