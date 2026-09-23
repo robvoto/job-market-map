@@ -34,6 +34,8 @@ Use `.agents/skills/instruction-maintenance/SKILL.md` whenever changing agent in
 
 - Never guess or invent; inspect the authoritative source first.
 - Keep context and changes bounded to what the task requires.
+- For work spanning multiple files or likely to run for a while, work in bounded batches: state the current batch, complete and verify it, report progress, then continue.
+- Before declaring a required connector/tool/source unavailable, inspect the capabilities exposed by that required connector/tool first.
 - Do not hardcode behaviour that belongs in admin settings, config, or another authoritative owner — see `.agents/skills/no-hardcoding/SKILL.md`.
 - Do not add hidden fallbacks, compatibility shims, dead paths, or broad exception swallowing unless explicitly approved.
 - Keep one canonical implementation per behaviour; implementation/review work must check for and remove confirmed duplicate or stale code — see `.agents/skills/code-quality/SKILL.md`.
