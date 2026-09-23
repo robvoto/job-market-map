@@ -37,6 +37,24 @@ Fit and application judgement belong to consumers.
 7. **Destructive retention is opt-in; canonical job/card evidence is preserved by default.**
 8. **Personal activity is not owned here; Job Hunter/JH-305 is the canonical per-user activity service.**
 
+## Fast collection profile
+
+The operator-controlled collection scope lives in `config/collection_profile.json`.
+It is valid JSON (the `comments` array is the human-readable comment area), so an
+agent or Rob can change one file without editing Python:
+
+- `enabled_sources`: currently `seek` or `linkedin`; this profile enables SEEK only.
+- `enabled_states`: currently `NSW`, `ACT`, or `QLD`; this profile enables NSW and ACT.
+- `lookback_days: 2` plus `lookback_anchor: previous_midnight` requests a two-day
+  source window and rejects cards older than 00:00 Australia/Sydney on the previous
+  calendar day. The effective window is therefore at least 24 hours and usually
+  less than 48 hours, rather than a rolling “last 24 hours”.
+- `backfill_existing_job_descriptions: false` keeps historical JD repair out of the
+  normal run. New JDs remain enabled because they are JMM evidence, not LLM fit work.
+
+The profile is read when a run starts; changing it does not interrupt a run already
+in progress. Personal fit, edge filtering and application ranking stay in JH.
+
 ## Repository
 
 WSL: `/home/robvoto/projects/job-market-map`

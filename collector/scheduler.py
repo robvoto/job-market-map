@@ -15,6 +15,7 @@ from collector.service_state import (
     update_scheduler_state,
 )
 from collector.settings import get_setting
+from collector.collection_profile import load_profile
 from collector.source_campaign import get_cycle
 
 LINKEDIN_TERMINAL_STATUSES = {"COMPLETE", "INCOMPLETE_CAP", "PARTIAL_FAILURE"}
@@ -183,6 +184,7 @@ class SchedulerService:
             not bool(get_setting("scheduler.enabled"))
             or not bool(get_setting("scheduler.linkedin_enabled"))
             or not bool(get_setting("collection.linkedin_enabled"))
+            or "linkedin" not in load_profile()["enabled_sources"]
         ):
             return False, target_cycle, slot
 

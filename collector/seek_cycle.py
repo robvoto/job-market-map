@@ -4,6 +4,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
+from collector.collection_profile import enabled_seek_states
 from collector.db import connect, init_db
 from collector.geographies import list_geographies
 from collector.run_logging import collection_logger
@@ -27,7 +28,8 @@ def _now() -> str:
 
 
 def enabled_state_codes() -> list[str]:
-    return [row["code"] for row in list_geographies(enabled_only=True)]
+    allowed = set(enabled_seek_states())
+    return [row["code"] for row in list_geographies(enabled_only=True) if row["code"] in allowed]
 
 
 def state_root(code: str) -> dict | None:

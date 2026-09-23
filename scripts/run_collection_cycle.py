@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from threading import Event
 
 from collector.backup import create_backup
+from collector.collection_profile import load_profile, previous_midnight_cutoff
 from collector.browser_broker import close_browser, close_tab, open_tab
 from collector.jd_batch import enrich_pending_jds
 from collector.jd_queue import mark_pending_deferred, pending_primary_ids
@@ -162,7 +163,8 @@ def main(argv: list[str] | None = None) -> int:
                 return 2
 
             default_days = int(get_setting("collection.default_freshness_days"))
-            days = int(args.days if args.days is not None else default_days)
+            profile = load_profile()
+            days = int(args.days if args.days is not None else profile["lookback_days"])
             has_coverage_workspace = any(state_root(code) is not None for code in codes)
             mode = (
                 "fresh"
@@ -176,6 +178,8 @@ def main(argv: list[str] | None = None) -> int:
                 codes=codes,
                 started_at=run_started_local,
             )
+            if seek_cutoff_at is None and profile["lookback_anchor"] == "previous_midnight":
+                seek_cutoff_at = previous_midnight_cutoff(run_started_local)
             run_id = start_market_run(
                 trigger=args.trigger,
                 mode=mode,
