@@ -1,3 +1,5 @@
+import os
+
 from collector import db, service_state
 
 
@@ -26,6 +28,35 @@ def test_market_run_persists_structured_stats_and_bootstrap_kind(tmp_path, monke
     assert latest["stats"] == {"duration_seconds": 42.5, "jobs_added": 12}
     assert bootstrap["id"] == run_id
     assert bootstrap["run_kind"] == "bootstrap"
+
+
+def test_recover_stale_market_runs_marks_dead_runner_interrupted(tmp_path, monkeypatch):
+    monkeypatch.setattr(db, "DB_PATH", tmp_path / "market.db")
+    monkeypatch.setattr(service_state, "connect", db.connect)
+    monkeypatch.setattr(service_state, "init_db", db.init_db)
+
+    stale_id = service_state.start_market_run(
+        trigger="scheduled", mode="resume", states=["NSW"], backup_path=None
+    )
+    live_id = service_state.start_market_run(
+        trigger="scheduled", mode="resume", states=["NSW"], backup_path=None
+    )
+    with db.connect() as conn:
+        conn.execute("UPDATE market_collection_runs SET pid=? WHERE id=?", (999999999, stale_id))
+        conn.execute("UPDATE market_collection_runs SET pid=? WHERE id=?", (os.getpid(), live_id))
+
+    assert service_state.recover_stale_market_runs() == [stale_id]
+    stale = service_state.latest_market_run()
+    assert stale["id"] == live_id
+    with db.connect() as conn:
+        rows = conn.execute(
+            "SELECT id,status,finished_at,message FROM market_collection_runs ORDER BY id"
+        ).fetchall()
+    assert rows[0][0] == stale_id
+    assert rows[0][1] == "INTERRUPTED"
+    assert rows[0][2] is not None
+    assert "ended before finalisation" in rows[0][3]
+    assert rows[1][1] == "RUNNING"
 
 
 def test_latest_complete_fresh_seek_started_at_ignores_partial_and_resume_runs(

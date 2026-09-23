@@ -22,6 +22,7 @@ def start_market_run(
     run_kind: str = "normal",
 ) -> int:
     init_db()
+    recover_stale_market_runs()
     with connect() as conn:
         cur = conn.execute(
             """
@@ -77,6 +78,47 @@ def finish_market_run(
         )
 
 
+def recover_stale_market_runs(*, reason: str = "collection process ended before finalisation") -> list[int]:
+    """Close RUNNING market runs whose recorded runner process no longer exists.
+
+    A host restart releases the filesystem lock before the runner can persist its
+    normal terminal status. Without this recovery, readiness reports a false
+    RUNNING state indefinitely and another source may be scheduled against it.
+    """
+    init_db()
+    recovered: list[int] = []
+    with connect() as conn:
+        rows = conn.execute(
+            """
+            SELECT id, pid FROM market_collection_runs
+             WHERE status='RUNNING' AND finished_at IS NULL
+            ORDER BY id
+            """
+        ).fetchall()
+        for row in rows:
+            pid = int(row["pid"] or 0)
+            alive = False
+            if pid > 0:
+                try:
+                    os.kill(pid, 0)
+                    alive = True
+                except (ProcessLookupError, PermissionError, OSError):
+                    alive = False
+            if alive:
+                continue
+            run_id = int(row["id"])
+            conn.execute(
+                """
+                UPDATE market_collection_runs
+                   SET status='INTERRUPTED', finished_at=?, message=?, error=?
+                 WHERE id=? AND status='RUNNING' AND finished_at IS NULL
+                """,
+                (utc_now(), reason, reason, run_id),
+            )
+            recovered.append(run_id)
+    return recovered
+
+
 def _decode_market_run(row) -> dict | None:
     if not row:
         return None
@@ -98,6 +140,7 @@ def _decode_market_run(row) -> dict | None:
 
 
 def latest_market_run() -> dict | None:
+    recover_stale_market_runs()
     init_db()
     with connect() as conn:
         row = conn.execute(
@@ -107,6 +150,7 @@ def latest_market_run() -> dict | None:
 
 
 def latest_seek_market_run() -> dict | None:
+    recover_stale_market_runs()
     init_db()
     with connect() as conn:
         row = conn.execute(

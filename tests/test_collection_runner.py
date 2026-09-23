@@ -47,6 +47,18 @@ def test_extra_fresh_run_gets_incremental_cutoff_but_daily_run_does_not(monkeypa
     )
 
 
+def test_run_deadline_uses_absolute_wall_clock_time():
+    from datetime import UTC, timedelta
+
+    from scripts import run_collection_cycle as runner
+
+    deadline = datetime(2026, 9, 23, 6, 0, tzinfo=UTC)
+    assert not runner._deadline_reached(deadline, now=deadline - timedelta(seconds=1))
+    assert runner._deadline_reached(deadline, now=deadline)
+    assert runner._deadline_reached(deadline, now=deadline + timedelta(hours=3))
+    assert not runner._deadline_reached(None, now=deadline + timedelta(days=1))
+
+
 def test_successful_manual_default_run_marks_only_overlapping_schedule_slot(monkeypatch):
     from scripts import run_collection_cycle as runner
 

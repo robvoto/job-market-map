@@ -60,6 +60,11 @@ def _seek_incremental_cutoff(
     return candidate if candidate > horizon_start else None
 
 
+def _deadline_reached(deadline_at: datetime | None, *, now: datetime | None = None) -> bool:
+    """Return whether the absolute wall-clock run deadline has passed."""
+    return deadline_at is not None and (now or datetime.now(UTC)) >= deadline_at
+
+
 def _should_rollover_exhausted_daily_coverage(
     *,
     final_status: str,
@@ -211,11 +216,16 @@ def main(argv: list[str] | None = None) -> int:
                 else configured_limit
             )
 
+            deadline_at = (
+                datetime.now(UTC) + timedelta(minutes=max_minutes)
+                if max_minutes
+                else None
+            )
+
             def deadline_reached() -> bool:
-                return (
-                    bool(max_minutes)
-                    and (time.monotonic() - run_started) >= max_minutes * 60
-                )
+                # Use wall-clock time so host sleep/suspend still consumes the
+                # configured run window. time.monotonic() may pause in WSL.
+                return _deadline_reached(deadline_at)
 
             list_page_id = int(open_tab("about:blank", active=False).result["pageId"])
             detail_page_id = None
