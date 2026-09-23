@@ -81,7 +81,7 @@ def test_consumer_readiness_reports_seek_and_linkedin_run_facts(monkeypatch):
     monkeypatch.setattr(
         readiness,
         "_jd_coverage",
-        lambda: {"available": 10, "missing_not_cached": 3, "failed": 1},
+        lambda **_: {"available": 10, "missing_not_cached": 3, "failed": 1},
     )
 
     payload = readiness.consumer_readiness()
@@ -89,6 +89,11 @@ def test_consumer_readiness_reports_seek_and_linkedin_run_facts(monkeypatch):
     assert payload["source_runs"]["seek"]["status"] == "COMPLETE"
     assert payload["source_runs"]["linkedin"]["status"] == "PARTIAL_FAILURE"
     assert payload["jd_coverage"] == {
+        "available": 10,
+        "missing_not_cached": 3,
+        "failed": 1,
+    }
+    assert payload["jd_coverage_recent_3d"] == {
         "available": 10,
         "missing_not_cached": 3,
         "failed": 1,

@@ -8,8 +8,13 @@ from collector.service_state import latest_seek_market_run
 from collector.source_status import source_status_is_active_sql
 
 
-def _jd_coverage() -> dict[str, int]:
-    """Return mutually exclusive JD readiness counts for active canonical vacancies."""
+def _jd_coverage(*, recent_only: bool = False) -> dict[str, int]:
+    """Return mutually exclusive JD readiness counts for active canonical vacancies.
+
+    ``recent_only`` applies JMM's fixed 72-hour window to the canonical
+    vacancy's verified ``posted_at`` value. Keeping this calculation in JMM
+    makes downstream consumers use the same population and clock.
+    """
     init_db()
     active_sql = source_status_is_active_sql("j.source_status")
     with connect() as conn:
@@ -48,7 +53,12 @@ def _jd_coverage() -> dict[str, int]:
               FROM active_primary a
               JOIN jobs p ON p.id=a.primary_id
               LEFT JOIN failed_primary f ON f.primary_id=a.primary_id
-            """
+             WHERE (:recent_only = 0 OR (
+                       p.posted_at IS NOT NULL
+                   AND julianday(p.posted_at) >= julianday('now', '-3 days')
+             ))
+            """,
+            {"recent_only": int(recent_only)},
         ).fetchone()
     return {
         "available": int(row["available"] or 0),
@@ -76,4 +86,5 @@ def consumer_readiness() -> dict[str, Any]:
             },
         },
         "jd_coverage": _jd_coverage(),
+        "jd_coverage_recent_3d": _jd_coverage(recent_only=True),
     }

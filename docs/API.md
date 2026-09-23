@@ -24,7 +24,7 @@ POST /v3/jobs/{id}/jd
 GET /v3/coverage/seek
 ```
 
-`GET /v3/readiness` is the read-only consumer readiness contract. It reports JMM-owned source-run facts for SEEK and LinkedIn (status plus available run timestamps) and mutually exclusive JD coverage counts across active canonical vacancies: `available`, `missing_not_cached`, and `failed`. It does not trigger collection, JD enrichment, retries, or any other mutation. Consumers may use explicit failed/partial/not-run source state to surface degradation, but the endpoint does not define an acceptable cache-miss percentage or invent a freshness threshold.
+`GET /v3/readiness` is the read-only consumer readiness contract. It reports JMM-owned source-run facts for SEEK and LinkedIn (status plus available run timestamps), mutually exclusive JD coverage counts across active canonical vacancies (`jd_coverage`), and the same counts for SEEK vacancies posted in the last 72 hours (`jd_coverage_recent_3d`). It does not trigger collection, JD enrichment, retries, or any other mutation. Consumers may use explicit failed/partial/not-run source state to surface degradation, but the endpoint does not define an acceptable cache-miss percentage or invent a freshness threshold.
 
 `GET /v3/feed/jobs?after_id=<cursor>&limit=<n>` is the incremental neutral feed. It can be filtered by source/geography. The first page returns `snapshot_max_id`; a multi-page caller may pass that value back as `through_id` on later pages to keep one run on a fixed market boundary. Job payloads contain `identity_key` for stable cross-service correlation.
 
