@@ -41,6 +41,8 @@ Use `.agents/skills/instruction-maintenance/SKILL.md` whenever changing agent in
 - Keep one canonical implementation per behaviour; implementation/review work must check for and remove confirmed duplicate or stale code — see `.agents/skills/code-quality/SKILL.md`.
 - Job Market Map is neutral/global market infrastructure only; it does not own personal activity/outcomes — see `.agents/skills/job-market-map/SKILL.md`.
 - Do not claim completion without validation evidence (tests, Ruff, `git diff --check`).
+- Before any semantic/product/UX/business-rule/default/workflow/data-interpretation/classification/heuristic/fallback/persistent-data behaviour change: investigate, explain the current finding and exact proposed effect, then wait for Rob's explicit approval. Treat uncertain changes as semantic; mechanical no-behaviour changes may proceed.
+- Never claim a preference, rule, memory, or instruction is persisted unless the authoritative persistent source was actually updated and verified.
 - Preserve unrelated work when other agents or sessions may be active.
 - Before editing, inspect the exact current target file and apply a narrow, context-checked patch.
 - If a patch hunk or `old_text` does not match, stop and reread the file before creating a new patch; never retry stale patch text.
