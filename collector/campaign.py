@@ -179,12 +179,10 @@ def linkedin_campaign_progress() -> dict:
         }
     cycle_key = str(state["cycle_key"])
     complete, capped, terminal = _progress_counts(runs, cycle_key)
-    if runs and complete == len(runs):
-        display_status = "COMPLETE"
-    elif runs and terminal == len(runs) and capped:
-        display_status = "INCOMPLETE_CAP"
-    else:
-        display_status = str(state["status"])
+    # The campaign row is authoritative for run lifecycle. Geography cursors
+    # can all be terminal while the campaign is still enriching JDs; inferring
+    # COMPLETE here would expose a finished run with no completed_at timestamp.
+    display_status = str(state["status"] or "PARTIAL")
     return {
         "status": display_status,
         "cycle_key": cycle_key,

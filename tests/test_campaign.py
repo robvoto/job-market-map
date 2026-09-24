@@ -176,6 +176,42 @@ def test_linkedin_geography_cap_is_reported_not_hidden(tmp_path, monkeypatch):
     assert progress["geographies_remaining"] == 0
 
 
+def test_linkedin_progress_does_not_infer_complete_before_campaign_finalizes(
+    tmp_path, monkeypatch
+):
+    campaign, _ = _isolate(tmp_path, monkeypatch)
+    monkeypatch.setattr(
+        campaign,
+        "linkedin_geography_runs",
+        lambda: [{"geography_code": "NSW", "location": "New South Wales, Australia"}],
+    )
+    cycle_key = "linkedin:2026-09-24T16:00+10:00"
+    save_cursor(
+        "linkedin",
+        "",
+        "New South Wales, Australia",
+        10,
+        status="COMPLETE",
+        cycle_key=cycle_key,
+    )
+    with db.connect() as conn:
+        conn.execute(
+            "INSERT INTO source_campaign_state(source,cycle_key,status,started_at,updated_at,completed_at) VALUES(?,?,?,?,?,NULL)",
+            (
+                "linkedin",
+                cycle_key,
+                "PARTIAL",
+                "2026-09-24T06:00:00+00:00",
+                "2026-09-24T06:10:00+00:00",
+            ),
+        )
+
+    progress = campaign.linkedin_campaign_progress()
+
+    assert progress["status"] == "PARTIAL"
+    assert progress["completed_at"] is None
+
+
 def test_linkedin_campaign_has_no_browser_dependency():
     import inspect
 
