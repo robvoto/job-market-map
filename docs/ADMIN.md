@@ -30,7 +30,7 @@ The top Admin panel controls the running collector without killing the Admin API
 
 **JMM browser: Running** means only that the dedicated persistent Chrome process is reachable. It does not claim SEEK is signed in. Use **Open SEEK login browser** to bring that same persistent SEEK session forward and sign in when needed.
 
-Start the background Admin service with `./scripts/service.sh start`; it must remain running for the in-app overnight scheduler to fire. The status panel refreshes every 10 seconds.
+Start JMM with `C:\Users\thewr\run_JMM.ps1`; this opens the visible runtime/log PowerShell window and must remain running for the in-app scheduler to fire. The status panel refreshes every 10 seconds.
 
 **Run collection now** uses the same configured freshness horizon as the scheduler. A successful manual run counts as the scheduled run only when it overlaps the configured scheduler window; an earlier run does not suppress a later slot if that would leave part of the market day uncovered.
 

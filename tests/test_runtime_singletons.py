@@ -27,11 +27,11 @@ def test_service_stop_does_not_require_mutating_settings_lookup():
     assert "JOB_MARKET_MAP_SERVICE_RUNNING_UNHEALTHY" in service
 
 
-def test_service_start_allows_bounded_migration_startup_window():
+def test_service_start_is_disabled_for_local_background_runtime():
     service = Path("scripts/service.sh").read_text(encoding="utf-8")
 
-    assert "for _ in $(seq 1 120); do" in service
-    assert "sleep 0.25" in service
+    assert "JOB_MARKET_MAP_BACKGROUND_START_DISABLED" in service
+    assert "run_JMM.ps1" in service
 
 
 def test_jmm_service_owns_browser_lifecycle():
@@ -47,3 +47,15 @@ def test_jmm_service_owns_browser_lifecycle():
     assert 'scripts/stop_browser_service.sh' in service
     assert '--user-data-dir=$PROFILE' in stop_browser
     assert 'scripts/run_browser_service.sh' in stop_browser
+
+
+def test_local_jmm_cannot_start_hidden_or_bootstrap_browser_from_collection():
+    service = Path("scripts/service.sh").read_text(encoding="utf-8")
+    start_api = Path("scripts/start-api.sh").read_text(encoding="utf-8")
+    collection = Path("scripts/start_collection_service.sh").read_text(encoding="utf-8")
+
+    assert "JOB_MARKET_MAP_BACKGROUND_START_DISABLED" in service
+    assert "JOB_MARKET_MAP_VISIBLE_TERMINAL_REQUIRED" in start_api
+    assert "[[ ! -t 1 || ! -t 2 ]]" in start_api
+    assert "JMM_VISIBLE_SERVICE_REQUIRED" in collection
+    assert 'scripts/start_browser_service.sh' not in collection

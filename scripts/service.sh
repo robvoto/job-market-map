@@ -80,40 +80,8 @@ health_ok() {
 
 case "${1:-status}" in
   start)
-    if pid="$(find_managed_api_pid)"; then
-      port="$(port_from_pid "$pid")" || {
-        echo "JOB_MARKET_MAP_SERVICE_PORT_UNKNOWN pid=${pid}" >&2
-        exit 1
-      }
-      if health_ok "$port"; then
-        echo "$pid" > "$PID_FILE"
-        echo "JOB_MARKET_MAP_SERVICE_ALREADY_RUNNING pid=${pid} http://127.0.0.1:${port}/admin"
-        exit 0
-      fi
-      echo "JOB_MARKET_MAP_SERVICE_RUNNING_UNHEALTHY pid=${pid}; refusing to launch a duplicate" >&2
-      exit 1
-    fi
-
-    port="$(configured_port)"
-    base="http://127.0.0.1:${port}"
-    nohup ./scripts/start-api.sh >>logs/api.log 2>&1 &
-    pid=$!
-    echo "$pid" > "$PID_FILE"
-    # First start after a bounded schema/data migration can legitimately take
-    # longer than the steady-state path. Keep this bounded, but do not report a
-    # false failure while the verified managed process is still starting.
-    for _ in $(seq 1 120); do
-      if health_ok "$port"; then
-        echo "JOB_MARKET_MAP_SERVICE_STARTED pid=${pid} admin=${base}/admin"
-        exit 0
-      fi
-      if ! kill -0 "$pid" 2>/dev/null; then
-        break
-      fi
-      sleep 0.25
-    done
-    echo "JOB_MARKET_MAP_SERVICE_FAILED; see logs/api.log" >&2
-    exit 1
+    echo "JOB_MARKET_MAP_BACKGROUND_START_DISABLED: start JMM from C:\\Users\\thewr\\run_JMM.ps1 so the live log window remains visible." >&2
+    exit 2
     ;;
   stop)
     if [[ -f "$PID_FILE" ]]; then

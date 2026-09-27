@@ -12,14 +12,9 @@ The distinction is important:
 - each collection runs in a separate subprocess;
 - Admin can start/stop collection and pause/resume the schedule without killing itself.
 
-## Start once in the background
+## Start JMM explicitly
 
-```bash
-cd /home/robvoto/projects/job-market-map
-./scripts/service.sh start
-```
-
-You can close the terminal afterward. As long as Windows/WSL remains running, the Admin service remains available at:
+From Windows, run `C:\Users\thewr\run_JMM.ps1`. This opens the visible JMM PowerShell/WSL runtime window. Keep that window open while JMM is in use. The Admin service is then available at:
 
 ```text
 http://127.0.0.1:8770/admin
@@ -34,7 +29,7 @@ Check or stop the **Admin service itself** from a terminal:
 
 The UI intentionally does not contain a button that kills its own web service, because after doing so the UI could not restart itself.
 
-This does not create operating-system startup persistence. After Windows/WSL restarts, run `./scripts/service.sh start` again.
+JMM has no local operating-system autostart. After Windows/WSL restarts, JMM remains off until you explicitly run `C:\Users\thewr\run_JMM.ps1` again.
 
 ## AWS boundary
 
@@ -100,7 +95,7 @@ Rollover (`snapshot_and_reset_coverage`, JMM-015) archives each geography's curr
 
 Operating cadence is source-specific. LinkedIn runs every 4 hours with a 5-hour lookback. SEEK runs every 12 hours by default with a 1-day horizon. Both sources queue newly discovered jobs for JD enrichment during their normal runs; SEEK drains bounded JD batches between coverage partitions and finishes with a final queue drain. If both sources are due together, LinkedIn runs first and SEEK follows after the singleton lock is released. On-demand JD retrieval remains a fallback, not the normal collection path.
 
-The scheduler only starts when the API was launched in service mode (`start-api.sh` / `service.sh`). Direct test imports do not create background collection.
+The scheduler starts only when JMM is launched through the visible local runtime (`start-api.sh`, normally via `C:\Users\thewr\run_JMM.ps1`). Direct test imports do not create background collection.
 
 ## SQLite backup policy
 

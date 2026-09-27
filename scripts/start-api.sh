@@ -3,6 +3,14 @@ set -euo pipefail
 cd "$(dirname "$0")/.."
 ROOT="$PWD"
 mkdir -p data logs backups
+
+# Local JMM is operator-owned: it must run in Rob's visible PowerShell/WSL
+# terminal so runtime and collection logs are observable. AWS uses its own
+# systemd ExecStart and does not call this local launcher.
+if [[ ! -t 1 || ! -t 2 ]]; then
+  echo "JOB_MARKET_MAP_VISIBLE_TERMINAL_REQUIRED: start C:\\Users\\thewr\\run_JMM.ps1" >&2
+  exit 10
+fi
 exec 9>data/api-service.lock
 if ! flock -n 9; then
   echo "JOB_MARKET_MAP_API_ALREADY_RUNNING"

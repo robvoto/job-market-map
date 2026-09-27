@@ -36,7 +36,13 @@ export DISPLAY="$DISPLAY_VALUE"
 export WAYLAND_DISPLAY="$WAYLAND_VALUE"
 export XDG_RUNTIME_DIR="$RUNTIME_VALUE"
 
-"$ROOT/scripts/start_browser_service.sh"
+# Collection is subordinate to the visible JMM runtime. Never bootstrap the
+# persistent browser from a detached collection helper while JMM is off.
+if ! pgrep -f '[u]v run uvicorn api\.main:app --host 127\.0\.0\.1 --port 8770' >/dev/null \
+   && ! pgrep -f '[u]vicorn api\.main:app --host 127\.0\.0\.1 --port 8770' >/dev/null; then
+  echo "JMM_VISIBLE_SERVICE_REQUIRED: start C:\\Users\\thewr\\run_JMM.ps1 first." >&2
+  exit 4
+fi
 
 nohup "$PYTHON" -u -m scripts.run_collection_cycle "$@" \
   >>"$LOG_FILE" 2>&1 </dev/null &

@@ -122,11 +122,7 @@ Current whole-state scope is **NSW + ACT + QLD**. SEEK coverage is independent o
 
 ## Running as a local service
 
-Start once in the background:
-
-```bash
-./scripts/service.sh start
-```
+Start JMM explicitly from Windows with `C:\Users\thewr\run_JMM.ps1`. Keep its visible runtime/log window open while JMM is in use.
 
 Admin: `http://127.0.0.1:8770/admin`
 

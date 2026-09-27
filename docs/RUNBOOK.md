@@ -4,11 +4,9 @@
 
 ## Start the Admin + in-app scheduler service
 
-```bash
-./scripts/service.sh start
-```
+From Windows, run `C:\Users\thewr\run_JMM.ps1`. It opens the visible PowerShell/WSL runtime window and keeps JMM attached to that window.
 
-Then open `http://127.0.0.1:8770/admin`. The service runs in the background; the UI starts/stops SEEK or LinkedIn collection, controls the shared scheduler and shows current runtime health.
+Then open `http://127.0.0.1:8770/admin`. The UI starts/stops SEEK or LinkedIn collection, controls the shared scheduler and shows current runtime health.
 
 ```bash
 ./scripts/service.sh status
@@ -56,9 +54,7 @@ This uses the production geography-first LinkedIn HTTP path for enabled ACT/NSW/
 When this foreground launcher is run from a terminal, it mirrors API/Admin
 output and all scheduled or Admin-started collection subprocess output into
 that same terminal. It also appends the stream to `logs/api.log`; the durable
-collection-specific record remains `logs/collection.log`. The detached
-`./scripts/service.sh start` mode has no live terminal and writes to the log
-files instead.
+collection-specific record remains `logs/collection.log`. There is no supported detached local API mode. Closing the visible JMM terminal stops the local runtime; durable output is also written to the log files.
 
 ## Compact stale data
 
