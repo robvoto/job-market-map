@@ -68,7 +68,7 @@ uv run python -m collector.retention
 
 ## SEEK browser prerequisite
 
-JMM keeps one visible long-lived Chromium service using `data/playwright_jmm_seek_user_data` **for SEEK only**. `scripts/start_browser_service.sh` starts it only when it is not already running; later SEEK collection runs attach to the same browser over localhost CDP and detach without closing it. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, use Admin's **Open SEEK login browser** control, complete it in the visible JMM browser and let the run continue. LinkedIn is a separate HTTP-only subprocess and never touches this browser.
+While the local JMM service is running, JMM keeps one visible long-lived Chromium service using `data/playwright_jmm_seek_user_data` **for SEEK only**. The browser is owned by the JMM API lifecycle: stopping or losing the JMM API stops this browser too. `scripts/start_browser_service.sh` starts it only when it is not already running; later SEEK collection runs attach to the same browser over localhost CDP and detach without closing it. Do not point JMM at Rob's normal Chrome or Job Hunter's profile. If SEEK presents human verification, use Admin's **Open SEEK login browser** control, complete it in the visible JMM browser and let the run continue. LinkedIn is a separate HTTP-only subprocess and never touches this browser.
 
 For a long-running/manual collection launched from MCP or another temporary shell, use the detached collection launcher so the visible Chromium process and collection continue after the calling shell exits:
 

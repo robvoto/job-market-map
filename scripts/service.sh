@@ -150,6 +150,7 @@ case "${1:-status}" in
       sleep 0.25
     done
     rm -f "$PID_FILE"
+    "$ROOT/scripts/stop_browser_service.sh"
     echo "JOB_MARKET_MAP_SERVICE_STOPPED"
     ;;
   status)

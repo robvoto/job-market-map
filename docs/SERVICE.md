@@ -44,7 +44,7 @@ JMM is currently a local-only service. Job Hunter's AWS deployment intentionally
 JOB_HUNTER_MARKET_MAP_BASE_URL=http://127.0.0.1:8770/v3
 ```
 
-The scheduler, SQLite state and long-lived SEEK browser/session are process-persistent, so JMM is not a Lambda workload. LinkedIn remains HTTP-only and does not use Chromium. The `scripts/ec2/` files are deployment templates for a separately approved future AWS deployment; they are not part of the current local runtime.
+The scheduler, SQLite state and long-lived SEEK browser/session are process-persistent while JMM is on, so JMM is not a Lambda workload. The local SEEK browser is lifecycle-owned by the JMM API and stops when JMM stops; it must not remain orphaned while JMM is off. LinkedIn remains HTTP-only and does not use Chromium. The `scripts/ec2/` files are deployment templates for a separately approved future AWS deployment; they are not part of the current local runtime.
 
 ## Admin collection controls
 

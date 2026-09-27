@@ -32,3 +32,18 @@ def test_service_start_allows_bounded_migration_startup_window():
 
     assert "for _ in $(seq 1 120); do" in service
     assert "sleep 0.25" in service
+
+
+def test_jmm_service_owns_browser_lifecycle():
+    start_api = Path("scripts/start-api.sh").read_text(encoding="utf-8")
+    browser = Path("scripts/run_browser_service.sh").read_text(encoding="utf-8")
+    service = Path("scripts/service.sh").read_text(encoding="utf-8")
+    stop_browser = Path("scripts/stop_browser_service.sh").read_text(encoding="utf-8")
+
+    assert 'JMM_BROWSER_OWNER_PID="$$"' in start_api
+    assert 'OWNER_PID="${JMM_BROWSER_OWNER_PID:-}"' in browser
+    assert 'owner_active()' in browser
+    assert 'JMM browser owner exited; stopping Chromium.' in browser
+    assert 'scripts/stop_browser_service.sh' in service
+    assert '--user-data-dir=$PROFILE' in stop_browser
+    assert 'scripts/run_browser_service.sh' in stop_browser

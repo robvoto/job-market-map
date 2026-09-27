@@ -24,7 +24,7 @@ from collector.settings import get_setting
 print(int(get_setting('api.port')))
 PY
 )"
-"$ROOT/scripts/start_browser_service.sh"
+JMM_BROWSER_OWNER_PID="$$" "$ROOT/scripts/start_browser_service.sh"
 echo "Job Market Map API/Admin starting on http://127.0.0.1:${PORT}/admin"
 echo "In-app overnight scheduler enabled by service mode; schedule is controlled from Admin."
 exec uv run uvicorn api.main:app --host 127.0.0.1 --port "$PORT"
