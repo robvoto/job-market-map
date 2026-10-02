@@ -31,6 +31,12 @@ The UI intentionally does not contain a button that kills its own web service, b
 
 JMM has no local operating-system autostart. After Windows/WSL restarts, JMM remains off until you explicitly run `C:\Users\thewr\run_JMM.ps1` again.
 
+### Former Windows wake task
+
+The Windows Scheduled Task **`JMM Wake and Ensure Runtime`** was removed on 2 October 2026 because it woke the PC and attempted to start JMM invisibly. It previously ran `E:\Programming\MCP-server\jmm_wake.ps1` at approximately 03:55, 07:55, 11:55, 15:55, 19:55 and 23:55 each day with `WakeToRun=True`.
+
+Do not recreate that task under the current local-runtime policy: `scripts/service.sh start` is intentionally disabled and `scripts/start-api.sh` requires a visible terminal. If unattended/wake operation is wanted again later, treat that as an explicit lifecycle-policy change: first decide whether JMM should again be allowed to run headless, then update the launcher/guards/tests/docs together and only then recreate a scheduled task. The historical script path above is retained as a reference, not as an active supported start path.
+
 ## AWS boundary
 
 JMM is currently a local-only service. Job Hunter's AWS deployment intentionally does not run JMM and must not be configured with a deployed or same-host JMM URL. Local Job Hunter uses:
