@@ -61,6 +61,17 @@ def test_hot_get_setting_does_not_reseed_existing_catalog(tmp_path, monkeypatch)
     assert calls["count"] == 0
 
 
+def test_hot_get_setting_does_not_run_schema_init_for_existing_row(tmp_path, monkeypatch):
+    settings = _wire(tmp_path, monkeypatch)
+    settings.seed_settings()
+
+    def unexpected_init():
+        raise AssertionError("hot setting reads must not rerun schema initialization")
+
+    monkeypatch.setattr(settings, "init_db", unexpected_init)
+    assert settings.get_setting("dedupe.enable_near_match") is True
+
+
 def test_seed_removes_obsolete_personal_activity_settings(tmp_path, monkeypatch):
     settings = _wire(tmp_path, monkeypatch)
     settings.seed_settings()

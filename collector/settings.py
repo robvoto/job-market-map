@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -121,13 +122,20 @@ def list_settings() -> list[dict[str, Any]]:
 
 
 def get_setting(key: str) -> Any:
-    # Hot-path read: ingestion can call this thousands of times. Do not rewrite the
-    # whole settings catalog on every lookup. Seed only when the requested row is absent.
-    init_db()
-    with connect() as conn:
-        row = conn.execute(
-            "SELECT value_json FROM settings WHERE key=?", (key,)
-        ).fetchone()
+    # Hot-path read: ingestion can call this thousands of times. Runtime startup
+    # owns schema initialization; a normal lookup must not rerun schema DDL while
+    # another connection is ingesting cards. Seed only for a genuinely missing
+    # settings table/row (for example a fresh standalone maintenance/test DB).
+    try:
+        with connect() as conn:
+            row = conn.execute(
+                "SELECT value_json FROM settings WHERE key=?", (key,)
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table: settings" not in str(exc).casefold():
+            raise
+        row = None
+
     if not row:
         seed_settings()
         with connect() as conn:
