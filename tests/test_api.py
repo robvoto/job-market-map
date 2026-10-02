@@ -269,6 +269,9 @@ def test_search_matches_filters_on_any_active_linked_source_and_returns_primary_
                 (linkedin_id, "2026-09-12T00:00:00+00:00", "2026-09-12T00:00:00+00:00"),
             )
 
+        # Direct SQL bypasses normal ingest field-state writes; explicitly run
+        # startup's legacy backfill before exercising search semantics.
+        db.init_db()
         response = client.get(
             "/v3/jobs/search",
             params=[
@@ -323,6 +326,8 @@ def test_search_is_bounded_and_supports_neutral_filters(tmp_path, monkeypatch):
                     (job_id, "2026-09-10", "2026-09-10"),
                 )
 
+        # These fixture rows bypass ingest; make deterministic field states explicit.
+        db.init_db()
         first = client.get("/v3/jobs/search", params={"limit": 2}).json()
         assert first["total"] == 3
         assert len(first["items"]) == 2
@@ -472,6 +477,8 @@ def test_salary_search_linked_source_does_not_hide_matching_salary_evidence(tmp_
                     (alias_id, field_name, "known", "2026-09-10"),
                 )
 
+        # Backfill the directly inserted primary row just as runtime startup does.
+        db.init_db()
         response = client.get(
             "/v3/jobs/search",
             params={
