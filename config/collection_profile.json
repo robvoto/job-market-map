@@ -5,8 +5,14 @@
     "Available source options: seek and linkedin. JMM stores source/JD evidence; personal fit and ranking belong in JH.",
     "lookback_anchor=previous_midnight means the local Australia/Sydney cutoff is 00:00 of the previous calendar day (normally 24-48 hours)."
   ],
-  "enabled_sources": ["seek"],
-  "enabled_states": ["NSW", "ACT"],
+  "enabled_sources": [
+    "seek",
+    "linkedin"
+  ],
+  "enabled_states": [
+    "NSW",
+    "ACT"
+  ],
   "lookback_days": 2,
   "lookback_anchor": "previous_midnight",
   "fetch_new_job_descriptions": true,
