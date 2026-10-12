@@ -24,7 +24,7 @@ If the requested task branch already exists and is clearly the branch assigned t
 ## Operator contract
 The human should not need to remember Git mechanics.
 
-- Completed intended work is committed and pushed automatically after validation, then integrated into `main` when safe, unless the human explicitly says not to push or not to integrate.
+- Completed intended work is committed and pushed automatically to its isolated task branch after validation unless the human explicitly says to hold. Integration into `main` requires explicit approval for the completed task and any repository-required checks; a task-branch push is not integration approval.
 - Do not wait for a second approval when the human has already requested automatic commit/push.
 - Stop and ask only for a genuine safety gate: unrelated changes, destructive actions, force-pushes, deployment/restart, credentials/external messages, or unresolved conflicting work.
 - JMM runtime lifecycle is one of those safety gates and is owned by `.agents/skills/job-market-map/SKILL.md`: Git integration never authorises starting, stopping, restarting, reloading, killing, or otherwise changing JMM runtime state.
